@@ -34,15 +34,25 @@ For speaker diarization, set `HF_TOKEN` and accept model terms at:
 | `WHISPER_LANG` | `en` | Language code |
 | `WHISPER_DEVICE` | `cuda` | `cuda` or `cpu` |
 | `HF_TOKEN` | _(none)_ | HuggingFace token for diarization |
+| `ANTHROPIC_API_KEY` | _(none)_ | Enables chapter generation via Claude |
 | `SENTENCES` | `5` | Sentences per paragraph in HTML |
 
 ## Files
 
 | File | Purpose |
 |------|---------|
-| `transcribe.sh` | Main entry point — download, transcribe, convert |
-| `json_to_html.py` | Convert whisper JSON to styled HTML (reusable standalone) |
+| `transcribe.sh` | Main entry point — download, transcribe, chapters, convert |
+| `generate_chapters.py` | Send transcript to Claude, get chapter markers with abstracts |
+| `json_to_html.py` | Convert whisper JSON to styled HTML, optionally with chapters TOC |
 | `requirements.txt` | Python dependencies |
+
+## Pipeline
+
+1. `whisper-ctranslate2` → `<name>.json` (segments with timestamps)
+2. `generate_chapters.py` → `<name>_chapters.json` (chapters, abstracts, types)
+3. `json_to_html.py --chapters` → `<name>.html` (styled transcript with TOC)
+
+Step 2 requires `ANTHROPIC_API_KEY`. Without it, HTML is generated without chapters.
 
 ## Development
 

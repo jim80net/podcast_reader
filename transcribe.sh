@@ -96,17 +96,35 @@ else
     whisper-ctranslate2 "${WHISPER_ARGS[@]}"
 fi
 
+# --- Generate chapters (optional) ---
+CHAPTERS_PATH="$SCRIPT_DIR/${STEM}_chapters.json"
+CHAPTERS_ARG=""
+
+if [ -f "$CHAPTERS_PATH" ]; then
+    echo "Chapters JSON already exists: $CHAPTERS_PATH (delete to regenerate)"
+    CHAPTERS_ARG="--chapters $CHAPTERS_PATH"
+elif [ -n "${ANTHROPIC_API_KEY:-}" ]; then
+    echo "Generating chapter markers with Claude..."
+    python3 "$SCRIPT_DIR/generate_chapters.py" "$JSON_PATH"
+    CHAPTERS_ARG="--chapters $CHAPTERS_PATH"
+else
+    echo "Skipping chapter generation (set ANTHROPIC_API_KEY to enable)"
+fi
+
 # --- Convert to HTML ---
 if [ -z "$TITLE" ]; then
     TITLE=$(echo "$STEM" | sed 's/[_-]/ /g' | sed 's/.*/\L&/; s/[a-z]*/\u&/g')
 fi
 
 echo "Generating HTML transcript..."
-python3 "$SCRIPT_DIR/json_to_html.py" "$JSON_PATH" --title "$TITLE" --sentences "$SENTENCES"
+python3 "$SCRIPT_DIR/json_to_html.py" "$JSON_PATH" --title "$TITLE" --sentences "$SENTENCES" $CHAPTERS_ARG
 
 echo ""
 echo "Done! Output files:"
 echo "  JSON: $JSON_PATH"
+if [ -n "$CHAPTERS_ARG" ]; then
+    echo "  Chapters: $CHAPTERS_PATH"
+fi
 echo "  HTML: $HTML_PATH"
 
 # Show Windows path if running in WSL

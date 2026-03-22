@@ -1,0 +1,109 @@
+#!/usr/bin/env python3
+"""Generate chapter markers with abstracts from a whisper transcript using Claude."""
+
+import argparse
+import json
+import os
+import sys
+from pathlib import Path
+
+import anthropic
+
+
+SYSTEM_PROMPT = """\
+You are a podcast analyst. Given a timestamped transcript, identify the natural \
+chapter boundaries and produce a JSON array of chapters.
+
+For each chapter, provide:
+- "title": A concise, descriptive chapter title
+- "start": Start time in seconds (use the timestamp of the first segment in the chapter)
+- "end": End time in seconds (use the timestamp of the last segment in the chapter)
+- "abstract": A 2-3 sentence summary of what is discussed in this chapter
+- "type": One of "intro", "housekeeping", "content", "sponsor", "outro"
+
+Guidelines:
+- Identify sponsor reads, ad segments, or promotional plugs as type "sponsor"
+- Introductory greetings, theme music descriptions, or "welcome to the show" segments are "intro"
+- Housekeeping like announcements, schedule updates, or meta-discussion about the podcast is "housekeeping"
+- Closing remarks, sign-offs, or "thanks for listening" are "outro"
+- Everything else is "content"
+- Aim for chapters that represent meaningful topic shifts, not every minor tangent
+- A typical 60-minute podcast has 5-15 chapters
+- Chapters must be contiguous — every second of the podcast belongs to exactly one chapter
+- Return ONLY the JSON array, no other text"""
+
+
+def format_transcript(segments: list[dict]) -> str:
+    """Format segments with timestamps for the LLM prompt."""
+    lines = []
+    for seg in segments:
+        start = seg["start"]
+        text = seg["text"].strip()
+        if not text:
+            continue
+        m, s = divmod(int(start), 60)
+        h, m = divmod(m, 60)
+        lines.append(f"[{h:02d}:{m:02d}:{s:02d}] {text}")
+    return "\n".join(lines)
+
+
+def generate_chapters(transcript_text: str, model: str = "claude-haiku-4-5-20251001") -> list[dict]:
+    """Send transcript to Claude and get back structured chapters."""
+    client = anthropic.Anthropic()
+
+    response = client.messages.create(
+        model=model,
+        max_tokens=4096,
+        system=SYSTEM_PROMPT,
+        messages=[
+            {
+                "role": "user",
+                "content": f"Here is the transcript:\n\n{transcript_text}",
+            }
+        ],
+    )
+
+    raw = response.content[0].text.strip()
+
+    # Strip markdown code fences if present
+    if raw.startswith("```"):
+        raw = raw.split("\n", 1)[1]
+        if raw.endswith("```"):
+            raw = raw.rsplit("```", 1)[0]
+
+    return json.loads(raw)
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Generate chapter markers from a whisper transcript")
+    parser.add_argument("json_file", help="Path to the whisper JSON output")
+    parser.add_argument("--model", default="claude-haiku-4-5-20251001",
+                        help="Claude model to use (default: claude-haiku-4-5-20251001)")
+    args = parser.parse_args()
+
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        print("Error: ANTHROPIC_API_KEY environment variable is required (API key or OAuth token)", file=sys.stderr)
+        sys.exit(1)
+
+    json_path = Path(args.json_file)
+    data = json.loads(json_path.read_text())
+
+    print(f"Formatting {len(data['segments'])} segments...")
+    transcript_text = format_transcript(data["segments"])
+
+    print(f"Sending to {args.model} for chapter analysis...")
+    chapters = generate_chapters(transcript_text, model=args.model)
+
+    out_path = json_path.with_name(json_path.stem + "_chapters.json")
+    out_path.write_text(json.dumps(chapters, indent=2))
+    print(f"Written {len(chapters)} chapters to {out_path}")
+
+    for ch in chapters:
+        m, s = divmod(int(ch["start"]), 60)
+        h, m = divmod(m, 60)
+        badge = f"[{ch['type']}]" if ch["type"] != "content" else ""
+        print(f"  {h:02d}:{m:02d}:{s:02d}  {ch['title']} {badge}")
+
+
+if __name__ == "__main__":
+    main()
