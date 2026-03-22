@@ -10,6 +10,46 @@ from pathlib import Path
 import anthropic
 
 
+def _nearest_segment_time(target: float, seg_starts: list[float]) -> float:
+    """Return the segment start time closest to *target*."""
+    if not seg_starts:
+        return target
+    best = seg_starts[0]
+    best_dist = abs(target - best)
+    for t in seg_starts[1:]:
+        d = abs(target - t)
+        if d < best_dist:
+            best, best_dist = t, d
+    return best
+
+
+def snap_chapters_to_segments(chapters: list[dict], segments: list[dict]) -> list[dict]:
+    """Snap all chapter timestamps to the nearest real segment timestamp.
+
+    LLMs sometimes hallucinate timestamps that don't exist in the transcript.
+    This post-processing step ensures every chapter boundary aligns with an
+    actual segment, preventing empty chapters and misplaced content.
+    """
+    if not chapters or not segments:
+        return chapters
+
+    seg_starts = sorted({s["start"] for s in segments})
+
+    snapped = []
+    for ch in chapters:
+        ch = dict(ch)  # shallow copy
+        ch["start"] = _nearest_segment_time(ch["start"], seg_starts)
+        ch["end"] = _nearest_segment_time(ch["end"], seg_starts)
+        if ch.get("paragraph_breaks"):
+            ch["paragraph_breaks"] = [
+                _nearest_segment_time(t, seg_starts) for t in ch["paragraph_breaks"]
+            ]
+        if ch.get("pull_quote_start") is not None:
+            ch["pull_quote_start"] = _nearest_segment_time(ch["pull_quote_start"], seg_starts)
+        snapped.append(ch)
+    return snapped
+
+
 SYSTEM_PROMPT = """\
 You are a podcast analyst. Given a timestamped transcript, identify the natural \
 chapter boundaries and produce a JSON array of chapters.
@@ -127,6 +167,10 @@ def main():
 
     print(f"Sending to {args.model} for chapter analysis...")
     chapters = generate_chapters(transcript_text, model=args.model)
+
+    segments = [s for s in data["segments"] if s.get("text", "").strip()]
+    chapters = snap_chapters_to_segments(chapters, segments)
+    print(f"Snapped chapter timestamps to nearest transcript segments")
 
     out_path = json_path.with_name(json_path.stem + "_chapters.json")
     out_path.write_text(json.dumps(chapters, indent=2))
