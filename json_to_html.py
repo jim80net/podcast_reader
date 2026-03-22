@@ -19,10 +19,35 @@ def _count_sentences(text: str) -> int:
     return sum(1 for ch in text if ch in ".!?")
 
 
+def _last_sentence_boundary(text: str) -> int | None:
+    """Find the index of the last sentence-ending punctuation (.!?) in text.
+
+    Returns None if no sentence boundary exists.
+    """
+    for i in range(len(text) - 1, -1, -1):
+        if text[i] in ".!?":
+            return i
+    return None
+
+
+_MAX_PARAGRAPH_CHARS = 800
+
+
 def segments_to_paragraphs(segments: list[dict], sentences_per_para: int = 5) -> list[dict]:
-    """Fallback: group segments into paragraphs of roughly N sentences each."""
+    """Group segments into paragraphs of roughly N sentences each.
+
+    Breaks occur at sentence boundaries to avoid splitting mid-sentence.
+    YouTube captions have short, overlapping segments where sentence boundaries
+    rarely align with segment boundaries. When a paragraph exceeds the sentence
+    threshold, the text is split at the last sentence boundary, carrying any
+    trailing fragment into the next paragraph.
+
+    A character-count safety valve ensures paragraphs still break even when
+    there is no sentence-ending punctuation in the text.
+    """
     paragraphs = []
     current = None
+    carry = ""  # text after the last sentence boundary, carried to next paragraph
 
     for seg in segments:
         text = seg["text"].strip()
@@ -30,13 +55,30 @@ def segments_to_paragraphs(segments: list[dict], sentences_per_para: int = 5) ->
             continue
 
         if current is None:
-            current = {"start": seg["start"], "end": seg["end"], "text": text}
-        elif _count_sentences(current["text"]) >= sentences_per_para:
-            paragraphs.append(current)
-            current = {"start": seg["start"], "end": seg["end"], "text": text}
+            combined = (carry + " " + text).strip() if carry else text
+            current = {"start": seg["start"], "end": seg["end"], "text": combined}
+            carry = ""
         else:
             current["end"] = seg["end"]
             current["text"] += " " + text
+
+            threshold_met = _count_sentences(current["text"]) >= sentences_per_para
+            too_long = len(current["text"]) >= _MAX_PARAGRAPH_CHARS
+
+            if threshold_met or too_long:
+                # Find the last sentence boundary to split at
+                boundary = _last_sentence_boundary(current["text"])
+                if boundary is not None:
+                    para_text = current["text"][:boundary + 1].rstrip()
+                    carry = current["text"][boundary + 1:].strip()
+                    current["text"] = para_text
+                    paragraphs.append(current)
+                    current = None
+                elif too_long:
+                    # No sentence boundary at all — force break at segment boundary
+                    paragraphs.append(current)
+                    current = None
+                    carry = ""
 
     if current:
         paragraphs.append(current)
