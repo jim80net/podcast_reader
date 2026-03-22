@@ -20,6 +20,9 @@ For each chapter, provide:
 - "end": End time in seconds (use the timestamp of the last segment in the chapter)
 - "abstract": A 2-3 sentence summary of what is discussed in this chapter
 - "type": One of "intro", "housekeeping", "content", "sponsor", "outro"
+- "paragraph_breaks": An array of start-second timestamps where a new paragraph should \
+begin within this chapter. Each value is the timestamp (in seconds) of the first segment \
+in that paragraph. The first value must equal the chapter's "start" time.
 
 Guidelines:
 - Identify sponsor reads, ad segments, or promotional plugs as type "sponsor"
@@ -30,7 +33,17 @@ Guidelines:
 - Aim for chapters that represent meaningful topic shifts, not every minor tangent
 - A typical 60-minute podcast has 5-15 chapters
 - Chapters must be contiguous — every second of the podcast belongs to exactly one chapter
-- Return ONLY the JSON array, no other text"""
+
+Paragraph break guidelines:
+- Break paragraphs at thematic boundaries — when the speaker shifts to a new point, \
+example, argument, or sub-topic
+- One coherent thought or argument per paragraph
+- Do NOT break mechanically by sentence count — some paragraphs may be 2 sentences, \
+others may be 8, depending on the content
+- Use the timestamps from the transcript to identify where breaks should occur
+- Snap each break to the nearest segment timestamp from the transcript
+
+Return ONLY the JSON array, no other text."""
 
 
 def format_transcript(segments: list[dict]) -> str:

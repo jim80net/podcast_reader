@@ -20,7 +20,7 @@ def _count_sentences(text: str) -> int:
 
 
 def segments_to_paragraphs(segments: list[dict], sentences_per_para: int = 5) -> list[dict]:
-    """Group segments into paragraphs of roughly N sentences each."""
+    """Fallback: group segments into paragraphs of roughly N sentences each."""
     paragraphs = []
     current = None
 
@@ -32,6 +32,42 @@ def segments_to_paragraphs(segments: list[dict], sentences_per_para: int = 5) ->
         if current is None:
             current = {"start": seg["start"], "end": seg["end"], "text": text}
         elif _count_sentences(current["text"]) >= sentences_per_para:
+            paragraphs.append(current)
+            current = {"start": seg["start"], "end": seg["end"], "text": text}
+        else:
+            current["end"] = seg["end"]
+            current["text"] += " " + text
+
+    if current:
+        paragraphs.append(current)
+
+    return paragraphs
+
+
+def segments_to_paragraphs_themed(segments: list[dict], break_times: list[float]) -> list[dict]:
+    """Group segments into paragraphs using LLM-provided thematic break timestamps."""
+    if not break_times:
+        return segments_to_paragraphs(segments)
+
+    sorted_breaks = sorted(break_times)
+    paragraphs = []
+    current = None
+    break_idx = 1  # skip first break (it's the chapter start, already handled)
+
+    for seg in segments:
+        text = seg["text"].strip()
+        if not text:
+            continue
+
+        # Check if this segment crosses the next paragraph break
+        starts_new = False
+        while break_idx < len(sorted_breaks) and seg["start"] >= sorted_breaks[break_idx] - 0.5:
+            starts_new = True
+            break_idx += 1
+
+        if current is None:
+            current = {"start": seg["start"], "end": seg["end"], "text": text}
+        elif starts_new:
             paragraphs.append(current)
             current = {"start": seg["start"], "end": seg["end"], "text": text}
         else:
@@ -75,9 +111,10 @@ def build_sidebar_nav(chapters: list[dict]) -> str:
     return '<aside id="sidebar">\n<div class="sidebar-inner">\n' + "\n".join(items) + "\n</div>\n</aside>"
 
 
-def build_chapter_body(paragraphs: list[dict], chapters: list[dict]) -> str:
-    """Build main content with chapter sections and inline abstracts."""
+def build_chapter_body(segments: list[dict], chapters: list[dict], sentences_per_para: int = 5) -> str:
+    """Build main content with chapter sections, using themed paragraph breaks when available."""
     if not chapters:
+        paragraphs = segments_to_paragraphs(segments, sentences_per_para)
         parts = []
         for p in paragraphs:
             ts = fmt_time(p["start"])
@@ -96,11 +133,20 @@ def build_chapter_body(paragraphs: list[dict], chapters: list[dict]) -> str:
         parts.append(f'<h2><span class="ts">{fmt_time(ch["start"])}</span> {ch["title"]}{badge_html}</h2>')
         parts.append(f'<p class="chapter-abstract">{ch["abstract"]}</p>')
 
+        # Collect segments belonging to this chapter
         ch_end = sorted_chapters[i + 1]["start"] if i + 1 < len(sorted_chapters) else float("inf")
+        ch_segments = [s for s in segments if s["start"] >= ch["start"] and s["start"] < ch_end]
+
+        # Use themed breaks if available, otherwise fall back to sentence counting
+        breaks = ch.get("paragraph_breaks")
+        if breaks:
+            paragraphs = segments_to_paragraphs_themed(ch_segments, breaks)
+        else:
+            paragraphs = segments_to_paragraphs(ch_segments, sentences_per_para)
+
         for p in paragraphs:
-            if p["start"] >= ch["start"] and p["start"] < ch_end:
-                ts = fmt_time(p["start"])
-                parts.append(f'<p><span class="ts">{ts}</span> {p["text"]}</p>')
+            ts = fmt_time(p["start"])
+            parts.append(f'<p><span class="ts">{ts}</span> {p["text"]}</p>')
 
         parts.append('</section>')
 
@@ -359,12 +405,13 @@ document.addEventListener('DOMContentLoaded', function() {
 """
 
 
-def build_html(paragraphs: list[dict], title: str, chapters: list[dict] | None = None) -> str:
-    """Build a styled HTML document from paragraphs, optionally with chapters."""
+def build_html(segments: list[dict], title: str, chapters: list[dict] | None = None,
+               sentences_per_para: int = 5) -> str:
+    """Build a styled HTML document from segments, optionally with chapters."""
     sidebar_html = build_sidebar_nav(chapters) if chapters else ""
-    body = build_chapter_body(paragraphs, chapters) if chapters else "\n".join(
+    body = build_chapter_body(segments, chapters, sentences_per_para) if chapters else "\n".join(
         f'<p><span class="ts">{fmt_time(p["start"])}</span> {p["text"]}</p>'
-        for p in paragraphs
+        for p in segments_to_paragraphs(segments, sentences_per_para)
     )
     script_tag = f"<script>\n{_SCROLL_SCRIPT}</script>" if chapters else ""
 
@@ -411,12 +458,12 @@ def main():
             print(f"Loaded {len(chapters)} chapters from {chapters_path}")
 
     title = args.title or json_path.stem.replace("_", " ").title()
-    paragraphs = segments_to_paragraphs(data["segments"], sentences_per_para=args.sentences)
-    html = build_html(paragraphs, title, chapters=chapters)
+    segments = [s for s in data["segments"] if s.get("text", "").strip()]
+    html = build_html(segments, title, chapters=chapters, sentences_per_para=args.sentences)
 
     out_path = json_path.with_suffix(".html")
     out_path.write_text(html)
-    print(f"Written {len(paragraphs)} paragraphs to {out_path}")
+    print(f"Written to {out_path}")
 
 
 if __name__ == "__main__":
