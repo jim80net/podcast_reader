@@ -196,23 +196,21 @@ def build_chapter_body(segments: list[dict], chapters: list[dict], sentences_per
         else:
             paragraphs = segments_to_paragraphs(ch_segments, sentences_per_para)
 
-        # Determine where to insert the pull quote (by timestamp)
         pull_quote = ch.get("pull_quote")
         pull_quote_start = ch.get("pull_quote_start")
-        pull_quote_inserted = False
+        pull_quote_applied = not pull_quote  # skip if no quote
 
         for p in paragraphs:
-            # Insert pull quote before the paragraph that follows its timestamp
-            if pull_quote and not pull_quote_inserted and pull_quote_start is not None:
-                if p["start"] >= pull_quote_start:
-                    parts.append(f'<p class="pull-quote"><strong>{pull_quote}</strong></p>')
-                    pull_quote_inserted = True
             ts = fmt_time(p["start"])
-            parts.append(f'<p><span class="ts">{ts}</span> {p["text"]}</p>')
+            text = p["text"]
 
-        # If pull quote wasn't inserted (timestamp past all paragraphs), append at end
-        if pull_quote and not pull_quote_inserted:
-            parts.append(f'<p class="pull-quote"><strong>{pull_quote}</strong></p>')
+            # Bold the pull quote text inline within the matching paragraph
+            if not pull_quote_applied and pull_quote_start is not None and p["start"] >= pull_quote_start:
+                if pull_quote in text:
+                    text = text.replace(pull_quote, f"<strong>{pull_quote}</strong>", 1)
+                    pull_quote_applied = True
+
+            parts.append(f'<p><span class="ts">{ts}</span> {text}</p>')
 
         parts.append('</div>')  # close chapter-main
 
@@ -479,14 +477,6 @@ footer {
   text-align: center;
   font-family: 'JetBrains Mono', monospace;
   max-width: 56rem;
-}
-
-/* ---- PULL QUOTE (inline bold) ---- */
-.pull-quote {
-  color: var(--text-bright);
-  font-size: 1.05rem;
-  line-height: 1.65;
-  margin-bottom: 1.5rem;
 }
 
 /* ---- KEY POINTS (gutter) ---- */
