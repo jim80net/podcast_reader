@@ -44,10 +44,39 @@ else
     source "$SCRIPT_DIR/.venv/bin/activate"
 fi
 
-# --- Resolve input to a local file ---
-if [[ "$INPUT" =~ ^https?:// ]]; then
+# --- Resolve input and get transcript ---
+SKIP_WHISPER=0
+
+if [[ "$INPUT" =~ youtube\.com/|youtu\.be/ ]]; then
+    # --- YouTube: fetch captions directly ---
+    echo "Detected YouTube URL — fetching captions..."
+    VIDEO_ID=$(python3 -c "import sys; from youtube_transcript import extract_video_id; print(extract_video_id(sys.argv[1]) or '')" "$INPUT")
+    if [ -z "$VIDEO_ID" ]; then
+        echo "Error: Could not extract video ID from: $INPUT" >&2
+        exit 1
+    fi
+
+    STEM="${VIDEO_ID}"
+    JSON_PATH="$SCRIPT_DIR/${STEM}.json"
+    HTML_PATH="$SCRIPT_DIR/${STEM}.html"
+    TRANSCRIPT_SOURCE="youtube-captions"
+
+    if [ -f "$JSON_PATH" ]; then
+        echo "Transcript JSON already exists: $JSON_PATH (delete to re-fetch)"
+    else
+        python3 "$SCRIPT_DIR/youtube_transcript.py" "$INPUT" --output "$JSON_PATH"
+    fi
+
+    # Pick up auto-fetched title if user didn't provide one
+    TITLE_FILE="$SCRIPT_DIR/${STEM}.title"
+    if [ -z "$TITLE" ] && [ -f "$TITLE_FILE" ]; then
+        TITLE=$(cat "$TITLE_FILE")
+    fi
+
+    SKIP_WHISPER=1
+
+elif [[ "$INPUT" =~ ^https?:// ]]; then
     FILENAME=$(basename "$INPUT" | sed 's/\?.*//')
-    # Use a sanitized name if the URL filename is too long or ugly
     if [ ${#FILENAME} -gt 80 ]; then
         FILENAME="podcast_$(date +%Y%m%d_%H%M%S).mp3"
     fi
@@ -58,42 +87,51 @@ if [[ "$INPUT" =~ ^https?:// ]]; then
         echo "Downloading: $INPUT"
         curl -L -o "$AUDIO_PATH" "$INPUT"
     fi
+
+    STEM="${FILENAME%.*}"
+    JSON_PATH="$SCRIPT_DIR/${STEM}.json"
+    HTML_PATH="$SCRIPT_DIR/${STEM}.html"
+    TRANSCRIPT_SOURCE="whisper-ctranslate2"
+
 else
     AUDIO_PATH="$(realpath "$INPUT")"
     FILENAME="$(basename "$AUDIO_PATH")"
+
+    STEM="${FILENAME%.*}"
+    JSON_PATH="$SCRIPT_DIR/${STEM}.json"
+    HTML_PATH="$SCRIPT_DIR/${STEM}.html"
+    TRANSCRIPT_SOURCE="whisper-ctranslate2"
 fi
 
-if [ ! -f "$AUDIO_PATH" ]; then
-    echo "Error: File not found: $AUDIO_PATH" >&2
-    exit 1
-fi
-
-STEM="${FILENAME%.*}"
-JSON_PATH="$SCRIPT_DIR/${STEM}.json"
-HTML_PATH="$SCRIPT_DIR/${STEM}.html"
-
-# --- Transcribe ---
-if [ -f "$JSON_PATH" ]; then
-    echo "Transcript JSON already exists: $JSON_PATH (delete to re-transcribe)"
-else
-    echo "Transcribing with whisper-ctranslate2 (model=$MODEL, lang=$LANG, device=$DEVICE)..."
-
-    WHISPER_ARGS=(
-        "$AUDIO_PATH"
-        --model "$MODEL"
-        --language "$LANG"
-        --device "$DEVICE"
-        --output_format json
-        --output_dir "$SCRIPT_DIR"
-        --print_colors False
-    )
-
-    if [ -n "${HF_TOKEN:-}" ]; then
-        echo "HF_TOKEN detected — enabling speaker diarization"
-        WHISPER_ARGS+=(--hf_token "$HF_TOKEN")
+if [ "$SKIP_WHISPER" -eq 0 ]; then
+    if [ ! -f "$AUDIO_PATH" ]; then
+        echo "Error: File not found: $AUDIO_PATH" >&2
+        exit 1
     fi
 
-    whisper-ctranslate2 "${WHISPER_ARGS[@]}"
+    # --- Transcribe ---
+    if [ -f "$JSON_PATH" ]; then
+        echo "Transcript JSON already exists: $JSON_PATH (delete to re-transcribe)"
+    else
+        echo "Transcribing with whisper-ctranslate2 (model=$MODEL, lang=$LANG, device=$DEVICE)..."
+
+        WHISPER_ARGS=(
+            "$AUDIO_PATH"
+            --model "$MODEL"
+            --language "$LANG"
+            --device "$DEVICE"
+            --output_format json
+            --output_dir "$SCRIPT_DIR"
+            --print_colors False
+        )
+
+        if [ -n "${HF_TOKEN:-}" ]; then
+            echo "HF_TOKEN detected — enabling speaker diarization"
+            WHISPER_ARGS+=(--hf_token "$HF_TOKEN")
+        fi
+
+        whisper-ctranslate2 "${WHISPER_ARGS[@]}"
+    fi
 fi
 
 # --- Generate chapters (optional) ---
@@ -117,7 +155,7 @@ if [ -z "$TITLE" ]; then
 fi
 
 echo "Generating HTML transcript..."
-python3 "$SCRIPT_DIR/json_to_html.py" "$JSON_PATH" --title "$TITLE" --sentences "$SENTENCES" $CHAPTERS_ARG
+python3 "$SCRIPT_DIR/json_to_html.py" "$JSON_PATH" --title "$TITLE" --sentences "$SENTENCES" --source "$TRANSCRIPT_SOURCE" $CHAPTERS_ARG
 
 echo ""
 echo "Done! Output files:"
