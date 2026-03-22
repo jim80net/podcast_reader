@@ -7,6 +7,8 @@ import re
 import sys
 from pathlib import Path
 
+import urllib.request
+
 from youtube_transcript_api import YouTubeTranscriptApi
 
 
@@ -43,14 +45,15 @@ def snippets_to_whisper_segments(snippets: list[dict]) -> dict:
 
 def fetch_transcript(video_id: str) -> list[dict]:
     """Fetch transcript for a YouTube video. Prefers manual captions over auto-generated."""
+    from youtube_transcript_api import NoTranscriptFound
+
     ytt_api = YouTubeTranscriptApi()
     transcript_list = ytt_api.list(video_id)
 
-    # Try manual captions first, fall back to auto-generated
     try:
-        transcript = transcript_list.find_manually_created_transcript(["en"])
-    except Exception:
-        transcript = transcript_list.find_generated_transcript(["en"])
+        transcript = transcript_list.find_transcript(["en"])
+    except NoTranscriptFound:
+        raise SystemExit(f"Error: No English transcript available for {video_id}")
 
     fetched = transcript.fetch()
     return fetched.to_raw_data()
@@ -58,7 +61,6 @@ def fetch_transcript(video_id: str) -> list[dict]:
 
 def fetch_video_title(video_id: str) -> str:
     """Fetch the video title from YouTube's oembed endpoint."""
-    import urllib.request
     url = f"https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={video_id}&format=json"
     try:
         with urllib.request.urlopen(url, timeout=10) as resp:

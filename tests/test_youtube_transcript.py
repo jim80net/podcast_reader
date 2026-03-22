@@ -6,7 +6,7 @@ from pathlib import Path
 # Ensure project root is importable
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from youtube_transcript import extract_video_id
+from youtube_transcript import extract_video_id, snippets_to_whisper_segments
 
 
 class TestExtractVideoId:
@@ -30,9 +30,6 @@ class TestExtractVideoId:
 
     def test_plain_file_path(self):
         assert extract_video_id("/home/user/podcast.mp3") is None
-
-
-from youtube_transcript import snippets_to_whisper_segments
 
 
 class TestSnippetsToWhisperSegments:
