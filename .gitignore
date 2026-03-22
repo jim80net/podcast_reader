@@ -1,0 +1,23 @@
+# Virtual environment
+.venv/
+
+# Audio files (large, download fresh)
+*.mp3
+*.wav
+*.m4a
+*.ogg
+*.flac
+
+# Whisper model cache
+*.bin
+*.pt
+
+# Whisper raw outputs (keep HTML, regenerate from JSON if needed)
+*.json
+
+# Generated transcripts (regenerate with json_to_html.py)
+*.html
+
+# Python
+__pycache__/
+*.pyc
