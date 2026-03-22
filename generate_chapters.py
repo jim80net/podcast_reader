@@ -54,14 +54,13 @@ SYSTEM_PROMPT = """\
 You are a podcast analyst. Given a timestamped transcript, identify the natural \
 chapter boundaries and produce a JSON array of chapters.
 
-Each transcript line is formatted as [HH:MM:SS | <seconds>s] where the seconds \
-value after the pipe is what you MUST use for all timestamp fields in your output. \
-Copy the seconds value directly — do NOT convert from HH:MM:SS yourself.
+Each transcript line is formatted as [<seconds>] text. Use these seconds values \
+directly in your output — copy them exactly from the transcript.
 
 For each chapter, provide:
 - "title": A concise, descriptive chapter title
-- "start": Start time in seconds (copy the seconds value from the first segment in the chapter)
-- "end": End time in seconds (copy the seconds value from the last segment in the chapter)
+- "start": Start time in seconds (copy from the first segment in the chapter)
+- "end": End time in seconds (copy from the last segment in the chapter)
 - "abstract": A 2-3 sentence summary of what is discussed in this chapter
 - "type": One of "intro", "housekeeping", "content", "sponsor", "outro"
 - "paragraph_breaks": An array of seconds-timestamps where a new paragraph should \
@@ -112,20 +111,14 @@ Return ONLY the JSON array, no other text."""
 
 
 def format_transcript(segments: list[dict]) -> str:
-    """Format segments with timestamps for the LLM prompt.
-
-    Shows both HH:MM:SS (for temporal reasoning) and raw seconds (for JSON output)
-    so the LLM can copy the seconds value directly without mental arithmetic.
-    """
+    """Format segments with timestamps in seconds for the LLM prompt."""
     lines = []
     for seg in segments:
         start = seg["start"]
         text = seg["text"].strip()
         if not text:
             continue
-        m, s = divmod(int(start), 60)
-        h, m = divmod(m, 60)
-        lines.append(f"[{h:02d}:{m:02d}:{s:02d} | {start:.1f}s] {text}")
+        lines.append(f"[{start:.1f}] {text}")
     return "\n".join(lines)
 
 
