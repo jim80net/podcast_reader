@@ -5,6 +5,7 @@
 #   ./transcribe.sh <url-or-file> [title]
 #
 # Examples:
+#   ./transcribe.sh https://www.youtube.com/watch?v=VIDEO_ID "Episode Title"
 #   ./transcribe.sh https://example.com/episode.mp3 "My Podcast Ep 1"
 #   ./transcribe.sh ~/Downloads/episode.mp3
 #   ./transcribe.sh recording.wav "Interview with Alice"

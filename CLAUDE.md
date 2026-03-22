@@ -1,6 +1,6 @@
 # podcast_reader
 
-Transcribe podcast audio to styled HTML transcripts using [whisper-ctranslate2](https://github.com/Softcatala/whisper-ctranslate2) (faster-whisper + CLI).
+Transcribe podcast audio or YouTube videos to styled HTML transcripts. Uses [whisper-ctranslate2](https://github.com/Softcatala/whisper-ctranslate2) for audio files and [youtube-transcript-api](https://pypi.org/project/youtube-transcript-api/) for YouTube (fetches existing captions, no download).
 
 ## Quick Start
 

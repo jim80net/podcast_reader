@@ -38,9 +38,11 @@ WHISPER_MODEL=medium SENTENCES=3 ./transcribe.sh episode.mp3
 ### Output
 
 The script produces:
-- `<name>.json` — Raw Whisper segments with timestamps
+- `<name>.json` — Transcript segments with timestamps (from Whisper or YouTube captions)
 - `<name>_chapters.json` — Chapter markers with titles, abstracts, and type tags (if `ANTHROPIC_API_KEY` is set)
 - `<name>.html` — Styled, readable transcript with timestamp badges
+
+For YouTube videos, `<name>` is the video ID (e.g., `fkKh_WBT5BM.json`). The title is auto-extracted from YouTube if not provided.
 
 When chapters are generated, the HTML includes:
 - **Table of contents** with chapter titles, timestamps, and abstracts
@@ -54,8 +56,8 @@ The HTML supports both dark and light themes automatically via `prefers-color-sc
 
 - Python 3.10+
 - [uv](https://docs.astral.sh/uv/) for Python package management
-- NVIDIA GPU recommended (falls back to CPU)
-- `ffmpeg`
+- For audio transcription: NVIDIA GPU recommended (falls back to CPU), `ffmpeg`
+- For YouTube: no additional requirements (captions are fetched directly)
 
 ## Setup
 
