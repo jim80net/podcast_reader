@@ -47,17 +47,12 @@ When chapters are generated, the HTML includes:
 
 The HTML supports both dark and light themes automatically via `prefers-color-scheme`.
 
-Open in a browser from WSL:
-```
-\\wsl.localhost\Ubuntu\<path>\<name>.html
-```
-
 ## Requirements
 
 - Python 3.10+
 - [uv](https://docs.astral.sh/uv/) for Python package management
 - NVIDIA GPU recommended (falls back to CPU)
-- `ffmpeg` (usually pre-installed)
+- `ffmpeg`
 
 ## Setup
 
