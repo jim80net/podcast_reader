@@ -128,7 +128,7 @@ def generate_chapters(transcript_text: str, model: str = "claude-haiku-4-5-20251
 
     response = client.messages.create(
         model=model,
-        max_tokens=4096,
+        max_tokens=16384,
         system=SYSTEM_PROMPT,
         messages=[
             {
@@ -137,6 +137,12 @@ def generate_chapters(transcript_text: str, model: str = "claude-haiku-4-5-20251
             }
         ],
     )
+
+    if response.stop_reason == "max_tokens":
+        raise RuntimeError(
+            "Claude response was truncated (hit max_tokens). "
+            "The transcript may be too long for a single request."
+        )
 
     raw = response.content[0].text.strip()
 
