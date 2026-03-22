@@ -45,16 +45,16 @@ For speaker diarization, set `HF_TOKEN` and accept model terms at:
 | File | Purpose |
 |------|---------|
 | `transcribe.sh` | Main entry point — download, transcribe, chapters, convert |
-| `generate_chapters.py` | Send transcript to Claude, get chapter markers with abstracts |
-| `json_to_html.py` | Convert whisper JSON to styled HTML, optionally with chapters TOC |
+| `generate_chapters.py` | Send transcript to Claude, get chapters with abstracts, key points, and pull quotes |
+| `json_to_html.py` | Convert whisper JSON to styled HTML with chapters TOC, key points gutter, and pull quotes |
 | `youtube_transcript.py` | Fetch YouTube captions as whisper-compatible JSON |
 | `requirements.txt` | Python dependencies |
 
 ## Pipeline
 
 1. `whisper-ctranslate2` → `<name>.json` (segments with timestamps)
-2. `generate_chapters.py` → `<name>_chapters.json` (chapters, abstracts, types)
-3. `json_to_html.py --chapters` → `<name>.html` (styled transcript with TOC)
+2. `generate_chapters.py` → `<name>_chapters.json` (chapters, abstracts, types, key points, pull quotes)
+3. `json_to_html.py --chapters` → `<name>.html` (styled transcript with TOC, key points in right gutter, pull quotes inline)
 
 For YouTube URLs, step 1 uses `youtube_transcript.py` (fetches existing captions) instead of whisper-ctranslate2. No audio download or API key is required.
 

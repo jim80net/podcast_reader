@@ -39,7 +39,7 @@ WHISPER_MODEL=medium SENTENCES=3 ./transcribe.sh episode.mp3
 
 The script produces:
 - `<name>.json` — Transcript segments with timestamps (from Whisper or YouTube captions)
-- `<name>_chapters.json` — Chapter markers with titles, abstracts, and type tags (if `ANTHROPIC_API_KEY` is set)
+- `<name>_chapters.json` — Chapter markers with titles, abstracts, key points, pull quotes, and type tags (if `ANTHROPIC_API_KEY` is set)
 - `<name>.html` — Styled, readable transcript with timestamp badges
 
 For YouTube videos, `<name>` is the video ID (e.g., `fkKh_WBT5BM.json`). The title is auto-extracted from YouTube if not provided.
@@ -47,6 +47,8 @@ For YouTube videos, `<name>` is the video ID (e.g., `fkKh_WBT5BM.json`). The tit
 When chapters are generated, the HTML includes:
 - **Table of contents** with chapter titles, timestamps, and abstracts
 - **Chapter sections** with headings and summaries
+- **Key points** — bullet-point summaries in a sticky right gutter (hidden on narrow screens)
+- **Pull quotes** — standout phrases rendered as bold inline text after each chapter abstract
 - **Sponsor dimming** — sponsor/ad segments are visually muted (hover to reveal)
 - **Anchor navigation** — click any TOC entry to jump to that section
 

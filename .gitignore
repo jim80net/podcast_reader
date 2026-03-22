@@ -8,6 +8,12 @@
 # Claude Code local settings
 .claude/
 
+# Git worktrees
+.worktrees/
+
+# Superpowers brainstorm sessions
+.superpowers/
+
 # Audio files (large, download fresh)
 *.mp3
 *.wav
