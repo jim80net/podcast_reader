@@ -4,6 +4,9 @@ Transcribe podcast audio files into readable, styled HTML transcripts with times
 
 Uses [whisper-ctranslate2](https://github.com/Softcatala/whisper-ctranslate2) — a fast, GPU-accelerated Whisper implementation (4x faster than OpenAI's Whisper).
 
+<img width="1899" height="1447" alt="image" src="https://github.com/user-attachments/assets/de666976-cfd4-4a3b-84a3-653c8fade903" />
+
+
 ## Usage
 
 ```bash
