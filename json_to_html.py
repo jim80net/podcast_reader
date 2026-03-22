@@ -168,12 +168,22 @@ def build_chapter_body(segments: list[dict], chapters: list[dict], sentences_per
 
     for i, ch in enumerate(sorted_chapters):
         anchor = _slug(ch["title"])
+        key_points = ch.get("key_points", [])
+        has_gutter = bool(key_points)
         section_class = f'chapter-section type-{ch["type"]}'
+        if not has_gutter:
+            section_class += " no-gutter"
         label = TYPE_LABELS.get(ch["type"])
         badge_html = f' <span class="badge badge-{ch["type"]}">{label}</span>' if label else ""
         parts.append(f'<section id="{anchor}" class="{section_class}">')
+        parts.append('<div class="chapter-main">')
         parts.append(f'<h2><span class="ts">{fmt_time(ch["start"])}</span> {ch["title"]}{badge_html}</h2>')
-        parts.append(f'<p class="chapter-abstract">{ch["abstract"]}</p>')
+        parts.append(
+            '<div class="chapter-abstract">\n'
+            '<h3 class="chapter-abstract-heading">Summary</h3>\n'
+            f'<p>{ch["abstract"]}</p>\n'
+            '</div>'
+        )
 
         # Collect segments belonging to this chapter
         ch_end = sorted_chapters[i + 1]["start"] if i + 1 < len(sorted_chapters) else float("inf")
@@ -186,9 +196,37 @@ def build_chapter_body(segments: list[dict], chapters: list[dict], sentences_per
         else:
             paragraphs = segments_to_paragraphs(ch_segments, sentences_per_para)
 
+        # Determine where to insert the pull quote (by timestamp)
+        pull_quote = ch.get("pull_quote")
+        pull_quote_start = ch.get("pull_quote_start")
+        pull_quote_inserted = False
+
         for p in paragraphs:
+            # Insert pull quote before the paragraph that follows its timestamp
+            if pull_quote and not pull_quote_inserted and pull_quote_start is not None:
+                if p["start"] >= pull_quote_start:
+                    parts.append(f'<p class="pull-quote"><strong>{pull_quote}</strong></p>')
+                    pull_quote_inserted = True
             ts = fmt_time(p["start"])
             parts.append(f'<p><span class="ts">{ts}</span> {p["text"]}</p>')
+
+        # If pull quote wasn't inserted (timestamp past all paragraphs), append at end
+        if pull_quote and not pull_quote_inserted:
+            parts.append(f'<p class="pull-quote"><strong>{pull_quote}</strong></p>')
+
+        parts.append('</div>')  # close chapter-main
+
+        # Key points in right gutter
+        if has_gutter:
+            items = "\n".join(f"<li>{point}</li>" for point in key_points)
+            parts.append(
+                '<div class="chapter-gutter">\n'
+                '<div class="key-points">\n'
+                '<h3 class="key-points-heading">Key Points</h3>\n'
+                f'<ul>\n{items}\n</ul>\n'
+                '</div>\n'
+                '</div>'
+            )
 
         parts.append('</section>')
 
@@ -306,7 +344,6 @@ body {
 #content {
   margin-left: var(--sidebar-w);
   flex: 1;
-  max-width: 56rem;
   padding: 2.5rem 3rem 4rem;
 }
 
@@ -314,6 +351,7 @@ header {
   margin-bottom: 2.5rem;
   padding-bottom: 1.5rem;
   border-bottom: 2px solid var(--accent);
+  max-width: 56rem;
 }
 h1 {
   font-family: 'Oswald', sans-serif;
@@ -333,8 +371,22 @@ h1 {
 
 /* ---- CHAPTER SECTIONS ---- */
 .chapter-section {
+  display: grid;
+  grid-template-columns: minmax(0, 56rem) 24rem;
+  gap: 2.5rem;
   margin-bottom: 3rem;
   scroll-margin-top: 1.5rem;
+}
+.chapter-section.no-gutter {
+  grid-template-columns: minmax(0, 56rem);
+}
+.chapter-main {
+  min-width: 0;
+}
+.chapter-gutter {
+  align-self: start;
+  position: sticky;
+  top: 2rem;
 }
 .chapter-section h2 {
   font-family: 'Oswald', sans-serif;
@@ -358,6 +410,19 @@ h1 {
   line-height: 1.55;
   border-left: 2px solid var(--accent-dim);
   padding-left: 1rem;
+}
+.chapter-abstract p {
+  margin-bottom: 0;
+}
+.chapter-abstract-heading {
+  font-family: 'Oswald', sans-serif;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent-dim);
+  margin-bottom: 0.3rem;
+  font-style: normal;
 }
 .type-sponsor {
   opacity: 0.35;
@@ -413,9 +478,59 @@ footer {
   font-size: 0.75rem;
   text-align: center;
   font-family: 'JetBrains Mono', monospace;
+  max-width: 56rem;
+}
+
+/* ---- PULL QUOTE (inline bold) ---- */
+.pull-quote {
+  color: var(--text-bright);
+  font-size: 1.05rem;
+  line-height: 1.65;
+  margin-bottom: 1.5rem;
+}
+
+/* ---- KEY POINTS (gutter) ---- */
+.key-points {
+  border-left: 2px solid var(--accent);
+  padding-left: 1.2rem;
+}
+.key-points-heading {
+  font-family: 'Oswald', sans-serif;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+  margin-bottom: 0.6rem;
+}
+.key-points ul {
+  list-style: none;
+  padding: 0;
+}
+.key-points li {
+  position: relative;
+  padding-left: 1.1rem;
+  margin-bottom: 0.45rem;
+  font-size: 0.88rem;
+  line-height: 1.5;
+  color: var(--text-bright);
+}
+.key-points li::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0.55em;
+  width: 5px;
+  height: 5px;
+  background: var(--accent);
+  border-radius: 50%;
 }
 
 /* ---- RESPONSIVE ---- */
+@media (max-width: 1200px) {
+  .chapter-section { grid-template-columns: minmax(0, 56rem); }
+  .chapter-gutter { display: none; }
+}
 @media (max-width: 900px) {
   :root { --sidebar-w: 0px; }
   #sidebar { display: none; }

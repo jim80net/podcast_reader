@@ -23,6 +23,14 @@ For each chapter, provide:
 - "paragraph_breaks": An array of start-second timestamps where a new paragraph should \
 begin within this chapter. Each value is the timestamp (in seconds) of the first segment \
 in that paragraph. The first value must equal the chapter's "start" time.
+- "key_points": An array of strings — concise bullet points capturing the main arguments, \
+claims, or facts in the chapter. May be an empty array for thin chapters (e.g. short intros \
+or outros). Aim for 2-5 points per substantive chapter.
+- "pull_quote": A standout phrase from the chapter suitable for a magazine-style callout, \
+or null if nothing in the chapter merits highlighting. May be verbatim from the transcript \
+or lightly edited to clean up filler words and spoken grammar while preserving the speaker's intent.
+- "pull_quote_start": The timestamp (in seconds) of the transcript segment where the pull \
+quote begins. Required when "pull_quote" is non-null, omit or set to null otherwise.
 
 Guidelines:
 - Identify sponsor reads, ad segments, or promotional plugs as type "sponsor"
@@ -33,6 +41,19 @@ Guidelines:
 - Aim for chapters that represent meaningful topic shifts, not every minor tangent
 - A typical 60-minute podcast has 5-15 chapters
 - Chapters must be contiguous — every second of the podcast belongs to exactly one chapter
+
+Key points guidelines:
+- Key points should be substantive claims or arguments, not summaries \
+(e.g. "80% of casualties in Ukraine are now drone-inflicted" not "Discusses drone casualties")
+- Include specific numbers, names, or facts when the speaker provides them
+- If a chapter lists items (e.g. "myth number one... myth number two..."), \
+capture each item as a separate key point
+
+Pull quote guidelines:
+- Pick the single most striking, quotable statement — something that makes a reader \
+want to read the section
+- Not every chapter needs a pull quote — only include one if something genuinely stands out
+- Prefer vivid, self-contained statements over ones that need surrounding context
 
 Paragraph break guidelines:
 - Break paragraphs at thematic boundaries — when the speaker shifts to a new point, \
