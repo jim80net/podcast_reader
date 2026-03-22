@@ -1,8 +1,8 @@
 # Podcast Reader
 
-Transcribe podcast audio files into readable, styled HTML transcripts with timestamps.
+Transcribe podcast audio files or YouTube videos into readable, styled HTML transcripts with timestamps.
 
-Uses [whisper-ctranslate2](https://github.com/Softcatala/whisper-ctranslate2) — a fast, GPU-accelerated Whisper implementation (4x faster than OpenAI's Whisper).
+Uses [whisper-ctranslate2](https://github.com/Softcatala/whisper-ctranslate2) for audio files (GPU-accelerated, 4x faster than OpenAI's Whisper) and [youtube-transcript-api](https://pypi.org/project/youtube-transcript-api/) for YouTube videos (fetches existing captions — no audio download needed).
 
 <img width="1899" height="1447" alt="image" src="https://github.com/user-attachments/assets/de666976-cfd4-4a3b-84a3-653c8fade903" />
 
@@ -16,6 +16,9 @@ Uses [whisper-ctranslate2](https://github.com/Softcatala/whisper-ctranslate2) �
 ### Examples
 
 ```bash
+# From a YouTube video (uses existing captions, no download)
+./transcribe.sh https://www.youtube.com/watch?v=VIDEO_ID "Episode Title"
+
 # From a URL (downloads automatically)
 ./transcribe.sh https://media.rss.com/show/episode.mp3 "Episode 42: The Answer"
 
