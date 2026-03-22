@@ -54,22 +54,26 @@ SYSTEM_PROMPT = """\
 You are a podcast analyst. Given a timestamped transcript, identify the natural \
 chapter boundaries and produce a JSON array of chapters.
 
+Each transcript line is formatted as [HH:MM:SS | <seconds>s] where the seconds \
+value after the pipe is what you MUST use for all timestamp fields in your output. \
+Copy the seconds value directly — do NOT convert from HH:MM:SS yourself.
+
 For each chapter, provide:
 - "title": A concise, descriptive chapter title
-- "start": Start time in seconds (use the timestamp of the first segment in the chapter)
-- "end": End time in seconds (use the timestamp of the last segment in the chapter)
+- "start": Start time in seconds (copy the seconds value from the first segment in the chapter)
+- "end": End time in seconds (copy the seconds value from the last segment in the chapter)
 - "abstract": A 2-3 sentence summary of what is discussed in this chapter
 - "type": One of "intro", "housekeeping", "content", "sponsor", "outro"
-- "paragraph_breaks": An array of start-second timestamps where a new paragraph should \
-begin within this chapter. Each value is the timestamp (in seconds) of the first segment \
-in that paragraph. The first value must equal the chapter's "start" time.
+- "paragraph_breaks": An array of seconds-timestamps where a new paragraph should \
+begin within this chapter. Each value is the seconds value from the transcript line \
+of the first segment in that paragraph. The first value must equal the chapter's "start" time.
 - "key_points": An array of strings — concise bullet points capturing the main arguments, \
 claims, or facts in the chapter. May be an empty array for thin chapters (e.g. short intros \
 or outros). Aim for 2-5 points per substantive chapter.
 - "pull_quote": A standout phrase from the chapter suitable for a magazine-style callout, \
 or null if nothing in the chapter merits highlighting. May be verbatim from the transcript \
 or lightly edited to clean up filler words and spoken grammar while preserving the speaker's intent.
-- "pull_quote_start": The timestamp (in seconds) of the transcript segment where the pull \
+- "pull_quote_start": The seconds value from the transcript line where the pull \
 quote begins. Required when "pull_quote" is non-null, omit or set to null otherwise.
 
 Guidelines:
@@ -101,14 +105,18 @@ example, argument, or sub-topic
 - One coherent thought or argument per paragraph
 - Do NOT break mechanically by sentence count — some paragraphs may be 2 sentences, \
 others may be 8, depending on the content
-- Use the timestamps from the transcript to identify where breaks should occur
-- Snap each break to the nearest segment timestamp from the transcript
+- Use the seconds values from the transcript lines to identify where breaks should occur
+- Each break must use an exact seconds value that appears in the transcript
 
 Return ONLY the JSON array, no other text."""
 
 
 def format_transcript(segments: list[dict]) -> str:
-    """Format segments with timestamps for the LLM prompt."""
+    """Format segments with timestamps for the LLM prompt.
+
+    Shows both HH:MM:SS (for temporal reasoning) and raw seconds (for JSON output)
+    so the LLM can copy the seconds value directly without mental arithmetic.
+    """
     lines = []
     for seg in segments:
         start = seg["start"]
@@ -117,7 +125,7 @@ def format_transcript(segments: list[dict]) -> str:
             continue
         m, s = divmod(int(start), 60)
         h, m = divmod(m, 60)
-        lines.append(f"[{h:02d}:{m:02d}:{s:02d}] {text}")
+        lines.append(f"[{h:02d}:{m:02d}:{s:02d} | {start:.1f}s] {text}")
     return "\n".join(lines)
 
 
