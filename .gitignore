@@ -31,6 +31,10 @@
 # Generated transcripts (regenerate with json_to_html.py)
 *.html
 
+# Test fixtures are committed source artifacts, not generated outputs
+!tests/fixtures/*.json
+!tests/fixtures/*.html
+
 # Python
 __pycache__/
 *.pyc

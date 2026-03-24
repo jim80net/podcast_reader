@@ -1,6 +1,11 @@
 """Tests for podcast_reader.html paragraph grouping."""
 
+import json
+from pathlib import Path
+
 from podcast_reader.html import _count_sentences, segments_to_paragraphs
+
+FIXTURES = Path(__file__).parent / "fixtures"
 
 
 class TestCountSentences:
@@ -100,3 +105,34 @@ class TestSegmentsToParapraphs:
         paras = segments_to_paragraphs(segments, sentences_per_para=3)
         # Should not produce a single massive paragraph
         assert len(paras) > 1
+
+
+class TestBuildHtmlIntegration:
+    def test_full_pipeline_with_chapters(self) -> None:
+        """Integration test: whisper JSON + chapters JSON -> HTML matches expected output."""
+        from podcast_reader.html import build_html
+
+        whisper_data = json.loads((FIXTURES / "sample_whisper.json").read_text())
+        chapters = json.loads((FIXTURES / "sample_chapters.json").read_text())
+        segments = [s for s in whisper_data["segments"] if s.get("text", "").strip()]
+
+        result = build_html(
+            segments,
+            title="Test Episode",
+            chapters=chapters,
+            sentences_per_para=5,
+            source="test",
+        )
+
+        expected_path = FIXTURES / "sample_expected.html"
+        if not expected_path.exists():
+            # First run: generate the expected output
+            expected_path.write_text(result)
+            raise AssertionError(
+                f"Expected HTML fixture did not exist."
+                f" Generated it at {expected_path}."
+                " Review and re-run."
+            )
+
+        expected = expected_path.read_text()
+        assert result == expected

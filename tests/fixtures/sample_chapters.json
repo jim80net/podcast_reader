@@ -1,0 +1,35 @@
+[
+  {
+    "title": "Introduction",
+    "start": 0.0,
+    "end": 10.0,
+    "abstract": "The host introduces the episode.",
+    "type": "intro",
+    "paragraph_breaks": [0.0],
+    "key_points": [],
+    "pull_quote": null,
+    "pull_quote_start": null
+  },
+  {
+    "title": "Python Packaging",
+    "start": 10.0,
+    "end": 25.0,
+    "abstract": "Discussion of modern Python packaging with pyproject.toml.",
+    "type": "content",
+    "paragraph_breaks": [10.0, 20.0],
+    "key_points": ["pyproject.toml replaces setup.py", "hatchling is the recommended build backend"],
+    "pull_quote": "They replace setup.py and setup.cfg.",
+    "pull_quote_start": 15.0
+  },
+  {
+    "title": "Closing",
+    "start": 25.0,
+    "end": 30.0,
+    "abstract": "The host signs off.",
+    "type": "outro",
+    "paragraph_breaks": [25.0],
+    "key_points": [],
+    "pull_quote": null,
+    "pull_quote_start": null
+  }
+]
