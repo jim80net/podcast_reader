@@ -1,18 +1,24 @@
 # podcast_reader
 
-Transcribe podcast audio or YouTube videos to styled HTML transcripts. Uses [whisper-ctranslate2](https://github.com/Softcatala/whisper-ctranslate2) for audio files and [youtube-transcript-api](https://pypi.org/project/youtube-transcript-api/) for YouTube (fetches existing captions, no download).
+Transcribe podcast audio, YouTube videos, or X/Twitter videos to styled HTML transcripts. Uses [whisper-ctranslate2](https://github.com/Softcatala/whisper-ctranslate2) for audio files, [youtube-transcript-api](https://pypi.org/project/youtube-transcript-api/) for YouTube (fetches existing captions), and [yt-dlp](https://github.com/yt-dlp/yt-dlp) for X/Twitter and other platforms.
 
 ## Quick Start
 
 ```bash
 # Transcribe from a YouTube video (uses existing captions, no download)
-./transcribe.sh https://www.youtube.com/watch?v=VIDEO_ID "Episode Title"
+podcast-reader https://www.youtube.com/watch?v=VIDEO_ID "Episode Title"
 
-# Transcribe from a URL
-./transcribe.sh https://example.com/episode.mp3 "Episode Title"
+# Transcribe from X/Twitter (downloads audio via yt-dlp)
+podcast-reader https://x.com/user/status/123456 "Post Title"
+
+# Transcribe from any yt-dlp-supported URL
+podcast-reader https://vimeo.com/123456 "Video Title"
 
 # Transcribe a local file
-./transcribe.sh ~/Downloads/episode.mp3 "Episode Title"
+podcast-reader ~/Downloads/episode.mp3 "Episode Title"
+
+# Specify output directory
+podcast-reader --output-dir ./output https://example.com/video
 ```
 
 ## Setup
@@ -20,9 +26,14 @@ Transcribe podcast audio or YouTube videos to styled HTML transcripts. Uses [whi
 Requires: Python 3.10+, `uv`, NVIDIA GPU (optional, falls back to CPU).
 
 ```bash
-uv venv .venv
-source .venv/bin/activate
-uv pip install -r requirements.txt
+# Development
+uv sync --dev
+
+# Run directly
+uv run podcast-reader <url-or-file> [title]
+
+# Install as standalone tool
+uv tool install .
 ```
 
 For speaker diarization, set `HF_TOKEN` and accept model terms at:
@@ -39,31 +50,53 @@ For speaker diarization, set `HF_TOKEN` and accept model terms at:
 | `HF_TOKEN` | _(none)_ | HuggingFace token for diarization |
 | `ANTHROPIC_API_KEY` | _(none)_ | Enables chapter generation via Claude |
 | `SENTENCES` | `5` | Sentences per paragraph in HTML |
+| `YT_DLP_COOKIES` | _(none)_ | Path to cookies file for authenticated yt-dlp downloads |
 
-## Files
+## Package Structure
 
-| File | Purpose |
-|------|---------|
-| `transcribe.sh` | Main entry point — download, transcribe, chapters, convert |
-| `generate_chapters.py` | Send transcript to Claude, get chapters with abstracts, key points, and pull quotes |
-| `json_to_html.py` | Convert whisper JSON to styled HTML with chapters TOC, key points gutter, and pull quotes |
-| `youtube_transcript.py` | Fetch YouTube captions as whisper-compatible JSON |
-| `requirements.txt` | Python dependencies |
+| Module | Purpose |
+|--------|---------|
+| `src/podcast_reader/cli.py` | Main CLI entry point — URL routing, pipeline orchestration |
+| `src/podcast_reader/youtube.py` | Fetch YouTube captions as whisper-compatible JSON |
+| `src/podcast_reader/ytdlp.py` | Download audio from X/Twitter and other platforms via yt-dlp |
+| `src/podcast_reader/transcribe.py` | Run whisper-ctranslate2 on audio files |
+| `src/podcast_reader/chapters.py` | Generate chapter markers via Claude |
+| `src/podcast_reader/html.py` | Convert whisper JSON to styled HTML with TOC, key points, pull quotes |
+| `pyproject.toml` | Dependencies, entry point, tool configuration |
 
 ## Pipeline
 
-1. `whisper-ctranslate2` → `<name>.json` (segments with timestamps)
-2. `generate_chapters.py` → `<name>_chapters.json` (chapters, abstracts, types, key points, pull quotes)
-3. `json_to_html.py --chapters` → `<name>.html` (styled transcript with TOC, key points in right gutter, pull quotes inline)
-
-For YouTube URLs, step 1 uses `youtube_transcript.py` (fetches existing captions) instead of whisper-ctranslate2. No audio download or API key is required.
-
-Step 2 requires `ANTHROPIC_API_KEY`. Without it, HTML is generated without chapters.
+1. **YouTube URL** → `youtube.py` fetches captions → whisper JSON
+2. **Other URL** → `ytdlp.py` downloads audio → `transcribe.py` runs whisper → whisper JSON
+3. **Local file** → `transcribe.py` runs whisper → whisper JSON
+4. `chapters.py` → `<stem>_chapters.json` (if `ANTHROPIC_API_KEY` set)
+5. `html.py` → `<stem>.html` (styled transcript with TOC, key points, pull quotes)
 
 ## Development
 
 - Use `uv` for all Python package management, never raw `pip`.
 - Audio files, JSON, and HTML outputs are gitignored — they're generated artifacts.
+
+### Code Quality
+
+```bash
+# Run tests (unit only)
+uv run pytest -m "not integration"
+
+# Run all tests including integration
+uv run pytest
+
+# Type checking (strict mode)
+uv run mypy src/
+
+# Lint and format
+uv run ruff check src/ tests/
+uv run ruff format --check src/ tests/
+```
+
+- **mypy**: strict mode, all functions fully typed
+- **ruff**: line-length 100, rules E/F/W/I/N/UP/B/A/SIM/TCH
+- **pytest**: equality matchers preferred, subprocess mocked in unit tests, integration tests marked with `@pytest.mark.integration`
 
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
