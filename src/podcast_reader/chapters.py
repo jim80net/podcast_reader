@@ -1,5 +1,7 @@
 """Generate chapter markers with abstracts from a whisper transcript using Claude."""
 
+from __future__ import annotations
+
 import json
 from typing import Any
 

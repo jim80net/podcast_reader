@@ -66,6 +66,34 @@ def _wsl_path(path: Path) -> str | None:
     return None
 
 
+def _transcribe_if_needed(
+    *,
+    audio_path: Path,
+    json_path: Path,
+    output_dir: Path,
+    whisper_model: str,
+    whisper_lang: str,
+    whisper_device: str,
+    hf_token: str | None,
+) -> None:
+    """Run whisper transcription if JSON output doesn't already exist."""
+    if json_path.exists():
+        print(f"Transcript JSON already exists: {json_path} (delete to re-transcribe)")
+        return
+    print(
+        f"Transcribing with whisper-ctranslate2 "
+        f"(model={whisper_model}, lang={whisper_lang}, device={whisper_device})..."
+    )
+    transcribe(
+        audio_path=audio_path,
+        output_dir=output_dir,
+        model=whisper_model,
+        lang=whisper_lang,
+        device=whisper_device,
+        hf_token=hf_token,
+    )
+
+
 def _run_pipeline(
     *,
     input_arg: str,
@@ -119,10 +147,15 @@ def _run_pipeline(
             except RuntimeError:
                 title = None  # will derive from stem later
 
-        # Check if audio was already downloaded (caching)
-        existing_mp3s = list(output_dir.glob("*.mp3"))
-        audio_path: Path | None = existing_mp3s[0] if existing_mp3s else None
-        if audio_path is not None:
+        # Check if audio was already downloaded by yt-dlp (uses %(id)s template)
+        yt_dlp_mp3s = [
+            p
+            for p in output_dir.glob("*.mp3")
+            if not p.stem.startswith("podcast_")  # skip user files
+        ]
+        audio_path: Path
+        if yt_dlp_mp3s:
+            audio_path = yt_dlp_mp3s[0]
             print(f"Audio already exists: {audio_path} (delete to re-download)")
         else:
             print("Downloading with yt-dlp...")
@@ -131,22 +164,15 @@ def _run_pipeline(
         json_path = output_dir / f"{stem}.json"
         transcript_source = "whisper-ctranslate2"
 
-        if json_path.exists():
-            print(f"Transcript JSON already exists: {json_path} (delete to re-transcribe)")
-        else:
-            print(
-                f"Transcribing with whisper-ctranslate2 "
-                f"(model={whisper_model}, lang={whisper_lang},"
-                f" device={whisper_device})..."
-            )
-            transcribe(
-                audio_path=audio_path,
-                output_dir=output_dir,
-                model=whisper_model,
-                lang=whisper_lang,
-                device=whisper_device,
-                hf_token=hf_token,
-            )
+        _transcribe_if_needed(
+            audio_path=audio_path,
+            json_path=json_path,
+            output_dir=output_dir,
+            whisper_model=whisper_model,
+            whisper_lang=whisper_lang,
+            whisper_device=whisper_device,
+            hf_token=hf_token,
+        )
 
     else:
         audio_path = Path(input_arg).resolve()
@@ -161,22 +187,15 @@ def _run_pipeline(
         json_path = output_dir / f"{stem}.json"
         transcript_source = "whisper-ctranslate2"
 
-        if json_path.exists():
-            print(f"Transcript JSON already exists: {json_path} (delete to re-transcribe)")
-        else:
-            print(
-                f"Transcribing with whisper-ctranslate2 "
-                f"(model={whisper_model}, lang={whisper_lang},"
-                f" device={whisper_device})..."
-            )
-            transcribe(
-                audio_path=audio_path,
-                output_dir=output_dir,
-                model=whisper_model,
-                lang=whisper_lang,
-                device=whisper_device,
-                hf_token=hf_token,
-            )
+        _transcribe_if_needed(
+            audio_path=audio_path,
+            json_path=json_path,
+            output_dir=output_dir,
+            whisper_model=whisper_model,
+            whisper_lang=whisper_lang,
+            whisper_device=whisper_device,
+            hf_token=hf_token,
+        )
 
     # --- Generate chapters (optional) ---
     chapters_path = output_dir / f"{stem}_chapters.json"
