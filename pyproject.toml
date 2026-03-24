@@ -40,6 +40,7 @@ line-length = 100
 select = ["E", "F", "W", "I", "N", "UP", "B", "A", "SIM", "TCH"]
 
 [tool.pytest.ini_options]
+pythonpath = ["src"]
 markers = [
     "integration: tests that download from the internet or require external tools",
 ]
