@@ -11,7 +11,7 @@ if TYPE_CHECKING:
 
 import pytest
 
-from podcast_reader.cli import InputType, _run_pipeline, classify_input
+from podcast_reader.cli import InputType, _find_ytdlp_marker, _run_pipeline, classify_input
 
 _SAMPLE_SEGMENTS = {
     "segments": [
@@ -298,6 +298,48 @@ class TestRunPipelineURL:
         mock_build_html.assert_called_once()
 
     @patch("podcast_reader.cli._wsl_path", return_value=None)
+    @patch("podcast_reader.cli.build_html", return_value="<html>redownload</html>")
+    @patch("podcast_reader.cli.transcribe")
+    @patch("podcast_reader.cli.download_audio")
+    def test_redownloads_when_mp3_deleted_but_marker_remains(
+        self,
+        mock_download: MagicMock,
+        mock_transcribe: MagicMock,
+        mock_build_html: MagicMock,
+        _mock_wsl: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        # Orphaned marker — mp3 was deleted by user
+        (tmp_path / "video_id.ytdlp").write_text("https://x.com/user/status/123456")
+        # No video_id.mp3
+
+        audio_path = tmp_path / "video_id.mp3"
+
+        def fake_download(url: str, out_dir: Path, *, cookies: Path | None = None) -> Path:
+            audio_path.write_text("fake audio")
+            return audio_path
+
+        mock_download.side_effect = fake_download
+
+        json_path = tmp_path / "video_id.json"
+
+        def write_json(**kwargs: object) -> None:
+            json_path.write_text(json.dumps(_SAMPLE_SEGMENTS))
+
+        mock_transcribe.side_effect = write_json
+
+        kwargs = _pipeline_defaults(
+            input_arg="https://x.com/user/status/123456",
+            output_dir=tmp_path,
+        )
+        _run_pipeline(**kwargs)
+
+        mock_download.assert_called_once()
+        # Orphaned marker should have been cleaned up by _find_ytdlp_marker
+        # and a new one created by download_audio
+        assert (tmp_path / "video_id.html").exists()
+
+    @patch("podcast_reader.cli._wsl_path", return_value=None)
     @patch("podcast_reader.cli.build_html", return_value="<html></html>")
     @patch("podcast_reader.cli.transcribe")
     @patch("podcast_reader.cli.download_audio")
@@ -360,6 +402,47 @@ class TestRunPipelineURL:
         # Should fall back to stem-derived title
         call_args = mock_build_html.call_args
         assert call_args[0][1] == "Video Id"
+
+
+class TestFindYtdlpMarker:
+    """Tests for the _find_ytdlp_marker helper."""
+
+    def test_matches_by_url(self, tmp_path: Path) -> None:
+        url = "https://x.com/user/status/111"
+        (tmp_path / "abc.ytdlp").write_text(url)
+        (tmp_path / "abc.mp3").write_text("audio")
+
+        result = _find_ytdlp_marker(tmp_path, url)
+        assert result == tmp_path / "abc.ytdlp"
+
+    def test_ignores_marker_with_different_url(self, tmp_path: Path) -> None:
+        (tmp_path / "abc.ytdlp").write_text("https://x.com/other/status/999")
+        (tmp_path / "abc.mp3").write_text("audio")
+
+        result = _find_ytdlp_marker(tmp_path, "https://x.com/user/status/111")
+        assert result is None
+
+    def test_selects_correct_marker_among_multiple(self, tmp_path: Path) -> None:
+        (tmp_path / "aaa.ytdlp").write_text("https://x.com/other")
+        (tmp_path / "aaa.mp3").write_text("audio")
+        (tmp_path / "bbb.ytdlp").write_text("https://x.com/target")
+        (tmp_path / "bbb.mp3").write_text("audio")
+
+        result = _find_ytdlp_marker(tmp_path, "https://x.com/target")
+        assert result == tmp_path / "bbb.ytdlp"
+
+    def test_removes_orphaned_marker(self, tmp_path: Path) -> None:
+        orphan = tmp_path / "deleted.ytdlp"
+        orphan.write_text("https://x.com/gone")
+        # No corresponding .mp3
+
+        result = _find_ytdlp_marker(tmp_path, "https://x.com/gone")
+        assert result is None
+        assert not orphan.exists(), "Orphaned marker should be cleaned up"
+
+    def test_returns_none_when_no_markers(self, tmp_path: Path) -> None:
+        result = _find_ytdlp_marker(tmp_path, "https://x.com/user/status/111")
+        assert result is None
 
 
 class TestRunPipelineLocalFile:
