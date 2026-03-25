@@ -147,15 +147,11 @@ def _run_pipeline(
             except RuntimeError:
                 title = None  # will derive from stem later
 
-        # Check if audio was already downloaded by yt-dlp (uses %(id)s template)
-        yt_dlp_mp3s = [
-            p
-            for p in output_dir.glob("*.mp3")
-            if not p.stem.startswith("podcast_")  # skip user files
-        ]
+        # Check for a .ytdlp marker left by a previous download
+        ytdlp_markers = list(output_dir.glob("*.ytdlp"))
         audio_path: Path
-        if yt_dlp_mp3s:
-            audio_path = yt_dlp_mp3s[0]
+        if ytdlp_markers and ytdlp_markers[0].with_suffix(".mp3").exists():
+            audio_path = ytdlp_markers[0].with_suffix(".mp3")
             print(f"Audio already exists: {audio_path} (delete to re-download)")
         else:
             print("Downloading with yt-dlp...")

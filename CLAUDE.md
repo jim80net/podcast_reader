@@ -26,8 +26,8 @@ podcast-reader --output-dir ./output https://example.com/video
 Requires: Python 3.10+, `uv`, NVIDIA GPU (optional, falls back to CPU).
 
 ```bash
-# Development
-uv sync --dev
+# Development (includes anthropic for chapter generation)
+uv sync --extra dev --extra chapters
 
 # Run directly
 uv run podcast-reader <url-or-file> [title]

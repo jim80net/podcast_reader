@@ -55,4 +55,10 @@ def download_audio(url: str, output_dir: Path, cookies: Path | None = None) -> P
     mp3_files = sorted(output_dir.glob("*.mp3"), key=lambda p: p.stat().st_mtime, reverse=True)
     if not mp3_files:
         raise RuntimeError(f"yt-dlp completed but no mp3 file found in {output_dir}")
-    return mp3_files[0]
+    audio_path = mp3_files[0]
+
+    # Write a marker so cache lookup can identify yt-dlp downloads unambiguously
+    marker = audio_path.with_suffix(".ytdlp")
+    marker.write_text(url)
+
+    return audio_path
