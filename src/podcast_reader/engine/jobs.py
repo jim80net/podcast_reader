@@ -87,10 +87,15 @@ class JobStore:
             return [copy.deepcopy(record) for record in self._jobs.values()]
 
     def start_worker(self) -> None:
-        """Start the single worker thread (idempotent)."""
+        """Start the single worker thread (idempotent; restartable after shutdown).
+
+        Clears the stop event so a store restarted after :meth:`shutdown`
+        processes jobs again instead of exiting on its first dequeue.
+        """
         with self._lock:
             if self._worker is not None:
                 return
+            self._stop.clear()
             self._worker = threading.Thread(target=self._work_loop, name="job-worker", daemon=True)
             self._worker.start()
 
@@ -134,10 +139,14 @@ class JobStore:
     def _work_loop(self) -> None:
         while True:
             job_id = self._queue.get()
-            if self._stop.is_set() or job_id is None:
+            if self._stop.is_set():
                 # On stop, a dequeued job is left untouched: it is still
                 # ``queued`` in the journal, so recovery re-enqueues it.
                 return
+            if job_id is None:
+                # Stale wake-up sentinel from a previous shutdown (the exiting
+                # worker dequeued a job id instead); not an exit signal now.
+                continue
             try:
                 self._run_job(job_id)
             except Exception as exc:  # the only worker must survive anything
