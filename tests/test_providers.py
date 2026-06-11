@@ -100,6 +100,8 @@ class TestCustomUrlValidation:
             "ftp://example.com",
             "not-a-url",
             "",
+            "https://",  # scheme without a hostname
+            "https:///v1",  # empty hostname, path only
         ],
     )
     def test_rejects_everything_else(self, url: str) -> None:

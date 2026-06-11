@@ -357,12 +357,16 @@ def create_app(
             raise HTTPException(
                 status_code=400, detail=f"unknown chapter provider: {body.chapter_provider!r}"
             )
-        if body.custom_provider_url:
+        # Validate the EFFECTIVE values (body merged over current settings):
+        # the custom provider needs a non-empty, valid base URL no matter
+        # whether it arrives in this PUT or was persisted earlier, and any
+        # explicitly supplied URL must be valid regardless of provider.
+        settings = body.to_settings(load_settings(data_dir))
+        if settings["chapter_provider"] == "custom" or settings["custom_provider_url"]:
             try:
-                validate_custom_url(body.custom_provider_url)
+                validate_custom_url(settings["custom_provider_url"])
             except ValueError as exc:
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
-        settings = body.to_settings(load_settings(data_dir))
         save_settings(data_dir, settings)
         return settings
 
