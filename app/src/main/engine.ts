@@ -200,16 +200,22 @@ async function stopStale(
   const timeoutMs = deps.staleStopTimeoutMs ?? DEFAULT_STALE_STOP_TIMEOUT_MS
   const waitOpts = { timeoutMs, isAlive: deps.isAlive, sleep: deps.sleep }
   if (token !== null) {
+    let accepted = false
     try {
-      await deps.fetchFn(`http://127.0.0.1:${discovery.port}/v1/shutdown`, {
+      const res = await deps.fetchFn(`http://127.0.0.1:${discovery.port}/v1/shutdown`, {
         method: 'POST',
         headers: { authorization: `Bearer ${token}` },
         signal: AbortSignal.timeout(deps.healthTimeoutMs ?? 3000)
       })
+      // Only a 202 means the engine accepted the shutdown (the documented
+      // 202-then-exit contract). On anything else (401/404/503) it will
+      // never exit on its own — skip the graceful wait, go straight to
+      // force-kill.
+      accepted = res.status === 202
     } catch {
       // unresponsive: fall through to force-kill
     }
-    if (await waitForPidExit(discovery.pid, waitOpts)) return
+    if (accepted && (await waitForPidExit(discovery.pid, waitOpts))) return
   }
   deps.killPid(discovery.pid)
   if (!(await waitForPidExit(discovery.pid, waitOpts))) {

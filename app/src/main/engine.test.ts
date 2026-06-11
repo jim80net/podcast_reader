@@ -43,6 +43,7 @@ function makeWorld(opts: {
   staleHealthStatus?: number
   childBehavior?: 'ready' | 'exit' | 'silent'
   pidDiesAfterShutdownPost?: boolean
+  shutdownStatus?: number
 }): World {
   const files = new Map<string, string>()
   if (opts.discovery !== undefined) {
@@ -67,7 +68,7 @@ function makeWorld(opts: {
     if (url.endsWith('/v1/shutdown') && init?.method === 'POST') {
       shutdownPosts.push(url)
       if (opts.pidDiesAfterShutdownPost) stalePidAlive = false
-      return new Response(null, { status: 202 })
+      return new Response(null, { status: opts.shutdownStatus ?? 202 })
     }
     if (url.endsWith('/v1/health')) {
       if (opts.staleHealthStatus !== undefined && stalePidAlive) {
@@ -192,6 +193,22 @@ describe('ensureEngine — adopt', () => {
     expect(world.killedPids).toEqual([])
     expect(handle.adopted).toBe(false)
     expect(world.spawns).toHaveLength(1)
+  })
+
+  it('skips the graceful wait and force-kills when the shutdown POST is rejected (non-202)', async () => {
+    // The stale pid dies right after the rejected POST — if the supervisor
+    // wrongly credited a non-202 response as an accepted shutdown, it would
+    // see that exit during the graceful wait and skip the force-kill. Only
+    // a 202 (the documented 202-then-exit contract) earns the wait.
+    const world = makeWorld({
+      discovery: { ...liveDiscovery, version: '0.1.0' },
+      shutdownStatus: 503,
+      pidDiesAfterShutdownPost: true
+    })
+    const handle = await ensureEngine(world.deps)
+    expect(world.shutdownPosts).toHaveLength(1)
+    expect(world.killedPids).toEqual([4242])
+    expect(handle.adopted).toBe(false)
   })
 
   it('force-kills an old engine that ignores graceful shutdown', async () => {
