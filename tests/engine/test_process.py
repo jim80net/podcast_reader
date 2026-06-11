@@ -16,10 +16,12 @@ from unittest.mock import MagicMock, patch
 import httpx
 import pytest
 
+from podcast_reader.engine.jobs import JobStore
 from podcast_reader.engine.library import entry_dir, list_entries, source_identity
 from podcast_reader.engine.process import (
     READY_SENTINEL,
     bind_engine_socket,
+    bind_socket_option,
     make_pipeline_runner,
     popen_kwargs,
     remove_discovery,
@@ -101,6 +103,15 @@ class TestBindAndDiscovery:
                 sock.close()
         finally:
             blocker.close()
+
+    def test_bind_socket_option_is_platform_selected(self) -> None:
+        """POSIX uses SO_REUSEADDR (TIME_WAIT rebinding; live listeners still
+        EADDRINUSE). Windows must not: SO_REUSEADDR there allows binding an
+        actively-bound port, defeating the fallback — SO_EXCLUSIVEADDRUSE instead."""
+        assert bind_socket_option("linux") == socket.SO_REUSEADDR
+        assert bind_socket_option("darwin") == socket.SO_REUSEADDR
+        assert bind_socket_option("win32") != socket.SO_REUSEADDR
+        assert bind_socket_option("win32") == ~4  # winsock SO_EXCLUSIVEADDRUSE
 
     def test_discovery_removed_on_close(self, tmp_path: Path) -> None:
         state = load_engine_state(tmp_path)
@@ -256,6 +267,21 @@ class TestPipelineRunner:
         assert [e["source_id"] for e in entries] == [source_id]
         assert entries[0]["html_path"] == str(edir / "ep.html")
         assert entries[0]["title"] == "Episode"
+
+    def test_missing_local_file_fails_with_structured_not_found(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A nonexistent local source must fail code="not_found", not "internal"."""
+        monkeypatch.setenv("PODCAST_READER_DATA_DIR", str(tmp_path))
+        store = JobStore(tmp_path, make_pipeline_runner(tmp_path))
+        record = store.submit(str(tmp_path / "missing.mp3"), None)
+        store.start_worker()
+        assert _wait_for(lambda: store.get(record["id"])["state"] == "failed")
+        error = store.get(record["id"])["error"]
+        assert error is not None
+        assert error["code"] == "not_found"
+        assert "File not found" in error["message"]
+        store.shutdown()
 
 
 class TestServeSmoke:

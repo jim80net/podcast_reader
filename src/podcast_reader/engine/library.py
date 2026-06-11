@@ -28,15 +28,23 @@ STAGING_DIR_NAME = "staging"
 _INDEX_LOCK = threading.Lock()
 
 
+_HASH_CHUNK_SIZE = 1024 * 1024  # 1 MiB
+
+
 def source_identity(source: str) -> str:
     """Stable identity for a source: sha256 of the URL, or of file bytes locally.
 
     Keying local files by content means two different files that happen to share
-    a name (``episode.mp3``) can never collide in the library.
+    a name (``episode.mp3``) can never collide in the library. Local files are
+    hashed in 1 MiB chunks so large media never loads into memory whole.
     """
     if source.startswith(("http://", "https://")):
         return hashlib.sha256(source.encode()).hexdigest()
-    return hashlib.sha256(Path(source).read_bytes()).hexdigest()
+    digest = hashlib.sha256()
+    with Path(source).open("rb") as fh:
+        for chunk in iter(lambda: fh.read(_HASH_CHUNK_SIZE), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def entry_dir(library_dir: Path, source_id: str) -> Path:

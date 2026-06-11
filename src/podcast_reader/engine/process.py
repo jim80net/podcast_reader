@@ -15,7 +15,6 @@ engine joins a Job Object with kill-on-job-close at startup so children
 
 from __future__ import annotations
 
-import json
 import os
 import socket
 import sys
@@ -29,6 +28,7 @@ from podcast_reader.engine import library
 from podcast_reader.engine.app import create_app
 from podcast_reader.engine.jobs import JobStore
 from podcast_reader.engine.settings import (
+    atomic_write_json,
     data_dir,
     engine_version,
     load_engine_state,
@@ -36,7 +36,7 @@ from podcast_reader.engine.settings import (
     save_engine_state,
     token_fingerprint,
 )
-from podcast_reader.pipeline import run_pipeline
+from podcast_reader.pipeline import PipelineError, run_pipeline
 from podcast_reader.tools import (
     kill_children,
     popen_kwargs,  # re-export: spawn-time child options
@@ -54,6 +54,7 @@ __all__ = [
     "DiscoveryInfo",
     "READY_SENTINEL",
     "bind_engine_socket",
+    "bind_socket_option",
     "make_pipeline_runner",
     "popen_kwargs",
     "remove_discovery",
@@ -74,6 +75,22 @@ class DiscoveryInfo(TypedDict):
     version: str
 
 
+def bind_socket_option(platform: str = sys.platform) -> int:
+    """``SOL_SOCKET`` option for the engine bind, selected per platform.
+
+    POSIX: ``SO_REUSEADDR`` allows immediate rebinding of a ``TIME_WAIT`` port
+    while a live listener still fails ``EADDRINUSE`` (preserving the
+    ephemeral-port fallback). Windows: ``SO_REUSEADDR`` there allows binding an
+    actively-bound port, which would defeat the fallback — use
+    ``SO_EXCLUSIVEADDRUSE`` instead.
+    """
+    if platform == "win32":
+        # Only Windows builds of CPython expose socket.SO_EXCLUSIVEADDRUSE;
+        # its winsock value is ~SO_REUSEADDR == ~4 (WinSock2.h).
+        return int(getattr(socket, "SO_EXCLUSIVEADDRUSE", ~4))
+    return int(socket.SO_REUSEADDR)
+
+
 def bind_engine_socket(base: Path, state: EngineState) -> socket.socket:
     """Bind (and listen on) the engine socket, persisting the real port.
 
@@ -83,7 +100,7 @@ def bind_engine_socket(base: Path, state: EngineState) -> socket.socket:
     uvicorn starts accepting — the advertised port is live immediately.
     """
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.setsockopt(socket.SOL_SOCKET, bind_socket_option(), 1)
     try:
         sock.bind(("127.0.0.1", state["port"]))
     except OSError:
@@ -108,10 +125,7 @@ def write_discovery(path: Path, state: EngineState, sock: socket.socket) -> None
         token_fingerprint=token_fingerprint(state["token"]),
         version=engine_version(),
     )
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(info, indent=2))
-    os.chmod(tmp, 0o600)
-    os.replace(tmp, path)
+    atomic_write_json(path, info, mode=0o600)
     print(READY_SENTINEL, flush=True)
 
 
@@ -132,7 +146,16 @@ def make_pipeline_runner(base: Path) -> JobRunner:
     def run(record: JobRecord, on_event: Callable[[PipelineEvent], None]) -> PipelineResult:
         settings = load_settings(base)  # snapshot at dequeue
         library_dir = Path(settings["library_dir"])
-        source_id = library.source_identity(record["source"])
+        source = record["source"]
+        # Stat-check local sources before hashing them for identity, so a bad
+        # path fails structured ("not_found"), not as an internal error.
+        if not source.startswith(("http://", "https://")) and not Path(source).is_file():
+            raise PipelineError(
+                "not_found",
+                f"File not found: {source}",
+                "Check the path and try again.",
+            )
+        source_id = library.source_identity(source)
         staging = library.staging_dir(library_dir, source_id)
         staging.mkdir(parents=True, exist_ok=True)
 

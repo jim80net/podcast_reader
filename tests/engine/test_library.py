@@ -42,6 +42,14 @@ class TestSourceIdentity:
         audio.write_bytes(b"audio bytes")
         assert source_identity(str(audio)) == hashlib.sha256(b"audio bytes").hexdigest()
 
+    def test_large_local_file_chunked_hash_matches_full_digest(self, tmp_path: Path) -> None:
+        """Files larger than one hash chunk (1 MiB) produce the same identity
+        as a whole-content sha256."""
+        payload = bytes(range(256)) * (10 * 1024)  # 2.5 MiB, > 2 chunks
+        audio = tmp_path / "big.mp3"
+        audio.write_bytes(payload)
+        assert source_identity(str(audio)) == hashlib.sha256(payload).hexdigest()
+
     def test_same_named_local_files_do_not_collide(self, tmp_path: Path) -> None:
         a_dir = tmp_path / "a"
         b_dir = tmp_path / "b"

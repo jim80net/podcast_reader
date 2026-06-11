@@ -102,10 +102,25 @@ def engine_version() -> str:
 
 
 def atomic_write_json(path: Path, payload: object, *, mode: int | None = None) -> None:
-    """Write *payload* as JSON via temp file + ``os.replace`` under the module lock."""
+    """Write *payload* as JSON via temp file + ``os.replace`` under the module lock.
+
+    With *mode*, the temp file is created with that mode applied at ``os.open``
+    time (``O_CREAT | O_EXCL``), so the payload is never readable by other
+    users, even transiently.
+    """
     tmp = path.with_suffix(path.suffix + ".tmp")
+    data = json.dumps(payload, indent=2)
     with _WRITE_LOCK:
-        tmp.write_text(json.dumps(payload, indent=2))
-        if mode is not None:
-            os.chmod(tmp, mode)
+        if mode is None:
+            tmp.write_text(data)
+        else:
+            _secure_write_text(tmp, data, mode)
         os.replace(tmp, path)
+
+
+def _secure_write_text(path: Path, data: str, mode: int) -> None:
+    """Create *path* carrying *mode* from the moment it exists, then write *data*."""
+    path.unlink(missing_ok=True)  # a temp file left by a crash would trip O_EXCL
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode)
+    with os.fdopen(fd, "w") as fh:
+        fh.write(data)

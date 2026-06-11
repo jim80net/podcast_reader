@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
+import os
 import stat
 from typing import TYPE_CHECKING
 
 from podcast_reader.engine.settings import (
+    EngineState,
     data_dir,
     load_engine_state,
     load_settings,
@@ -56,6 +58,33 @@ class TestEngineState:
         save_engine_state(tmp_path, state)
         assert load_engine_state(tmp_path)["port"] == 4242
         assert stat.S_IMODE((tmp_path / "engine-state.json").stat().st_mode) == 0o600
+
+
+class TestSecureWrites:
+    def test_engine_state_tmp_created_0600_at_open(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The temp file must carry mode 0600 from the moment it exists
+        (O_CREAT|O_EXCL with the mode at open) — no chmod-later window."""
+        observed: list[tuple[bool, int]] = []
+        real_open = os.open
+
+        def spy(path: str, flags: int, mode: int = 0o777) -> int:
+            fd = real_open(path, flags, mode)
+            observed.append((bool(flags & os.O_EXCL), stat.S_IMODE(os.fstat(fd).st_mode)))
+            return fd
+
+        monkeypatch.setattr("podcast_reader.engine.settings.os.open", spy)
+        save_engine_state(tmp_path, EngineState(port=1, token="t" * 43))
+        assert observed == [(True, 0o600)]
+        assert stat.S_IMODE((tmp_path / "engine-state.json").stat().st_mode) == 0o600
+
+    def test_stale_tmp_file_does_not_break_secure_write(self, tmp_path: Path) -> None:
+        """A temp file left by a crash must not trip O_EXCL on the next write."""
+        (tmp_path / "engine-state.json.tmp").write_text("stale")
+        save_engine_state(tmp_path, EngineState(port=7, token="t" * 43))
+        assert load_engine_state(tmp_path)["port"] == 7
+        assert list(tmp_path.glob("*.tmp")) == []
 
 
 class TestUserSettings:
