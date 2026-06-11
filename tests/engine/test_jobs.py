@@ -372,11 +372,11 @@ class TestSubscriptions:
         record = store.submit("https://example.com/a", None)
         store.start_worker()
         assert _wait_for(lambda: store.get(record["id"])["state"] == "done")
+        store.shutdown()  # quiesce the worker before inspecting the queue
         assert q.full()
         first = q.get(timeout=1)
         # oldest events were dropped, so the queue no longer starts at "0"
         assert first["message"] != "0"
-        store.shutdown()
 
     def test_subscriber_full_for_streak_limit_is_pruned(self, tmp_path: Path) -> None:
         """A queue that stays full for SUBSCRIBER_FULL_STREAK_LIMIT consecutive
