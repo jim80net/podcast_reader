@@ -1,5 +1,6 @@
 import { CHANNELS } from '../shared/ipc'
 import type { EngineManager } from './engine-manager'
+import type { UpdateStatus } from '../shared/ipc'
 import type { SettingsUpdate } from '../shared/types'
 
 /**
@@ -16,7 +17,17 @@ export interface IpcMainLike {
   handle(channel: string, listener: (event: any, ...args: any[]) => unknown): void
 }
 
-export function registerIpcHandlers(ipcMain: IpcMainLike, manager: EngineManager): void {
+/** The renderer-facing slice of the auto-updater (UpdaterController or the disabled gate). */
+export interface UpdaterAccess {
+  status(): UpdateStatus
+  installNow(): Promise<void>
+}
+
+export function registerIpcHandlers(
+  ipcMain: IpcMainLike,
+  manager: EngineManager,
+  updates: UpdaterAccess
+): void {
   const client = () => {
     const c = manager.client
     if (c === null) throw new Error('engine is not ready')
@@ -58,4 +69,7 @@ export function registerIpcHandlers(ipcMain: IpcMainLike, manager: EngineManager
     client().testKey(provider, apiKey)
   )
   ipcMain.handle(CHANNELS.providersList, () => client().listProviders())
+
+  ipcMain.handle(CHANNELS.updateGetStatus, () => updates.status())
+  ipcMain.handle(CHANNELS.updateInstall, () => updates.installNow())
 }

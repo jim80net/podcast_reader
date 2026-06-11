@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 
 import { CHANNELS, PUSH_CHANNELS } from '../shared/ipc'
-import type { EngineStatus, PodcastReaderApi } from '../shared/ipc'
+import type { EngineStatus, PodcastReaderApi, UpdateStatus } from '../shared/ipc'
 import type { JobRecord, PipelineEvent, SettingsUpdate } from '../shared/types'
 
 /**
@@ -33,6 +33,8 @@ const api: PodcastReaderApi = {
   keyStorageMode: () => ipcRenderer.invoke(CHANNELS.keysStorageMode),
   listProviders: () => ipcRenderer.invoke(CHANNELS.providersList),
   getPathForFile: (file) => webUtils.getPathForFile(file),
+  getUpdateStatus: () => ipcRenderer.invoke(CHANNELS.updateGetStatus),
+  installUpdate: () => ipcRenderer.invoke(CHANNELS.updateInstall),
   onEngineStatus: (listener: (status: EngineStatus) => void) =>
     subscribe(PUSH_CHANNELS.engineStatus, listener),
   onPipelineEvent: (listener: (event: PipelineEvent) => void) =>
@@ -40,7 +42,9 @@ const api: PodcastReaderApi = {
   onJobsHydrated: (listener: (jobs: JobRecord[]) => void) =>
     subscribe(PUSH_CHANNELS.jobsHydrated, listener),
   onProtocolRequest: (listener: (job: JobRecord) => void) =>
-    subscribe(PUSH_CHANNELS.protocolRequest, listener)
+    subscribe(PUSH_CHANNELS.protocolRequest, listener),
+  onUpdateStatus: (listener: (status: UpdateStatus) => void) =>
+    subscribe(PUSH_CHANNELS.updateStatus, listener)
 }
 
 contextBridge.exposeInMainWorld('api', api)

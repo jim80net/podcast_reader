@@ -1,7 +1,8 @@
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 
-import { BrowserWindow, app, ipcMain, safeStorage } from 'electron'
+import { BrowserWindow, app, dialog, ipcMain, safeStorage } from 'electron'
+import { autoUpdater } from 'electron-updater'
 
 import { resolveDataDir } from './data-dir'
 import { defaultSupervisorDeps, ensureEngine } from './engine'
@@ -10,8 +11,11 @@ import { EngineManager } from './engine-manager'
 import { registerIpcHandlers } from './ipc'
 import { parseProtocolUrl, selectProtocolArgv } from './protocol'
 import { pidIsAlive } from './quit'
+import { BUILD_SIGNED, UpdaterController, updaterGate } from './updater'
 import { KeyVault } from './vault'
 import { PUSH_CHANNELS } from '../shared/ipc'
+import type { UpdaterAccess } from './ipc'
+import type { UpdateStatus } from '../shared/ipc'
 
 /**
  * Electron main entry: thin glue binding the tested modules to the app
@@ -33,6 +37,15 @@ function broadcast(channel: string, payload: unknown): void {
 let manager: EngineManager | null = null
 let mainWindow: BrowserWindow | null = null
 let quitting = false
+let updater: UpdaterController | null = null
+let updaterDisabled: UpdateStatus = { state: 'disabled', reason: 'updater not initialized' }
+
+// Test/portable seam: an explicit userData override keeps the vault and the
+// single-instance lock (which keys off userData) isolated per run.
+const userDataOverride = process.env['PODCAST_READER_USER_DATA_DIR']
+if (userDataOverride !== undefined && userDataOverride !== '') {
+  app.setPath('userData', resolve(userDataOverride))
+}
 
 // ---- single instance + protocol registration (per P8) ----------------------
 
@@ -96,7 +109,7 @@ async function start(): Promise<void> {
     sleep: supervisorDeps.sleep,
     log
   })
-  registerIpcHandlers(ipcMain, manager)
+  registerIpcHandlers(ipcMain, manager, setupUpdater())
 
   createWindow()
   await manager.start()
@@ -104,6 +117,49 @@ async function start(): Promise<void> {
   // Windows cold-start protocol launch: the URL arrives in our own argv.
   const raw = selectProtocolArgv(process.argv)
   if (raw !== null) void handleProtocolUrl(raw)
+}
+
+// ---- auto-update (design decisions 9, 10) -----------------------------------
+
+function setupUpdater(): UpdaterAccess {
+  const gate = updaterGate({
+    isPackaged: app.isPackaged,
+    buildSigned: BUILD_SIGNED,
+    env: process.env as Record<string, string | undefined>
+  })
+  if (gate.enabled) {
+    updater = new UpdaterController({
+      autoUpdater,
+      confirm: async (version) => {
+        const result = await dialog.showMessageBox({
+          type: 'info',
+          title: 'Update ready',
+          message: `Podcast Reader ${version} has been downloaded.`,
+          detail: 'Restart now to install? The local engine is shut down first.',
+          buttons: ['Restart and install', 'Later'],
+          defaultId: 0,
+          cancelId: 1
+        })
+        return result.response === 0
+      },
+      quitEngine: async () => {
+        // quitAndInstall re-enters before-quit; the flag stops that handler
+        // from preventDefault-ing the install.
+        quitting = true
+        await manager?.quit()
+      },
+      send: broadcast,
+      log
+    })
+    updater.start()
+  } else {
+    updaterDisabled = { state: 'disabled', reason: gate.reason }
+    log(`auto-update: ${gate.reason}`)
+  }
+  return {
+    status: () => updater?.status ?? updaterDisabled,
+    installNow: () => updater?.installNow() ?? Promise.resolve()
+  }
 }
 
 function createWindow(): void {

@@ -116,6 +116,13 @@ body {
   border-radius: 8px;
 }
 
+.update-banner {
+  background: color-mix(in srgb, var(--accent, #4a8fd4) 12%, transparent);
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
 .view {
   display: flex;
   flex-direction: column;

@@ -30,7 +30,9 @@ export const CHANNELS = {
   keysPut: 'keys:put',
   keysTest: 'keys:test',
   keysStorageMode: 'keys:storage-mode',
-  providersList: 'providers:list'
+  providersList: 'providers:list',
+  updateGetStatus: 'update:get-status',
+  updateInstall: 'update:install'
 } as const
 
 /** Main → renderer push channels (`webContents.send`). */
@@ -42,7 +44,9 @@ export const PUSH_CHANNELS = {
   /** Full job list after every SSE (re)connect — records are the source of truth. */
   jobsHydrated: 'jobs:hydrated',
   /** A validated podcast-reader:// request landed as an awaiting-confirmation job. */
-  protocolRequest: 'protocol:request'
+  protocolRequest: 'protocol:request',
+  /** Auto-update lifecycle (UpdateStatus) from the main-process UpdaterController. */
+  updateStatus: 'update:status'
 } as const
 
 export type EngineStatus =
@@ -50,6 +54,21 @@ export type EngineStatus =
   | { state: 'ready'; port: number; version: string; adopted: boolean; pid: number }
   | { state: 'failed'; message: string }
   | { state: 'stopped' }
+
+/**
+ * Auto-update lifecycle (design decision 9): background download, consent
+ * prompt, engine-quit-then-install. `disabled` carries the gate reason
+ * (dev run / unsigned build — see `updaterGate`).
+ */
+export type UpdateStatus =
+  | { state: 'disabled'; reason: string }
+  | { state: 'idle' }
+  | { state: 'checking' }
+  | { state: 'downloading'; version: string }
+  | { state: 'ready'; version: string }
+  | { state: 'deferred'; version: string }
+  | { state: 'installing'; version: string }
+  | { state: 'error'; message: string }
 
 /** What the preload bridge exposes as `window.api`. */
 export interface PodcastReaderApi {
@@ -74,8 +93,12 @@ export interface PodcastReaderApi {
   listProviders(): Promise<ProviderInfo[]>
   /** Resolve a dropped File's real filesystem path (webUtils.getPathForFile). */
   getPathForFile(file: File): string
+  getUpdateStatus(): Promise<UpdateStatus>
+  /** Apply a downloaded update now (quit sequence first, then quitAndInstall). */
+  installUpdate(): Promise<void>
   onEngineStatus(listener: (status: EngineStatus) => void): () => void
   onPipelineEvent(listener: (event: PipelineEvent) => void): () => void
   onJobsHydrated(listener: (jobs: JobRecord[]) => void): () => void
   onProtocolRequest(listener: (job: JobRecord) => void): () => void
+  onUpdateStatus(listener: (status: UpdateStatus) => void): () => void
 }

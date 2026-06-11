@@ -9,7 +9,7 @@ import { mountReader } from './views/reader'
 import { mountSettings } from './views/settings'
 import type { Route } from './router'
 import type { ViewCleanup } from './store'
-import type { EngineStatus } from '../../shared/ipc'
+import type { EngineStatus, UpdateStatus } from '../../shared/ipc'
 
 /**
  * Renderer shell (task 4.1): hash router between the four views, an
@@ -35,6 +35,8 @@ const enginePill = el('span', {
 })
 const engineBanner = el('div', { class: 'banner error-banner', attrs: { role: 'alert' } })
 engineBanner.hidden = true
+const updateBanner = el('div', { class: 'banner update-banner', attrs: { role: 'status' } })
+updateBanner.hidden = true
 
 const viewContainer = el('main', { class: 'view', attrs: { id: 'view' } })
 
@@ -49,6 +51,7 @@ root.append(
     enginePill
   ),
   engineBanner,
+  updateBanner,
   viewContainer
 )
 
@@ -74,6 +77,48 @@ function renderEngineStatus(status: EngineStatus): void {
       break
   }
 }
+
+// ---- auto-update surfacing (design decision 9) -----------------------------------
+
+function renderUpdateStatus(status: UpdateStatus): void {
+  updateBanner.replaceChildren()
+  updateBanner.hidden = true
+  switch (status.state) {
+    case 'downloading':
+      updateBanner.append(el('span', { text: `Downloading update v${status.version}…` }))
+      updateBanner.hidden = false
+      break
+    case 'ready':
+    case 'deferred': {
+      const install = el('button', { text: 'Restart to update', attrs: { type: 'button' } })
+      install.addEventListener('click', () => {
+        install.disabled = true
+        void window.api.installUpdate()
+      })
+      updateBanner.append(
+        el('span', { text: `Update v${status.version} downloaded.` }),
+        install
+      )
+      updateBanner.hidden = false
+      break
+    }
+    case 'installing':
+      updateBanner.append(el('span', { text: `Installing update v${status.version}…` }))
+      updateBanner.hidden = false
+      break
+    case 'error':
+      updateBanner.append(el('span', { text: `Update check failed: ${status.message}` }))
+      updateBanner.hidden = false
+      break
+    case 'disabled': // quiet — dev/unsigned posture is logged main-side
+    case 'idle':
+    case 'checking':
+      break
+  }
+}
+
+window.api.onUpdateStatus(renderUpdateStatus)
+void window.api.getUpdateStatus().then(renderUpdateStatus)
 
 // ---- IPC push wiring (design decision 4) ----------------------------------------
 
