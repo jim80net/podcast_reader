@@ -19,6 +19,9 @@ podcast-reader ~/Downloads/episode.mp3 "Episode Title"
 
 # Specify output directory
 podcast-reader --output-dir ./output https://example.com/video
+
+# Start the localhost engine (job API + SSE + managed library)
+podcast-reader serve
 ```
 
 ## Setup
@@ -60,7 +63,15 @@ For speaker diarization, set `HF_TOKEN` and accept model terms at:
 | `src/podcast_reader/youtube.py` | Fetch YouTube captions as whisper-compatible JSON |
 | `src/podcast_reader/ytdlp.py` | Download audio from X/Twitter and other platforms via yt-dlp |
 | `src/podcast_reader/transcribe.py` | Run whisper-ctranslate2 on audio files |
-| `src/podcast_reader/tools.py` | Resolve bundled console scripts (yt-dlp, whisper) not on PATH |
+| `src/podcast_reader/tools.py` | Tool resolution (external tools + frozen bundled workers) and spawn kwargs |
+| `src/podcast_reader/types.py` | TypedDict boundaries: PipelineRequest/Event, JobRecord, LibraryEntry, EngineSettings |
+| `src/podcast_reader/pipeline.py` | Shared step runner with progress events (used by CLI and engine) |
+| `src/podcast_reader/engine/settings.py` | Data dir, engine state (port/token), user settings persistence |
+| `src/podcast_reader/engine/library.py` | Managed transcript library: source-identity keys, atomic index, staged writes |
+| `src/podcast_reader/engine/jobs.py` | Persistent job journal, FIFO single-worker execution, SSE fan-out |
+| `src/podcast_reader/engine/app.py` | FastAPI app: bearer auth, jobs/events/library/settings/health routes |
+| `src/podcast_reader/engine/process.py` | Pre-bound socket handshake, discovery file, child reaping, `serve` |
+| `spike/` | Packaging spike evidence (PyInstaller onedir prototype, SPIKE_REPORT.md) |
 | `src/podcast_reader/chapters.py` | Generate chapter markers via Claude |
 | `src/podcast_reader/html.py` | Convert whisper JSON to styled HTML with TOC, key points, pull quotes |
 | `pyproject.toml` | Dependencies, entry point, tool configuration |

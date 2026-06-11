@@ -25,6 +25,9 @@
 *.bin
 *.pt
 
+# yt-dlp download cache markers
+*.ytdlp
+
 # Whisper raw outputs (keep HTML, regenerate from JSON if needed)
 *.json
 

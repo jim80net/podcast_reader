@@ -42,6 +42,20 @@ podcast-reader --output-dir ./output https://example.com/video
 
 If the title is omitted, it is auto-extracted from YouTube or via yt-dlp where possible.
 
+### Engine mode (for apps and integrations)
+
+```bash
+podcast-reader serve [--discovery-file PATH]
+```
+
+Starts a localhost-only HTTP engine (FastAPI) exposing the same pipeline as a job
+API: `POST /v1/jobs`, `GET /v1/jobs/{id}`, SSE progress at `GET /v1/events`, a
+managed transcript library (`~/PodcastReader/` by default), and `GET /v1/health`.
+All endpoints require the bearer token the engine generates on first start
+(`engine-state.json` in the data directory); the port is fixed per install and
+advertised in a discovery file. This is the foundation for the desktop app — see
+`docs/superpowers/specs/2026-06-11-desktop-packaging-design.md`.
+
 ### Output
 
 The pipeline produces (in `--output-dir`, default: current directory):
@@ -117,6 +131,8 @@ For speaker diarization, set `HF_TOKEN` and accept the model terms at:
 | `ANTHROPIC_API_KEY` | _(none)_ | Enables chapter generation via Claude |
 | `SENTENCES` | `5` | Sentences per paragraph in HTML |
 | `YT_DLP_COOKIES` | _(none)_ | Path to cookies file for authenticated yt-dlp downloads |
+| `PODCAST_READER_DATA_DIR` | `~/PodcastReader` | Engine data directory (library, job journal, settings) |
+| `PODCAST_READER_TOOLS_DIR` | _(none)_ | Preferred directory for external tools (yt-dlp, ffmpeg) |
 
 The Claude model used for chapters defaults to `claude-haiku-4-5-20251001` and can be overridden with `--model`.
 
