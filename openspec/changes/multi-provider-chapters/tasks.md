@@ -4,7 +4,7 @@
 
 - [x] 1.1 `src/podcast_reader/providers.py`: `ProviderSpec` TypedDict (`base_url, default_model, key_env, max_tokens`), `PROVIDERS` registry per the design table (verified base URLs/models; deepseek `deepseek-v4-flash` @ 8192, others 16384), custom-URL validation (https or localhost http); unit tests incl. validation scenarios
 - [x] 1.2 Rewrite `chapters.generate_chapters(transcript_text, *, spec, model, api_key)` on httpx `/chat/completions`: bearer auth, `max_tokens=spec["max_tokens"]`, model=None → `spec["default_model"]` (per K2), finish_reason=="length" → truncation error, error messages exclude response bodies (per K4), fence-strip parse unchanged; tests via `httpx.MockTransport` (success, truncation, HTTP error, no-anthropic-import, default-model resolution); key-redaction test on error paths
-- [ ] 1.3 `pyproject.toml`: httpx → core deps, remove anthropic from dependencies AND the dev extra (per K8), `chapters` extra → empty alias; `uv sync` + verify no anthropic import remains (`grep -r "import anthropic" src/`)
+- [x] 1.3 `pyproject.toml`: httpx → core deps, remove anthropic from dependencies AND the dev extra (per K8), `chapters` extra → empty alias; `uv sync` + verify no anthropic import remains (`grep -r "import anthropic" src/`)
 
 ## 2. Pipeline & CLI
 
