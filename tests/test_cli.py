@@ -58,6 +58,91 @@ _SAMPLE_SEGMENTS = {
     ]
 }
 
+_DUMMY_RESULT = PipelineResult(
+    json_path="a.json", chapters_path=None, html_path="a.html", title="T"
+)
+
+
+class TestCliProviderSelection:
+    """Spec: Key resolution and skip semantics + Model precedence (CLI face)."""
+
+    def _captured_request(
+        self, argv: list[str], monkeypatch: pytest.MonkeyPatch
+    ) -> PipelineRequest:
+        """Run the CLI with run_pipeline patched, returning the built request."""
+        with (
+            patch("podcast_reader.cli.run_pipeline", return_value=_DUMMY_RESULT) as mock_run,
+            patch("podcast_reader.cli._wsl_path", return_value=None),
+        ):
+            main_with_args(argv)
+        request: PipelineRequest = mock_run.call_args.args[0]
+        return request
+
+    def test_anthropic_env_var_compatibility(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Spec scenario: ANTHROPIC_API_KEY set, no provider flag — as before."""
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-legacy")
+        request = self._captured_request(["https://example.com/x.mp3", "T"], monkeypatch)
+        assert request["chapter_provider"] == "anthropic"
+        assert request["chapter_api_key"] == "sk-ant-legacy"
+        assert request["model"] is None  # provider default
+
+    def test_no_key_resolves_to_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        request = self._captured_request(["https://example.com/x.mp3", "T"], monkeypatch)
+        assert request["chapter_api_key"] is None
+
+    def test_provider_flag_resolves_that_providers_env_var(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Spec scenario: --provider deepseek + DEEPSEEK_API_KEY."""
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-ds-1")
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-ignored")
+        request = self._captured_request(
+            ["https://example.com/x.mp3", "T", "--provider", "deepseek"], monkeypatch
+        )
+        assert request["chapter_provider"] == "deepseek"
+        assert request["chapter_api_key"] == "sk-ds-1"
+
+    def test_provider_flag_without_model_uses_provider_default(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Spec scenario: --provider deepseek without --model — model stays None,
+        so generate_chapters resolves the DeepSeek registry default."""
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-ds-1")
+        request = self._captured_request(
+            ["https://example.com/x.mp3", "T", "--provider", "deepseek"], monkeypatch
+        )
+        assert request["model"] is None
+
+    def test_explicit_model_passes_through(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-1")
+        request = self._captured_request(
+            [
+                "https://example.com/x.mp3",
+                "T",
+                "--provider",
+                "openrouter",
+                "--model",
+                "meta-llama/llama-4-maverick",
+            ],
+            monkeypatch,
+        )
+        assert request["model"] == "meta-llama/llama-4-maverick"
+
+    def test_custom_provider_reads_url_and_key_envs(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("PODCAST_READER_CUSTOM_PROVIDER_KEY", "sk-local")
+        monkeypatch.setenv("PODCAST_READER_CUSTOM_PROVIDER_URL", "http://127.0.0.1:11434/v1")
+        request = self._captured_request(
+            ["https://example.com/x.mp3", "T", "--provider", "custom"], monkeypatch
+        )
+        assert request["chapter_provider"] == "custom"
+        assert request["chapter_api_key"] == "sk-local"
+        assert request["custom_provider_url"] == "http://127.0.0.1:11434/v1"
+
+    def test_unknown_provider_rejected_by_argparse(self) -> None:
+        with pytest.raises(SystemExit):
+            main_with_args(["https://example.com/x.mp3", "T", "--provider", "nonsense"])
+
 
 class TestCliChaptersFaultIsolation:
     """Spec: a chapters failure must not fail the CLI run (exit 0, warning printed)."""

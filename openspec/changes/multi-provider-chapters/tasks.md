@@ -10,7 +10,7 @@
 
 - [ ] 2.1 `types.py`: `PipelineRequest` + `chapter_provider`, `chapter_api_key`; `EngineSettings` + `chapter_provider`, `custom_provider_url`; `chapter_model` semantics: empty string = provider default
 - [x] 2.2 `pipeline.py` chapters step: skip with `chapters_skipped` + provider-aware hint when key is None (per K8), generic-wrap all chapters exceptions before `_emit` so response-body content never reaches events/journal (per K4); existing fault-isolation tests updated; missing-key-skip test; operationalized redaction test (mocked 401 echoing the key → full key and key[:12] absent from all events and persisted files)
-- [ ] 2.3 `cli.py`: `--provider` flag (default anthropic), `--model` default → None meaning provider default + help text updated (per K2), key resolution from registry env var at request build; env-var compatibility tests (ANTHROPIC_API_KEY exact behavior preserved; DEEPSEEK via flag; provider flag without model uses provider default)
+- [x] 2.3 `cli.py`: `--provider` flag (default anthropic), `--model` default → None meaning provider default + help text updated (per K2), key resolution from registry env var at request build; env-var compatibility tests (ANTHROPIC_API_KEY exact behavior preserved; DEEPSEEK via flag; provider flag without model uses provider default)
 
 ## 3. Engine key store
 

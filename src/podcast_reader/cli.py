@@ -12,6 +12,7 @@ import sys
 from pathlib import Path
 
 from podcast_reader.pipeline import PipelineError, _wsl_path, run_pipeline
+from podcast_reader.providers import PROVIDERS
 from podcast_reader.types import PipelineEvent, PipelineRequest
 
 
@@ -75,9 +76,15 @@ def _run_one_shot(argv: list[str]) -> None:
         help="Output directory (default: current directory)",
     )
     parser.add_argument(
+        "--provider",
+        choices=sorted(PROVIDERS),
+        default="anthropic",
+        help="Chapter LLM provider (default: anthropic)",
+    )
+    parser.add_argument(
         "--model",
-        default="claude-haiku-4-5-20251001",
-        help=("Claude model for chapters (default: claude-haiku-4-5-20251001)"),
+        default=None,
+        help="Chapter model (default: the selected provider's default model)",
     )
     args = parser.parse_args(argv)
 
@@ -92,8 +99,8 @@ def _run_one_shot(argv: list[str]) -> None:
         hf_token=os.environ.get("HF_TOKEN"),
         sentences=int(os.environ.get("SENTENCES", "5")),
         cookies=os.environ.get("YT_DLP_COOKIES"),
-        chapter_provider="anthropic",
-        chapter_api_key=os.environ.get("ANTHROPIC_API_KEY"),
+        chapter_provider=args.provider,
+        chapter_api_key=os.environ.get(PROVIDERS[args.provider]["key_env"]),
         custom_provider_url=os.environ.get("PODCAST_READER_CUSTOM_PROVIDER_URL", ""),
     )
 
