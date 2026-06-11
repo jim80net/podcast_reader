@@ -92,6 +92,9 @@ def _run_one_shot(argv: list[str]) -> None:
         hf_token=os.environ.get("HF_TOKEN"),
         sentences=int(os.environ.get("SENTENCES", "5")),
         cookies=os.environ.get("YT_DLP_COOKIES"),
+        chapter_provider="anthropic",
+        chapter_api_key=os.environ.get("ANTHROPIC_API_KEY"),
+        custom_provider_url=os.environ.get("PODCAST_READER_CUSTOM_PROVIDER_URL", ""),
     )
 
     try:

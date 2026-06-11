@@ -173,6 +173,9 @@ def make_pipeline_runner(base: Path) -> JobRunner:
             hf_token=os.environ.get("HF_TOKEN"),
             sentences=settings["sentences"],
             cookies=os.environ.get("YT_DLP_COOKIES"),
+            chapter_provider="anthropic",
+            chapter_api_key=os.environ.get("ANTHROPIC_API_KEY"),
+            custom_provider_url="",
         )
         staged = run_pipeline(request, on_event)
         result = _commit_artifacts(staged, library.entry_dir(library_dir, source_id))
