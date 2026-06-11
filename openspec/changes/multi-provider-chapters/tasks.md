@@ -19,6 +19,6 @@
 
 ## 4. Docs, gates, integration
 
-- [ ] 4.1 README (provider table, `--provider`, per-provider env vars, chapters-now-built-in note) + CLAUDE.md (providers.py row, chapters.py purpose update)
+- [x] 4.1 README (provider table, `--provider`, per-provider env vars, chapters-now-built-in note) + CLAUDE.md (providers.py row, chapters.py purpose update)
 - [ ] 4.2 Full gates: pytest unit, mypy strict, ruff check+format; `openspec validate multi-provider-chapters`
 - [ ] 4.3 Systems-review of implementation diff; PR
