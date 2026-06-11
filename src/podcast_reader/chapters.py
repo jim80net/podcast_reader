@@ -1,9 +1,21 @@
-"""Generate chapter markers with abstracts from a whisper transcript using Claude."""
+"""Generate chapter markers with abstracts from a whisper transcript via an LLM.
+
+All providers are reached through one OpenAI-compatible ``/chat/completions``
+request (see :mod:`podcast_reader.providers`); Anthropic goes through its
+OpenAI-compat endpoint, so no provider SDK is required.
+"""
 
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+import httpx
+
+if TYPE_CHECKING:
+    from podcast_reader.providers import ProviderSpec
+
+REQUEST_TIMEOUT_S = 300.0
 
 
 def _nearest_segment_time(target: float, seg_starts: list[float]) -> float:
@@ -122,44 +134,45 @@ def format_transcript(segments: list[dict[str, Any]]) -> str:
 
 
 def generate_chapters(
-    transcript_text: str, model: str = "claude-haiku-4-5-20251001"
+    transcript_text: str,
+    *,
+    spec: ProviderSpec,
+    api_key: str,
+    model: str | None = None,
+    transport: httpx.BaseTransport | None = None,
 ) -> list[dict[str, Any]]:
-    """Send transcript to Claude and get back structured chapters.
+    """Send the transcript to *spec*'s ``/chat/completions`` and parse chapters.
 
-    Requires the ``anthropic`` package (install with ``pip install podcast-reader[chapters]``).
+    *model* ``None`` (or empty) selects the provider's default model. *transport*
+    lets tests inject an ``httpx.MockTransport`` — production uses the default.
+
+    Error messages deliberately never include the provider's response body:
+    auth-error bodies echo key fragments (the practical key-leak vector).
     """
-    try:
-        import anthropic
-        from anthropic.types import TextBlock
-    except ModuleNotFoundError as exc:
-        raise RuntimeError(
-            "Chapter generation requires the 'anthropic' package. "
-            "Install it with: pip install podcast-reader[chapters]"
-        ) from exc
-
-    client = anthropic.Anthropic()
-
-    response = client.messages.create(
-        model=model,
-        max_tokens=16384,
-        system=SYSTEM_PROMPT,
-        messages=[
-            {
-                "role": "user",
-                "content": f"Here is the transcript:\n\n{transcript_text}",
-            }
+    payload = {
+        "model": model or spec["default_model"],
+        "max_tokens": spec["max_tokens"],
+        "messages": [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": f"Here is the transcript:\n\n{transcript_text}"},
         ],
-    )
+    }
+    url = spec["base_url"].rstrip("/") + "/chat/completions"
+    with httpx.Client(transport=transport, timeout=REQUEST_TIMEOUT_S) as client:
+        response = client.post(url, json=payload, headers={"Authorization": f"Bearer {api_key}"})
+    if response.status_code >= 400:
+        # Never include the response body in the message (key-redaction spec).
+        raise RuntimeError(f"Chapter provider request failed: HTTP {response.status_code}")
 
-    if response.stop_reason == "max_tokens":
+    body: dict[str, Any] = response.json()
+    choice = body["choices"][0]
+    if choice.get("finish_reason") == "length":
         raise RuntimeError(
-            "Claude response was truncated (hit max_tokens). "
+            "Chapter response was truncated (hit the provider's max_tokens cap). "
             "The transcript may be too long for a single request."
         )
-
-    block = response.content[0]
-    assert isinstance(block, TextBlock), f"Expected TextBlock, got {type(block)}"
-    raw = block.text.strip()
+    # Unknown finish_reason values are treated as success-with-parse-attempt.
+    raw = str(choice["message"]["content"]).strip()
 
     # Strip markdown code fences if present
     if raw.startswith("```"):

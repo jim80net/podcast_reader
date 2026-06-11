@@ -1,10 +1,16 @@
-"""Tests for chapter timestamp snapping in podcast_reader.chapters."""
+"""Tests for chapter generation and timestamp snapping in podcast_reader.chapters."""
 
 from __future__ import annotations
 
+import json
+import sys
 from typing import Any
 
-from podcast_reader.chapters import snap_chapters_to_segments
+import httpx
+import pytest
+
+from podcast_reader.chapters import SYSTEM_PROMPT, generate_chapters, snap_chapters_to_segments
+from podcast_reader.providers import PROVIDERS, ProviderSpec
 
 
 def _ch(
@@ -109,3 +115,165 @@ class TestSnapChaptersToSegments:
         chapters = [_ch(start=10, end=20, paragraph_breaks=[10])]
         result = snap_chapters_to_segments(chapters, [])
         assert result[0]["start"] == 10
+
+
+_CHAPTERS_JSON = [
+    {
+        "title": "Intro",
+        "start": 0.0,
+        "end": 5.0,
+        "abstract": "Opening.",
+        "type": "intro",
+        "paragraph_breaks": [0.0],
+        "key_points": [],
+        "pull_quote": None,
+        "pull_quote_start": None,
+    }
+]
+
+
+def _completion(content: str, finish_reason: str = "stop") -> dict[str, Any]:
+    """Build an OpenAI-compatible /chat/completions response body."""
+    return {"choices": [{"finish_reason": finish_reason, "message": {"content": content}}]}
+
+
+class _Recorder:
+    """MockTransport handler that records requests and replays a response."""
+
+    def __init__(self, response: httpx.Response) -> None:
+        self.response = response
+        self.requests: list[httpx.Request] = []
+
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        self.requests.append(request)
+        return self.response
+
+    @property
+    def transport(self) -> httpx.MockTransport:
+        return httpx.MockTransport(self)
+
+
+class TestGenerateChapters:
+    """Spec: OpenAI-compatible generation — one HTTP path for every provider."""
+
+    SPEC: ProviderSpec = PROVIDERS["anthropic"]
+
+    def test_successful_generation_returns_parsed_chapters(self) -> None:
+        recorder = _Recorder(httpx.Response(200, json=_completion(json.dumps(_CHAPTERS_JSON))))
+        chapters = generate_chapters(
+            "[0.0] Hello.",
+            spec=self.SPEC,
+            api_key="sk-test",
+            transport=recorder.transport,
+        )
+        assert chapters == _CHAPTERS_JSON
+
+    def test_request_shape_matches_chat_completions_contract(self) -> None:
+        recorder = _Recorder(httpx.Response(200, json=_completion(json.dumps(_CHAPTERS_JSON))))
+        generate_chapters(
+            "[0.0] Hello.",
+            spec=self.SPEC,
+            api_key="sk-test",
+            transport=recorder.transport,
+        )
+        request = recorder.requests[0]
+        assert str(request.url) == "https://api.anthropic.com/v1/chat/completions"
+        assert request.headers["authorization"] == "Bearer sk-test"
+        payload = json.loads(request.content)
+        assert payload["max_tokens"] == self.SPEC["max_tokens"]
+        assert payload["messages"][0] == {"role": "system", "content": SYSTEM_PROMPT}
+        assert payload["messages"][1]["role"] == "user"
+        assert "[0.0] Hello." in payload["messages"][1]["content"]
+
+    def test_model_none_resolves_to_provider_default(self) -> None:
+        """Spec: Model precedence — no explicit model means the provider default."""
+        recorder = _Recorder(httpx.Response(200, json=_completion(json.dumps(_CHAPTERS_JSON))))
+        generate_chapters(
+            "[0.0] Hello.",
+            spec=PROVIDERS["deepseek"],
+            api_key="sk-test",
+            transport=recorder.transport,
+        )
+        payload = json.loads(recorder.requests[0].content)
+        assert payload["model"] == "deepseek-v4-flash"
+        assert str(recorder.requests[0].url) == "https://api.deepseek.com/chat/completions"
+
+    def test_explicit_model_passes_through_verbatim(self) -> None:
+        recorder = _Recorder(httpx.Response(200, json=_completion(json.dumps(_CHAPTERS_JSON))))
+        generate_chapters(
+            "[0.0] Hello.",
+            spec=PROVIDERS["openrouter"],
+            model="meta-llama/llama-4-maverick",
+            api_key="sk-test",
+            transport=recorder.transport,
+        )
+        payload = json.loads(recorder.requests[0].content)
+        assert payload["model"] == "meta-llama/llama-4-maverick"
+
+    def test_markdown_fences_stripped_before_parse(self) -> None:
+        fenced = "```json\n" + json.dumps(_CHAPTERS_JSON) + "\n```"
+        recorder = _Recorder(httpx.Response(200, json=_completion(fenced)))
+        chapters = generate_chapters(
+            "[0.0] Hello.",
+            spec=self.SPEC,
+            api_key="sk-test",
+            transport=recorder.transport,
+        )
+        assert chapters == _CHAPTERS_JSON
+
+    def test_truncation_raises(self) -> None:
+        """Spec: Truncation raises — finish_reason 'length' is an error."""
+        recorder = _Recorder(
+            httpx.Response(200, json=_completion('[{"title": "cut', finish_reason="length"))
+        )
+        with pytest.raises(RuntimeError, match="truncated"):
+            generate_chapters(
+                "[0.0] Hello.",
+                spec=self.SPEC,
+                api_key="sk-test",
+                transport=recorder.transport,
+            )
+
+    def test_unknown_finish_reason_treated_as_success(self) -> None:
+        """Per design: unknown finish_reason values are success-with-parse-attempt."""
+        recorder = _Recorder(
+            httpx.Response(
+                200, json=_completion(json.dumps(_CHAPTERS_JSON), finish_reason="end_turn")
+            )
+        )
+        chapters = generate_chapters(
+            "[0.0] Hello.",
+            spec=self.SPEC,
+            api_key="sk-test",
+            transport=recorder.transport,
+        )
+        assert chapters == _CHAPTERS_JSON
+
+    def test_http_error_raises_without_response_body(self) -> None:
+        """Spec: Key redaction — error messages exclude the response body."""
+        api_key = "sk-test-secret-key-123456789"
+        body = {"error": {"message": f"Incorrect API key provided: {api_key}"}}
+        recorder = _Recorder(httpx.Response(401, json=body))
+        with pytest.raises(RuntimeError, match="HTTP 401") as excinfo:
+            generate_chapters(
+                "[0.0] Hello.",
+                spec=self.SPEC,
+                api_key=api_key,
+                transport=recorder.transport,
+            )
+        message = str(excinfo.value)
+        assert api_key not in message
+        assert api_key[:12] not in message
+        assert "Incorrect API key" not in message
+
+    def test_no_anthropic_import_required(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Spec: No anthropic import — generation succeeds with the package absent."""
+        monkeypatch.setitem(sys.modules, "anthropic", None)  # import anthropic -> ImportError
+        recorder = _Recorder(httpx.Response(200, json=_completion(json.dumps(_CHAPTERS_JSON))))
+        chapters = generate_chapters(
+            "[0.0] Hello.",
+            spec=self.SPEC,
+            api_key="sk-test",
+            transport=recorder.transport,
+        )
+        assert chapters == _CHAPTERS_JSON

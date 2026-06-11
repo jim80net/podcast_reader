@@ -22,6 +22,7 @@ from podcast_reader.chapters import (
     snap_chapters_to_segments,
 )
 from podcast_reader.html import build_html
+from podcast_reader.providers import PROVIDERS
 from podcast_reader.tools import run_child
 from podcast_reader.transcribe import transcribe
 from podcast_reader.types import PipelineEvent, PipelineResult
@@ -236,7 +237,12 @@ def run_pipeline(
             data = json.loads(json_path.read_text())
             segments = [s for s in data["segments"] if s.get("text", "").strip()]
             transcript_text = format_transcript(segments)
-            chapters = generate_chapters(transcript_text, model=request["model"])
+            chapters = generate_chapters(
+                transcript_text,
+                spec=PROVIDERS["anthropic"],
+                model=request["model"],
+                api_key=os.environ["ANTHROPIC_API_KEY"],
+            )
             chapters = snap_chapters_to_segments(chapters, segments)
             chapters_path.write_text(json.dumps(chapters, indent=2))
         except Exception as exc:  # provider/parse/network — never fatal
