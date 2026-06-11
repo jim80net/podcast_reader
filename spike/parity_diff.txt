@@ -1,0 +1,8 @@
+top-level keys  wc2: ['language', 'segments', 'text']  worker: ['language', 'segments', 'text']  fixture: ['segments']
+segment keys    wc2: ['avg_logprob', 'compression_ratio', 'end', 'id', 'no_speech_prob', 'seek', 'start', 'temperature', 'text', 'tokens', 'words']
+segment keys worker: ['avg_logprob', 'compression_ratio', 'end', 'id', 'no_speech_prob', 'seek', 'start', 'temperature', 'text', 'tokens']
+segment keys fixture: ['end', 'start', 'text']
+wc2-only seg keys: ['words']
+worker-only seg keys: []
+value diffs on shared keys: NONE — identical values
+top-level value diffs: NONE
