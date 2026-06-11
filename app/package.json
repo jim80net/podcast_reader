@@ -1,0 +1,25 @@
+{
+  "name": "podcast-reader-app",
+  "version": "0.1.0",
+  "description": "Desktop shell for the podcast-reader engine (Electron)",
+  "private": true,
+  "main": "./out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "@types/node": "24.13.2",
+    "electron": "42.4.0",
+    "electron-vite": "5.0.0",
+    "eslint": "10.4.1",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.61.0",
+    "vite": "7.3.5",
+    "vitest": "4.1.8"
+  }
+}
