@@ -15,6 +15,7 @@ publishes is pruned as abandoned (cleanup never depends on GC).
 
 from __future__ import annotations
 
+import collections
 import contextlib
 import copy
 import json
@@ -47,6 +48,44 @@ MAX_TERMINAL_JOBS = 200
 _TERMINAL_STATES = frozenset({"done", "failed", "interrupted"})
 
 
+class _WakeQueue:
+    """FIFO whose blocking get also wakes when the caller's stop event is set.
+
+    Replaces ``queue.Queue`` + ``None`` sentinel: a sentinel can be stolen by
+    a successor worker (leaving the stopping worker blocked forever), and a
+    stopping worker that dequeues a job must hand it back, breaking FIFO
+    order. Here a stopping worker exits without dequeuing anything, so the
+    backlog reaches its successor untouched and in order.
+    """
+
+    def __init__(self) -> None:
+        self._items: collections.deque[str] = collections.deque()
+        self._cond = threading.Condition()
+
+    def put(self, item: str) -> None:
+        with self._cond:
+            self._items.append(item)
+            self._cond.notify_all()
+
+    def wake_all(self) -> None:
+        """Wake blocked getters so they re-check their stop event."""
+        with self._cond:
+            self._cond.notify_all()
+
+    def get_or_stop(self, stop: threading.Event) -> str | None:
+        """Block until an item arrives (returned) or *stop* is set (``None``).
+
+        Stop wins over a non-empty queue: a stopping worker must skip the
+        backlog, not drain it.
+        """
+        with self._cond:
+            while not self._items and not stop.is_set():
+                self._cond.wait()
+            if stop.is_set():
+                return None
+            return self._items.popleft()
+
+
 class JobStore:
     """Journal-backed FIFO job store with a single worker thread."""
 
@@ -55,7 +94,7 @@ class JobStore:
         self._runner = runner
         self._lock = threading.RLock()
         self._jobs: dict[str, JobRecord] = {}
-        self._queue: queue.Queue[str | None] = queue.Queue()
+        self._queue = _WakeQueue()
         self._worker: threading.Thread | None = None
         self._stop = threading.Event()
         # subscriber queue → count of consecutive publishes it has been full for
@@ -107,11 +146,10 @@ class JobStore:
     def shutdown(self) -> None:
         """Stop the worker after the current job finishes, skipping the backlog.
 
-        The stop event makes the worker exit on its next dequeue instead of
-        draining queued jobs first; a job it dequeues on the way out is handed
-        back to the live queue (and is still ``queued`` in the journal, so
-        startup recovery covers the no-restart case too). The sentinel only
-        wakes a worker blocked on an empty queue.
+        The worker's stop event takes priority over queued items, so it exits
+        on its next dequeue without touching the backlog; those jobs stay
+        ``queued`` in the journal (startup recovery re-enqueues them) and in
+        the live queue, in order, for any restarted worker.
         """
         with self._lock:
             worker = self._worker
@@ -120,7 +158,7 @@ class JobStore:
         if worker is None:
             return
         stop.set()
-        self._queue.put(None)
+        self._queue.wake_all()
         worker.join(timeout=30)
 
     def subscribe(self) -> queue.Queue[PipelineEvent]:
@@ -145,18 +183,11 @@ class JobStore:
 
     def _work_loop(self, stop: threading.Event) -> None:
         while True:
-            job_id = self._queue.get()
-            if stop.is_set():
-                # On stop, hand a dequeued job back for a successor worker;
-                # it is also still ``queued`` in the journal, so startup
-                # recovery covers the no-restart case.
-                if job_id is not None:
-                    self._queue.put(job_id)
-                return
+            job_id = self._queue.get_or_stop(stop)
             if job_id is None:
-                # Stale wake-up sentinel from a previous shutdown (the exiting
-                # worker dequeued a job id instead); not an exit signal now.
-                continue
+                # Stop requested; the backlog was never dequeued, so it
+                # remains intact and in order for a successor worker.
+                return
             try:
                 self._run_job(job_id)
             except Exception as exc:  # the only worker must survive anything

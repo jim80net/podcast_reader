@@ -1,8 +1,8 @@
-"""Worker restart tests for podcast_reader.engine.jobs (cubic D7).
+"""Worker restart tests for podcast_reader.engine.jobs (cubic D7 + races).
 
-Kept separate from test_jobs.py: ``start_worker()`` after ``shutdown()`` on
-the *same* JobStore instance must process jobs again — the stop event has to
-be reset and a stale wake-up sentinel must not kill the fresh worker.
+``start_worker()`` after ``shutdown()`` on the *same* JobStore instance must
+process jobs again, a restart racing a slow shutdown must not revive the old
+worker, and the backlog must reach the successor untouched and in FIFO order.
 """
 
 from __future__ import annotations
@@ -56,14 +56,12 @@ class TestWorkerRestart:
         assert _wait_for(lambda: store.get(second["id"])["state"] == "done")
         store.shutdown()
 
-    def test_stale_shutdown_sentinel_does_not_kill_restarted_worker(self, tmp_path: Path) -> None:
-        """A None wake-up sentinel left over from shutdown() must be ignored
-        by the next worker, not treated as an exit signal (D7).
+    def test_shutdown_during_job_leaves_backlog_for_restarted_worker(self, tmp_path: Path) -> None:
+        """shutdown() during a running job must not poison the queue for the
+        next worker (D7; originally a stale-sentinel scenario, now sentinel-free).
 
-        Sequence: job A runs (blocking), job B is queued, shutdown() sets stop
-        and enqueues the sentinel. The exiting worker dequeues B (not the
-        sentinel) and returns, leaving None at the head of the queue for the
-        restarted worker.
+        Sequence: job A runs (blocking), job B is queued, shutdown() stops the
+        worker after A. A restarted worker must keep processing new jobs.
         """
         release = threading.Event()
         started = threading.Event()
@@ -107,18 +105,22 @@ class TestWorkerRestart:
         """
         release = threading.Event()
         started = threading.Event()
+        run_order: list[str] = []
 
         def blocking(
             record: JobRecord, on_event: Callable[[PipelineEvent], None]
         ) -> PipelineResult:
-            started.set()
-            assert release.wait(timeout=10)
+            run_order.append(record["source"])
+            if record["source"].endswith("/first"):
+                started.set()
+                assert release.wait(timeout=10)
             return _RESULT
 
         store = JobStore(tmp_path, blocking)
         store.start_worker()
         first = store.submit("https://example.com/first", None)
         second = store.submit("https://example.com/second", None)  # backlog
+        third = store.submit("https://example.com/third", None)  # backlog
         assert started.wait(timeout=10)
 
         old_stop = store._stop
@@ -140,8 +142,16 @@ class TestWorkerRestart:
         assert not shutdown_thread.is_alive()
 
         # The new worker processes the backlog; the old worker exits.
-        assert _wait_for(lambda: store.get(second["id"])["state"] == "done")
+        assert _wait_for(lambda: store.get(third["id"])["state"] == "done")
         assert store.get(first["id"])["state"] == "done"
+        assert store.get(second["id"])["state"] == "done"
         assert _wait_for(lambda: not old_worker.is_alive()), "old worker must exit"
         assert new_worker.is_alive()
+        # FIFO survives the hand-back: a job the exiting worker dequeued goes
+        # back to the FRONT of the queue, not the tail (cubic P2).
+        assert run_order == [
+            "https://example.com/first",
+            "https://example.com/second",
+            "https://example.com/third",
+        ]
         store.shutdown()
