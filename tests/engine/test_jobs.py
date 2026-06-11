@@ -214,6 +214,9 @@ class TestShutdown:
 
         shutdown_thread = threading.Thread(target=store.shutdown)
         shutdown_thread.start()  # blocks joining the worker mid-job
+        # Only release the in-flight job once the stop flag is definitely set,
+        # otherwise the worker could dequeue the backlog before it sees stop.
+        assert _wait_for(store._stop.is_set)
         release.set()
         shutdown_thread.join(timeout=10)
         assert not shutdown_thread.is_alive()
