@@ -39,13 +39,16 @@ class PipelineRequest(TypedDict):
     source: str  # URL or local file path
     title: str | None
     output_dir: str
-    model: str
+    model: str | None  # None/empty: the chapter provider's default model
     whisper_model: str
     whisper_lang: str
     whisper_device: str
     hf_token: str | None
     sentences: int
     cookies: str | None
+    chapter_provider: str  # a podcast_reader.providers.PROVIDERS key
+    chapter_api_key: str | None  # None: skip chapter generation
+    custom_provider_url: str  # base URL for the "custom" provider ("" otherwise)
 
 
 class PipelineResult(TypedDict):
@@ -81,7 +84,9 @@ class EngineSettings(TypedDict):
     whisper_device: str
     sentences: int
     library_dir: str
-    chapter_model: str
+    chapter_model: str  # "" means: the chapter provider's default model
+    chapter_provider: str  # a podcast_reader.providers.PROVIDERS key
+    custom_provider_url: str  # base URL for the "custom" provider ("" otherwise)
 
 
 def new_job_record(*, job_id: str, source: str, title: str | None) -> JobRecord:

@@ -29,14 +29,15 @@ podcast-reader serve
 Requires: Python 3.10+, `uv`, NVIDIA GPU (optional, falls back to CPU).
 
 ```bash
-# Development (includes anthropic for chapter generation)
-uv sync --extra dev --extra chapters
+# Development
+uv sync --extra dev
 
 # Run directly
 uv run podcast-reader <url-or-file> [title]
 
-# Install as standalone tool (whisper extra needed for non-YouTube sources)
-uv tool install '.[whisper,chapters]'
+# Install as standalone tool (whisper extra needed for non-YouTube sources;
+# chapter generation is built in — bring your own API key)
+uv tool install '.[whisper]'
 ```
 
 For speaker diarization, set `HF_TOKEN` and accept model terms at:
@@ -51,7 +52,10 @@ For speaker diarization, set `HF_TOKEN` and accept model terms at:
 | `WHISPER_LANG` | `en` | Language code |
 | `WHISPER_DEVICE` | `cuda` | `cuda` or `cpu` |
 | `HF_TOKEN` | _(none)_ | HuggingFace token for diarization |
-| `ANTHROPIC_API_KEY` | _(none)_ | Enables chapter generation via Claude |
+| `ANTHROPIC_API_KEY` | _(none)_ | Chapter key for the default `anthropic` provider |
+| `<PROVIDER>_API_KEY` | _(none)_ | Chapter key per `--provider`: `OPENAI_API_KEY`, `XAI_API_KEY`, `OPENROUTER_API_KEY`, `DEEPSEEK_API_KEY` |
+| `PODCAST_READER_CUSTOM_PROVIDER_URL` | _(none)_ | Base URL for `--provider custom` (https, or http on localhost) |
+| `PODCAST_READER_CUSTOM_PROVIDER_KEY` | _(none)_ | API key for `--provider custom` |
 | `SENTENCES` | `5` | Sentences per paragraph in HTML |
 | `YT_DLP_COOKIES` | _(none)_ | Path to cookies file for authenticated yt-dlp downloads |
 
@@ -69,10 +73,11 @@ For speaker diarization, set `HF_TOKEN` and accept model terms at:
 | `src/podcast_reader/engine/settings.py` | Data dir, engine state (port/token), user settings persistence |
 | `src/podcast_reader/engine/library.py` | Managed transcript library: source-identity keys, atomic index, staged writes |
 | `src/podcast_reader/engine/jobs.py` | Persistent job journal, FIFO single-worker execution, SSE fan-out |
-| `src/podcast_reader/engine/app.py` | FastAPI app: bearer auth, jobs/events/library/settings/health routes |
+| `src/podcast_reader/engine/app.py` | FastAPI app: bearer auth, jobs/events/library/settings/keys/health routes |
 | `src/podcast_reader/engine/process.py` | Pre-bound socket handshake, discovery file, child reaping, `serve` |
 | `spike/` | Packaging spike evidence (PyInstaller onedir prototype, SPIKE_REPORT.md) |
-| `src/podcast_reader/chapters.py` | Generate chapter markers via Claude |
+| `src/podcast_reader/providers.py` | Chapter LLM provider registry (base URL, default model, key env, max_tokens) + custom-URL validation |
+| `src/podcast_reader/chapters.py` | Generate chapter markers via any registry provider's OpenAI-compatible `/chat/completions` |
 | `src/podcast_reader/html.py` | Convert whisper JSON to styled HTML with TOC, key points, pull quotes |
 | `pyproject.toml` | Dependencies, entry point, tool configuration |
 
@@ -81,7 +86,7 @@ For speaker diarization, set `HF_TOKEN` and accept model terms at:
 1. **YouTube URL** → `youtube.py` fetches captions → whisper JSON
 2. **Other URL** → `ytdlp.py` downloads audio → `transcribe.py` runs whisper → whisper JSON
 3. **Local file** → `transcribe.py` runs whisper → whisper JSON
-4. `chapters.py` → `<stem>_chapters.json` (if `ANTHROPIC_API_KEY` set)
+4. `chapters.py` → `<stem>_chapters.json` (if an API key for the selected chapter provider is available — CLI: the provider's env var; engine: pushed key with env fallback)
 5. `html.py` → `<stem>.html` (styled transcript with TOC, key points, pull quotes)
 
 ## Development

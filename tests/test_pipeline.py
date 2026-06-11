@@ -74,19 +74,24 @@ def _request(
     input_arg: str,
     output_dir: Path,
     title: str | None = "Test Title",
+    chapter_provider: str = "anthropic",
+    chapter_api_key: str | None = None,
 ) -> PipelineRequest:
     """Build a PipelineRequest with test defaults."""
     return PipelineRequest(
         source=input_arg,
         title=title,
         output_dir=str(output_dir),
-        model="claude-haiku-4-5-20251001",
+        model=None,
         whisper_model="large-v3",
         whisper_lang="en",
         whisper_device="cpu",
         hf_token=None,
         sentences=5,
         cookies=None,
+        chapter_provider=chapter_provider,
+        chapter_api_key=chapter_api_key,
+        custom_provider_url="",
     )
 
 
@@ -559,7 +564,6 @@ class TestRunPipelineChapters:
     @patch("podcast_reader.pipeline.format_transcript", return_value="[0.0] Hello.")
     @patch("podcast_reader.pipeline.fetch_transcript")
     @patch("podcast_reader.pipeline.snippets_to_whisper_segments", return_value=_SAMPLE_SEGMENTS)
-    @patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"})
     def test_generates_chapters_when_api_key_set(
         self,
         _mock_snippets: MagicMock,
@@ -572,7 +576,7 @@ class TestRunPipelineChapters:
         tmp_path: Path,
     ) -> None:
         run_pipeline(
-            _request(input_arg=_YT_URL, output_dir=tmp_path),
+            _request(input_arg=_YT_URL, output_dir=tmp_path, chapter_api_key="test-key"),
             on_event=lambda e: None,
         )
 
@@ -615,7 +619,6 @@ class TestRunPipelineChapters:
     @patch("podcast_reader.pipeline.generate_chapters")
     @patch("podcast_reader.pipeline.fetch_transcript")
     @patch("podcast_reader.pipeline.snippets_to_whisper_segments", return_value=_SAMPLE_SEGMENTS)
-    @patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"})
     def test_loads_cached_chapters(
         self,
         _mock_snippets: MagicMock,
@@ -644,7 +647,6 @@ class TestChaptersFaultIsolation:
     @patch("podcast_reader.pipeline.format_transcript", return_value="[0.0] Hi.")
     @patch("podcast_reader.pipeline.fetch_transcript")
     @patch("podcast_reader.pipeline.snippets_to_whisper_segments", return_value=_SAMPLE_SEGMENTS)
-    @patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"})
     def test_chapter_failure_still_renders_html(
         self,
         _s: MagicMock,
@@ -656,12 +658,232 @@ class TestChaptersFaultIsolation:
         tmp_path: Path,
     ) -> None:
         events: list[PipelineEvent] = []
-        run_pipeline(_request(input_arg=_YT_URL, output_dir=tmp_path), on_event=events.append)
+        run_pipeline(
+            _request(input_arg=_YT_URL, output_dir=tmp_path, chapter_api_key="test-key"),
+            on_event=events.append,
+        )
         assert (tmp_path / "abc123XYZqq.html").exists()
         assert any(
             e["kind"] == "warning" and e["data"].get("code") == "chapters_failed" for e in events
         )
         assert mock_build_html.call_args.kwargs["chapters"] is None
+
+
+class TestChaptersKeysAndRedaction:
+    """Spec: Key resolution and skip semantics + Key redaction."""
+
+    @patch("podcast_reader.pipeline._wsl_path", return_value=None)
+    @patch("podcast_reader.pipeline.build_html", return_value="<html></html>")
+    @patch("podcast_reader.pipeline.generate_chapters")
+    @patch("podcast_reader.pipeline.fetch_transcript")
+    @patch("podcast_reader.pipeline.snippets_to_whisper_segments", return_value=_SAMPLE_SEGMENTS)
+    def test_missing_key_skips_with_provider_aware_hint(
+        self,
+        _s: MagicMock,
+        _f: MagicMock,
+        mock_generate: MagicMock,
+        _b: MagicMock,
+        _w: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        events: list[PipelineEvent] = []
+        run_pipeline(
+            _request(input_arg=_YT_URL, output_dir=tmp_path, chapter_provider="deepseek"),
+            on_event=events.append,
+        )
+        mock_generate.assert_not_called()
+        skips = [
+            e
+            for e in events
+            if e["kind"] == "warning" and e["data"].get("code") == "chapters_skipped"
+        ]
+        assert len(skips) == 1
+        assert "DEEPSEEK_API_KEY" in skips[0]["message"]
+        assert "push a key" in skips[0]["message"]
+
+    @patch("podcast_reader.pipeline._wsl_path", return_value=None)
+    @patch("podcast_reader.pipeline.build_html", return_value="<html></html>")
+    @patch("podcast_reader.pipeline.format_transcript", return_value="[0.0] Hi.")
+    @patch("podcast_reader.pipeline.fetch_transcript")
+    @patch("podcast_reader.pipeline.snippets_to_whisper_segments", return_value=_SAMPLE_SEGMENTS)
+    def test_failure_messages_are_generic_wrapped(
+        self,
+        _s: MagicMock,
+        _f: MagicMock,
+        _fmt: MagicMock,
+        _b: MagicMock,
+        _w: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        """Per K4: exception text never reaches events — only a generic message."""
+        secret = "sk-test-leaky-key-0123456789"
+        events: list[PipelineEvent] = []
+        with patch(
+            "podcast_reader.pipeline.generate_chapters",
+            side_effect=RuntimeError(f"401 body said: invalid key {secret}"),
+        ):
+            run_pipeline(
+                _request(input_arg=_YT_URL, output_dir=tmp_path, chapter_api_key=secret),
+                on_event=events.append,
+            )
+        failures = [
+            e
+            for e in events
+            if e["kind"] == "warning" and e["data"].get("code") == "chapters_failed"
+        ]
+        assert len(failures) == 1
+        assert "Chapter generation failed" in failures[0]["message"]
+        assert secret not in json.dumps(events)
+        assert "401 body said" not in json.dumps(events)
+
+    @patch("podcast_reader.pipeline._wsl_path", return_value=None)
+    @patch("podcast_reader.pipeline.build_html", return_value="<html></html>")
+    @patch("podcast_reader.pipeline.format_transcript", return_value="[0.0] Hi.")
+    @patch("podcast_reader.pipeline.fetch_transcript")
+    @patch("podcast_reader.pipeline.snippets_to_whisper_segments", return_value=_SAMPLE_SEGMENTS)
+    def test_redaction_sweep_after_mocked_401_echoing_key(
+        self,
+        _s: MagicMock,
+        _f: MagicMock,
+        _fmt: MagicMock,
+        _b: MagicMock,
+        _w: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        """Spec scenario: a 401 whose body echoes the key leaks neither the full
+        key nor its first 12 characters into any emitted event or persisted file."""
+        import httpx
+
+        from podcast_reader.chapters import generate_chapters as real_generate_chapters
+
+        key = "sk-test-redaction-0123456789abcdef"
+
+        def echoing_401(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                401, json={"error": {"message": f"Incorrect API key provided: {key}"}}
+            )
+
+        def via_mock_transport(transcript_text: str, **kwargs: object) -> object:
+            kwargs.pop("transport", None)
+            return real_generate_chapters(
+                transcript_text,
+                transport=httpx.MockTransport(echoing_401),
+                **kwargs,  # type: ignore[arg-type]
+            )
+
+        events: list[PipelineEvent] = []
+        with patch("podcast_reader.pipeline.generate_chapters", side_effect=via_mock_transport):
+            run_pipeline(
+                _request(input_arg=_YT_URL, output_dir=tmp_path, chapter_api_key=key),
+                on_event=events.append,
+            )
+
+        assert any(e["data"].get("code") == "chapters_failed" for e in events)
+        serialized = json.dumps(events)
+        assert key not in serialized
+        assert key[:12] not in serialized
+        for path in tmp_path.rglob("*"):
+            if path.is_file():
+                content = path.read_text(errors="replace")
+                assert key not in content, f"key leaked into {path}"
+                assert key[:12] not in content, f"key fragment leaked into {path}"
+
+
+class TestChapterErrorDiagnostics:
+    """M2: self-authored ChapterError messages reach the warning verbatim;
+    everything else keeps the generic class-name wrap (key redaction)."""
+
+    @patch("podcast_reader.pipeline._wsl_path", return_value=None)
+    @patch("podcast_reader.pipeline.build_html", return_value="<html></html>")
+    @patch("podcast_reader.pipeline.format_transcript", return_value="[0.0] Hi.")
+    @patch("podcast_reader.pipeline.fetch_transcript")
+    @patch("podcast_reader.pipeline.snippets_to_whisper_segments", return_value=_SAMPLE_SEGMENTS)
+    def test_truncation_message_reaches_warning_verbatim(
+        self,
+        _s: MagicMock,
+        _f: MagicMock,
+        _fmt: MagicMock,
+        _b: MagicMock,
+        _w: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        """A truncated response surfaces the chapters.py diagnostic verbatim,
+        not an opaque '(ChapterError)' wrap."""
+        import httpx
+
+        from podcast_reader.chapters import generate_chapters as real_generate_chapters
+
+        def truncated_200(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                json={
+                    "choices": [
+                        {"finish_reason": "length", "message": {"content": '[{"title": "cut'}}
+                    ]
+                },
+            )
+
+        def via_mock_transport(transcript_text: str, **kwargs: object) -> object:
+            kwargs.pop("transport", None)
+            return real_generate_chapters(
+                transcript_text,
+                transport=httpx.MockTransport(truncated_200),
+                **kwargs,  # type: ignore[arg-type]
+            )
+
+        events: list[PipelineEvent] = []
+        with patch("podcast_reader.pipeline.generate_chapters", side_effect=via_mock_transport):
+            run_pipeline(
+                _request(input_arg=_YT_URL, output_dir=tmp_path, chapter_api_key="sk-test"),
+                on_event=events.append,
+            )
+        failures = [
+            e
+            for e in events
+            if e["kind"] == "warning" and e["data"].get("code") == "chapters_failed"
+        ]
+        assert len(failures) == 1
+        assert "Chapter response was truncated" in failures[0]["message"]
+        assert "max_tokens cap" in failures[0]["message"]
+        assert "ChapterError" not in failures[0]["message"]  # message, not class name
+
+    @patch("podcast_reader.pipeline._wsl_path", return_value=None)
+    @patch("podcast_reader.pipeline.build_html", return_value="<html></html>")
+    @patch("podcast_reader.pipeline.generate_chapters")
+    @patch("podcast_reader.pipeline.fetch_transcript")
+    @patch("podcast_reader.pipeline.snippets_to_whisper_segments", return_value=_SAMPLE_SEGMENTS)
+    def test_custom_misconfig_message_reaches_warning_verbatim(
+        self,
+        _s: MagicMock,
+        _f: MagicMock,
+        mock_generate: MagicMock,
+        _b: MagicMock,
+        _w: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        """A missing custom base URL surfaces providers.py's self-authored
+        diagnostic, never an opaque '(ValueError)'."""
+        events: list[PipelineEvent] = []
+        run_pipeline(
+            _request(
+                input_arg=_YT_URL,
+                output_dir=tmp_path,
+                chapter_provider="custom",
+                chapter_api_key="sk-test",
+            ),
+            on_event=events.append,
+        )
+        mock_generate.assert_not_called()
+        failures = [
+            e
+            for e in events
+            if e["kind"] == "warning" and e["data"].get("code") == "chapters_failed"
+        ]
+        assert len(failures) == 1
+        assert "custom provider requires a base URL" in failures[0]["message"]
+        assert "(ValueError)" not in failures[0]["message"]
+        # html still rendered (fault isolation unchanged)
+        assert (tmp_path / "abc123XYZqq.html").exists()
 
 
 class TestEvents:

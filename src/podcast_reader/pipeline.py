@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import contextlib
 import json
-import os
 import re
 import shutil
 from enum import Enum
@@ -17,11 +16,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from podcast_reader.chapters import (
+    ChapterError,
     format_transcript,
     generate_chapters,
     snap_chapters_to_segments,
 )
 from podcast_reader.html import build_html
+from podcast_reader.providers import PROVIDERS, resolve_provider
 from podcast_reader.tools import run_child
 from podcast_reader.transcribe import transcribe
 from podcast_reader.types import PipelineEvent, PipelineResult
@@ -214,6 +215,7 @@ def run_pipeline(
     chapters_path = output_dir / f"{stem}_chapters.json"
     chapters: list[dict[str, Any]] | None = None
 
+    provider = request["chapter_provider"]
     if _valid_artifact(chapters_path):
         _emit(
             on_event,
@@ -224,28 +226,46 @@ def run_pipeline(
         )
         chapters = json.loads(chapters_path.read_text())
         _emit(on_event, "step_finished", "chapters", "", {"cached": True})
-    elif os.environ.get("ANTHROPIC_API_KEY"):
+    elif request["chapter_api_key"]:
         _emit(
             on_event,
             "step_started",
             "chapters",
-            "Generating chapter markers with Claude...",
+            f"Generating chapter markers via {provider}...",
             {},
         )
         try:
+            try:
+                spec = resolve_provider(provider, custom_base_url=request["custom_provider_url"])
+            except ValueError as exc:
+                # providers.py messages are self-authored (no response-body
+                # content) — promote them so the warning carries the diagnosis.
+                raise ChapterError(str(exc)) from exc
             data = json.loads(json_path.read_text())
             segments = [s for s in data["segments"] if s.get("text", "").strip()]
             transcript_text = format_transcript(segments)
-            chapters = generate_chapters(transcript_text, model=request["model"])
+            chapters = generate_chapters(
+                transcript_text,
+                spec=spec,
+                model=request["model"],
+                api_key=request["chapter_api_key"],
+            )
             chapters = snap_chapters_to_segments(chapters, segments)
             chapters_path.write_text(json.dumps(chapters, indent=2))
         except Exception as exc:  # provider/parse/network — never fatal
             chapters = None
+            # ChapterError messages contain no response-body content by
+            # construction, so they surface verbatim. Everything else gets the
+            # generic wrap (key redaction): the exception text may carry
+            # provider response fragments (auth-error bodies echo the key),
+            # so only the exception class name reaches events and the journal.
+            detail = f": {exc}" if isinstance(exc, ChapterError) else f" ({type(exc).__name__})"
             _emit(
                 on_event,
                 "warning",
                 "chapters",
-                f"Chapter generation failed: {exc}",
+                f"Chapter generation failed via {provider}{detail}; "
+                "rendering a chapterless transcript",
                 {"code": "chapters_failed"},
             )
         else:
@@ -261,7 +281,7 @@ def run_pipeline(
             on_event,
             "warning",
             "chapters",
-            "Skipping chapter generation (set ANTHROPIC_API_KEY to enable)",
+            f"Skipping chapter generation ({_chapter_key_hint(provider)})",
             {"code": "chapters_skipped"},
         )
 
@@ -302,6 +322,14 @@ def _emit(
 ) -> None:
     """Build and dispatch a PipelineEvent."""
     on_event(PipelineEvent(kind=kind, step=step, message=message, data=data))
+
+
+def _chapter_key_hint(provider: str) -> str:
+    """Provider-aware hint for the ``chapters_skipped`` warning."""
+    spec = PROVIDERS.get(provider)
+    if spec is None:
+        return f"unknown chapter provider {provider!r}"
+    return f"set {spec['key_env']} or push a key via the app to enable"
 
 
 def _valid_artifact(path: Path) -> bool:

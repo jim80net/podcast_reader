@@ -38,6 +38,7 @@ from podcast_reader.engine.settings import (
     token_fingerprint,
 )
 from podcast_reader.pipeline import PipelineError, run_pipeline
+from podcast_reader.providers import PROVIDERS
 from podcast_reader.tools import (
     kill_children,
     popen_kwargs,  # re-export: spawn-time child options
@@ -137,14 +138,19 @@ def remove_discovery(path: Path) -> None:
     path.unlink(missing_ok=True)
 
 
-def make_pipeline_runner(base: Path) -> JobRunner:
+def make_pipeline_runner(base: Path, key_store: dict[str, str] | None = None) -> JobRunner:
     """Build the engine's job runner: shared pipeline + managed library.
 
     Settings are snapshotted when the job is dequeued (each invocation reloads
     them), so a mid-job ``PUT /v1/settings`` cannot race the worker. Artifacts
     are produced in the entry's staging directory — which doubles as the cache
     for re-submissions — and committed into the entry directory atomically.
+
+    *key_store* is the process-memory chapter-API-key dict shared with the
+    FastAPI app (``PUT /v1/keys`` writes it); the runner injects the key for
+    the configured provider at dequeue, falling back to the provider's env var.
     """
+    keys: dict[str, str] = key_store if key_store is not None else {}
 
     def run(record: JobRecord, on_event: Callable[[PipelineEvent], None]) -> PipelineResult:
         settings = load_settings(base)  # snapshot at dequeue
@@ -162,17 +168,21 @@ def make_pipeline_runner(base: Path) -> JobRunner:
         staging = library.staging_dir(library_dir, source_id)
         staging.mkdir(parents=True, exist_ok=True)
 
+        provider = settings["chapter_provider"]
         request = PipelineRequest(
             source=record["source"],
             title=record["title"],
             output_dir=str(staging),
-            model=settings["chapter_model"],
+            model=settings["chapter_model"] or None,
             whisper_model=settings["whisper_model"],
             whisper_lang=settings["whisper_lang"],
             whisper_device=settings["whisper_device"],
             hf_token=os.environ.get("HF_TOKEN"),
             sentences=settings["sentences"],
             cookies=os.environ.get("YT_DLP_COOKIES"),
+            chapter_provider=provider,
+            chapter_api_key=_resolve_chapter_key(provider, keys),
+            custom_provider_url=settings["custom_provider_url"],
         )
         staged = run_pipeline(request, on_event)
         result = _commit_artifacts(staged, library.entry_dir(library_dir, source_id))
@@ -189,6 +199,23 @@ def make_pipeline_runner(base: Path) -> JobRunner:
         return result
 
     return run
+
+
+def _resolve_chapter_key(provider: str, keys: dict[str, str]) -> str | None:
+    """Resolve the chapter API key: pushed key first, then the env variable.
+
+    The env fallback preserves headless ``podcast-reader serve`` deployments
+    that export ``ANTHROPIC_API_KEY`` today; a key pushed via ``PUT /v1/keys``
+    takes precedence. An unknown provider resolves to no key, which the
+    pipeline degrades to a ``chapters_skipped`` warning.
+    """
+    pushed = keys.get(provider)
+    if pushed:
+        return pushed
+    spec = PROVIDERS.get(provider)
+    if spec is None:
+        return None
+    return os.environ.get(spec["key_env"])
 
 
 def _commit_artifacts(staged: PipelineResult, entry: Path) -> PipelineResult:
@@ -228,8 +255,11 @@ def serve_engine(
     sock = bind_engine_socket(base, state)
     if sys.platform == "win32":
         _join_windows_job()
-    store = JobStore(base, make_pipeline_runner(base))
-    app = create_app(base, store)
+    # One process-memory key store shared by the job runner and the app
+    # (the runner closure is built before the app, so app state can't host it).
+    key_store: dict[str, str] = {}
+    store = JobStore(base, make_pipeline_runner(base, key_store))
+    app = create_app(base, store, key_store=key_store)
     server = uvicorn.Server(uvicorn.Config(app, log_level="info"))
     if on_server is not None:
         on_server(server)

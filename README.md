@@ -9,7 +9,7 @@ Uses [youtube-transcript-api](https://pypi.org/project/youtube-transcript-api/) 
 ## Usage
 
 ```bash
-podcast-reader <url-or-file> [title] [--output-dir DIR] [--model CLAUDE_MODEL]
+podcast-reader <url-or-file> [title] [--output-dir DIR] [--provider PROVIDER] [--model MODEL]
 ```
 
 ### Examples
@@ -30,8 +30,11 @@ podcast-reader ~/Downloads/interview.mp3 "Interview with Dr. Smith"
 # With speaker diarization
 HF_TOKEN=hf_xxx podcast-reader episode.mp3 "Panel Discussion"
 
-# With chapter generation (requires Anthropic API key)
+# With chapter generation (bring your own API key; Anthropic is the default provider)
 ANTHROPIC_API_KEY=sk-ant-xxx podcast-reader episode.mp3 "Episode 42"
+
+# Chapter generation via another provider (see the provider table below)
+DEEPSEEK_API_KEY=sk-xxx podcast-reader --provider deepseek episode.mp3 "Episode 42"
 
 # Customize whisper model and paragraph size
 WHISPER_MODEL=medium SENTENCES=3 podcast-reader episode.mp3
@@ -64,7 +67,7 @@ is the foundation for the desktop app — see
 The pipeline produces (in `--output-dir`, default: current directory):
 
 - `<name>.json` — Transcript segments with timestamps (from Whisper or YouTube captions)
-- `<name>_chapters.json` — Chapter markers with titles, abstracts, key points, pull quotes, and type tags (if `ANTHROPIC_API_KEY` is set)
+- `<name>_chapters.json` — Chapter markers with titles, abstracts, key points, pull quotes, and type tags (if an API key for the selected chapter provider is available)
 - `<name>.html` — Styled, readable transcript with timestamp badges
 
 For YouTube videos, `<name>` is the video ID (e.g., `fkKh_WBT5BM.json`). For downloaded URLs, it's the audio filename produced by yt-dlp.
@@ -92,27 +95,27 @@ The HTML supports both dark and light themes automatically via `prefers-color-sc
 ## Setup
 
 ```bash
-# Install as a standalone tool with audio transcription and chapter support
-uv tool install '.[whisper,chapters]'
+# Install as a standalone tool with audio transcription support
+uv tool install '.[whisper]'
 
 # Or run from the repo without installing
 uv run podcast-reader <url-or-file> [title]
 ```
 
-A bare `uv tool install .` works for YouTube URLs (captions only); transcribing local files or non-YouTube URLs requires the `whisper` extra.
+A bare `uv tool install .` works for YouTube URLs (captions only); transcribing local files or non-YouTube URLs requires the `whisper` extra. Chapter generation is built in — just provide an API key for your provider (see [Chapter providers](#chapter-providers)).
 
 Optional features are packaged as extras:
 
 | Extra | Enables | Pulls in |
 |-------|---------|----------|
 | `whisper` | Transcribing audio files and non-YouTube URLs | `whisper-ctranslate2` |
-| `chapters` | Chapter generation via Claude | `anthropic` |
+| `chapters` | _(empty compatibility alias — chapters are now built in)_ | — |
 | `diarization` | Speaker labels | `pyannote.audio` |
-| `dev` | Tests, type checking, linting | `pytest`, `mypy`, `ruff`, `anthropic` |
+| `dev` | Tests, type checking, linting | `pytest`, `mypy`, `ruff` |
 
 ```bash
-# Example: development setup with chapter generation
-uv sync --extra dev --extra chapters
+# Example: development setup
+uv sync --extra dev
 
 # Example: everything needed to transcribe local audio with speaker labels
 uv sync --extra whisper --extra diarization
@@ -131,13 +134,38 @@ For speaker diarization, set `HF_TOKEN` and accept the model terms at:
 | `WHISPER_LANG` | `en` | Language code |
 | `WHISPER_DEVICE` | `cuda` | `cuda` or `cpu` |
 | `HF_TOKEN` | _(none)_ | HuggingFace token, enables speaker diarization |
-| `ANTHROPIC_API_KEY` | _(none)_ | Enables chapter generation via Claude |
 | `SENTENCES` | `5` | Sentences per paragraph in HTML |
 | `YT_DLP_COOKIES` | _(none)_ | Path to cookies file for authenticated yt-dlp downloads |
 | `PODCAST_READER_DATA_DIR` | `~/PodcastReader` | Engine data directory (library, job journal, settings) |
 | `PODCAST_READER_TOOLS_DIR` | _(none)_ | Preferred directory for external tools (yt-dlp, ffmpeg) |
 
-The Claude model used for chapters defaults to `claude-haiku-4-5-20251001` and can be overridden with `--model`.
+### Chapter providers
+
+Chapter generation works with any provider from the registry — select one with
+`--provider` (default: `anthropic`) and export that provider's API key. All
+providers are reached through the same OpenAI-compatible `/chat/completions`
+request. Without a key, the transcript still renders — just without chapters.
+
+| Provider | Key environment variable | Default model |
+|----------|--------------------------|---------------|
+| `anthropic` _(default)_ | `ANTHROPIC_API_KEY` | `claude-haiku-4-5-20251001` |
+| `openai` | `OPENAI_API_KEY` | `gpt-5.4-mini` |
+| `xai` | `XAI_API_KEY` | `grok-4.3` |
+| `openrouter` | `OPENROUTER_API_KEY` | `anthropic/claude-haiku-4.5` |
+| `deepseek` | `DEEPSEEK_API_KEY` | `deepseek-v4-flash` |
+| `custom` | `PODCAST_READER_CUSTOM_PROVIDER_KEY` | _(set with `--model`)_ |
+
+`--model` overrides the provider's default model. The `custom` provider sends
+requests to `PODCAST_READER_CUSTOM_PROVIDER_URL` (must be `https`, or `http`
+on localhost — e.g. a local OpenAI-compatible server).
+
+In engine mode, the provider and model are engine settings
+(`PUT /v1/settings`: `chapter_provider`, `chapter_model`,
+`custom_provider_url`), and API keys are pushed into process memory via
+`PUT /v1/keys {provider, api_key}` — they are never written to disk, never
+readable back through the API, and are lost on engine restart. Headless
+`podcast-reader serve` deployments can keep exporting the provider's key
+environment variable instead; a pushed key takes precedence.
 
 ## Development
 
