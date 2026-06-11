@@ -7,7 +7,7 @@
 - [x] 1.3 `engine/app.py` + `engine/process.py`: `POST /v1/shutdown` → 202 then `server.should_exit = True` (server handle injected by `serve_engine`); `serve_engine` sets uvicorn `timeout_graceful_shutdown=3` so engine exit is bounded regardless of supervisor (per P1); auth-rejection test; lifecycle test asserting children reaped + discovery file removed after endpoint-triggered exit (extend the existing serve_engine lifecycle test) — extended: trigger shutdown WITH a live SSE subscriber attached, assert bounded exit and that the `finally` cleanup ran (discovery file removed) (per P1); assert a job failing during shutdown is journaled `interrupted`, not `failed` (per P2)
 - [x] 1.4 `chapters.py`/`engine/app.py`: `POST /v1/keys/test {provider, api_key?}` — key resolution order supplied > pushed > env; minimal completion via the Phase 2 transport (small max_tokens); `{ok, detail}` with K4 redaction (mocked-401-echoing-key test: key and body absent from response and logs); 400 on unknown provider with no outbound call; tested key not stored; `provider=custom` resolves `custom_provider_url` from current settings, 400 if empty/invalid (per P9)
 - [x] 1.5 `engine/app.py`: `GET /v1/providers` — registry ids + default model + key-available boolean (pushed-or-env, boolean only); response never contains key material; TestClient tests: list includes exactly the six registry ids, response contains no key material with keys pushed and env vars set (per P4)
-- [ ] 1.6 Python gates: pytest unit, mypy strict, ruff check+format
+- [x] 1.6 Python gates: pytest unit, mypy strict, ruff check+format
 
 ## 2. App scaffold & engine client
 

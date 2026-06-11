@@ -73,11 +73,11 @@ For speaker diarization, set `HF_TOKEN` and accept model terms at:
 | `src/podcast_reader/engine/settings.py` | Data dir, engine state (port/token), user settings persistence |
 | `src/podcast_reader/engine/library.py` | Managed transcript library: source-identity keys, atomic index, staged writes |
 | `src/podcast_reader/engine/jobs.py` | Persistent job journal, FIFO single-worker execution, SSE fan-out |
-| `src/podcast_reader/engine/app.py` | FastAPI app: bearer auth, jobs/events/library/settings/keys/health routes |
+| `src/podcast_reader/engine/app.py` | FastAPI app: bearer auth, jobs (incl. confirm/dismiss of awaiting-confirmation), events, library, settings, keys (push + test), providers, health, shutdown routes |
 | `src/podcast_reader/engine/process.py` | Pre-bound socket handshake, discovery file, child reaping, `serve` |
 | `spike/` | Packaging spike evidence (PyInstaller onedir prototype, SPIKE_REPORT.md) |
 | `src/podcast_reader/providers.py` | Chapter LLM provider registry (base URL, default model, key env, max_tokens) + custom-URL validation |
-| `src/podcast_reader/chapters.py` | Generate chapter markers via any registry provider's OpenAI-compatible `/chat/completions` |
+| `src/podcast_reader/chapters.py` | Generate chapter markers via any registry provider's OpenAI-compatible `/chat/completions`; `verify_key` minimal round-trip backs `POST /v1/keys/test` |
 | `src/podcast_reader/html.py` | Convert whisper JSON to styled HTML with TOC, key points, pull quotes |
 | `pyproject.toml` | Dependencies, entry point, tool configuration |
 
