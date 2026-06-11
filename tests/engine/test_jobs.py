@@ -3,13 +3,19 @@
 from __future__ import annotations
 
 import json
+import logging
 import threading
 import time
 from typing import TYPE_CHECKING
 
 import pytest
 
-from podcast_reader.engine.jobs import JobStore
+from podcast_reader.engine.jobs import (
+    MAX_TERMINAL_JOBS,
+    SUBSCRIBER_FULL_STREAK_LIMIT,
+    SUBSCRIBER_QUEUE_SIZE,
+    JobStore,
+)
 from podcast_reader.pipeline import PipelineError
 from podcast_reader.types import JOB_STATES, PipelineEvent, PipelineResult
 
@@ -287,3 +293,98 @@ class TestSubscriptions:
         # oldest events were dropped, so the queue no longer starts at "0"
         assert first["message"] != "0"
         store.shutdown()
+
+    def test_subscriber_full_for_streak_limit_is_pruned(self, tmp_path: Path) -> None:
+        """A queue that stays full for SUBSCRIBER_FULL_STREAK_LIMIT consecutive
+        publishes is treated as abandoned and dropped (no GC-dependent cleanup)."""
+        store = JobStore(tmp_path, _ok_runner)
+        store.subscribe()  # never drained
+        event = PipelineEvent(kind="warning", step=None, message="m", data={})
+        for _ in range(SUBSCRIBER_QUEUE_SIZE):  # fill without ever hitting Full
+            store._publish(event)
+        assert store.subscriber_count == 1
+        for _ in range(SUBSCRIBER_FULL_STREAK_LIMIT - 1):
+            store._publish(event)
+        assert store.subscriber_count == 1  # one publish short of the limit
+        store._publish(event)
+        assert store.subscriber_count == 0
+
+    def test_full_streak_resets_when_consumer_drains(self, tmp_path: Path) -> None:
+        store = JobStore(tmp_path, _ok_runner)
+        q = store.subscribe()
+        event = PipelineEvent(kind="warning", step=None, message="m", data={})
+        for _ in range(SUBSCRIBER_QUEUE_SIZE + SUBSCRIBER_FULL_STREAK_LIMIT - 1):
+            store._publish(event)
+        q.get_nowait()  # a live consumer drains → the next publish is not full
+        store._publish(event)
+        assert store.subscriber_count == 1
+        # only a fresh full streak of LIMIT prunes it
+        for _ in range(SUBSCRIBER_FULL_STREAK_LIMIT):
+            store._publish(event)
+        assert store.subscriber_count == 0
+
+
+def _journal_record(job_id: str, state: str, stamp: float) -> dict[str, object]:
+    return {
+        "id": job_id,
+        "source": f"https://example.com/{job_id}",
+        "title": None,
+        "state": state,
+        "error": None,
+        "events": [],
+        "result": None,
+        "created_at": stamp,
+        "updated_at": stamp,
+    }
+
+
+class TestJournalRetention:
+    def test_terminal_jobs_capped_keeping_most_recent_and_all_non_terminal(
+        self, tmp_path: Path
+    ) -> None:
+        journal = [_journal_record(f"j{i}", "done", float(i)) for i in range(MAX_TERMINAL_JOBS + 5)]
+        journal.append(_journal_record("j-queued-old", "queued", 0.5))  # oldest, but kept
+        (tmp_path / "jobs.json").write_text(json.dumps(journal))
+
+        store = JobStore(tmp_path, _ok_runner)
+        store.submit("https://example.com/new", None)  # any write applies the cap
+
+        on_disk = json.loads((tmp_path / "jobs.json").read_text())
+        terminal = [r["id"] for r in on_disk if r["state"] == "done"]
+        assert len(terminal) == MAX_TERMINAL_JOBS
+        # the oldest terminal jobs (by updated_at) were dropped...
+        assert "j0" not in terminal
+        assert f"j{MAX_TERMINAL_JOBS + 4}" in terminal
+        # ...while non-terminal jobs survive regardless of age
+        states = {r["id"]: r["state"] for r in on_disk}
+        assert states["j-queued-old"] == "queued"
+
+    def test_no_pruning_below_cap(self, tmp_path: Path) -> None:
+        journal = [_journal_record("j-done", "done", 1.0)]
+        (tmp_path / "jobs.json").write_text(json.dumps(journal))
+        store = JobStore(tmp_path, _ok_runner)
+        submitted = store.submit("https://example.com/new", None)
+        on_disk = json.loads((tmp_path / "jobs.json").read_text())
+        assert {r["id"] for r in on_disk} == {"j-done", submitted["id"]}
+
+
+class TestCorruptJournal:
+    def test_corrupt_journal_quarantined_and_store_starts_empty(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        (tmp_path / "jobs.json").write_text("{ not json at all")
+        with caplog.at_level(logging.WARNING, logger="podcast_reader.engine.jobs"):
+            store = JobStore(tmp_path, _ok_runner)
+        assert store.list_jobs() == []
+        assert (tmp_path / "jobs.json.corrupt").read_text() == "{ not json at all"
+        assert not (tmp_path / "jobs.json").exists()
+        assert "jobs.json.corrupt" in caplog.text
+        # the store remains fully usable
+        record = store.submit("https://example.com/a", None)
+        assert [r["id"] for r in json.loads((tmp_path / "jobs.json").read_text())] == [record["id"]]
+
+    def test_wrong_shape_journal_treated_as_corrupt(self, tmp_path: Path) -> None:
+        (tmp_path / "jobs.json").write_text('{"not": "a list"}')
+        store = JobStore(tmp_path, _ok_runner)
+        assert store.list_jobs() == []
+        assert (tmp_path / "jobs.json.corrupt").exists()

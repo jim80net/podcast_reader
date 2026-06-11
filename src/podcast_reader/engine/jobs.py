@@ -8,13 +8,16 @@ which is what makes startup interrupted-marking and restart recovery work.
 
 Exactly one daemon worker thread executes jobs, so at most one job runs at a
 time and submissions are processed FIFO. SSE clients subscribe via bounded
-per-client queues; when a queue is full the oldest event is dropped.
+per-client queues; when a queue is full the oldest event is dropped, and a
+queue that stays full for ``SUBSCRIBER_FULL_STREAK_LIMIT`` consecutive
+publishes is pruned as abandoned (cleanup never depends on GC).
 """
 
 from __future__ import annotations
 
 import copy
 import json
+import logging
 import queue
 import threading
 import time
@@ -33,8 +36,14 @@ if TYPE_CHECKING:
 
     JobRunner = Callable[[JobRecord, Callable[[PipelineEvent], None]], PipelineResult]
 
+logger = logging.getLogger(__name__)
+
 JOURNAL_FILE = "jobs.json"
 SUBSCRIBER_QUEUE_SIZE = 256
+SUBSCRIBER_FULL_STREAK_LIMIT = 100
+MAX_TERMINAL_JOBS = 200
+
+_TERMINAL_STATES = frozenset({"done", "failed", "interrupted"})
 
 
 class JobStore:
@@ -47,7 +56,8 @@ class JobStore:
         self._jobs: dict[str, JobRecord] = {}
         self._queue: queue.Queue[str | None] = queue.Queue()
         self._worker: threading.Thread | None = None
-        self._subscribers: list[queue.Queue[PipelineEvent]] = []
+        # subscriber queue → count of consecutive publishes it has been full for
+        self._subscribers: dict[queue.Queue[PipelineEvent], int] = {}
         self._recover_journal()
 
     # -- public API ------------------------------------------------------
@@ -96,14 +106,13 @@ class JobStore:
         """Register a bounded event queue for SSE fan-out."""
         q: queue.Queue[PipelineEvent] = queue.Queue(maxsize=SUBSCRIBER_QUEUE_SIZE)
         with self._lock:
-            self._subscribers.append(q)
+            self._subscribers[q] = 0
         return q
 
     def unsubscribe(self, q: queue.Queue[PipelineEvent]) -> None:
         """Remove a subscriber queue (safe to call twice)."""
         with self._lock:
-            if q in self._subscribers:
-                self._subscribers.remove(q)
+            self._subscribers.pop(q, None)
 
     @property
     def subscriber_count(self) -> int:
@@ -189,40 +198,87 @@ class JobStore:
     def _recover_journal(self) -> None:
         """Load the journal, flipping ``running`` → ``interrupted`` and
         re-enqueueing persisted ``queued`` jobs in ``created_at`` order so the
-        FIFO promise survives a restart."""
+        FIFO promise survives a restart.
+
+        An unreadable or wrong-shaped journal is quarantined as
+        ``jobs.json.corrupt`` (with a warning) and recovery continues empty —
+        a corrupt journal must never prevent the engine from serving.
+        """
         path = self._data_dir / JOURNAL_FILE
         if not path.exists():
             return
-        records = cast("list[JobRecord]", json.loads(path.read_text()))
-        interrupted = False
-        for record in records:
-            if record["state"] == "running":
-                record["state"] = "interrupted"
-                record["updated_at"] = time.time()
-                interrupted = True
-            self._jobs[record["id"]] = record
-        if interrupted:
-            self._write_journal()
-        queued = [r for r in self._jobs.values() if r["state"] == "queued"]
-        for record in sorted(queued, key=lambda r: r["created_at"]):
+        try:
+            records = cast("list[JobRecord]", json.loads(path.read_text()))
+            jobs: dict[str, JobRecord] = {}
+            queued: list[JobRecord] = []
+            interrupted = False
+            for record in records:
+                if record["state"] == "running":
+                    record["state"] = "interrupted"
+                    record["updated_at"] = time.time()
+                    interrupted = True
+                elif record["state"] == "queued":
+                    queued.append(record)
+                jobs[record["id"]] = record
+            queued.sort(key=lambda r: r["created_at"])
+        except (ValueError, TypeError, KeyError) as exc:
+            corrupt = path.with_name(path.name + ".corrupt")
+            path.replace(corrupt)
+            logger.warning(
+                "Job journal unreadable; quarantined to %s and starting empty: %s", corrupt, exc
+            )
+            return
+        with self._lock:
+            self._jobs.update(jobs)
+            if interrupted:
+                self._write_journal()
+        for record in queued:
             self._queue.put(record["id"])
 
     def _write_journal(self) -> None:
-        """Atomic journal write; caller must hold the lock."""
+        """Atomic journal write with terminal-job retention; caller holds the lock."""
+        self._prune_terminal_jobs()
         atomic_write_json(self._data_dir / JOURNAL_FILE, list(self._jobs.values()))
+
+    def _prune_terminal_jobs(self) -> None:
+        """Drop the oldest terminal jobs beyond ``MAX_TERMINAL_JOBS``.
+
+        Non-terminal jobs (queued/running/awaiting-confirmation) are always
+        retained; the cap keeps the rewrite-the-whole-journal cost bounded.
+        """
+        terminal = [r for r in self._jobs.values() if r["state"] in _TERMINAL_STATES]
+        excess = len(terminal) - MAX_TERMINAL_JOBS
+        if excess <= 0:
+            return
+        terminal.sort(key=lambda r: r["updated_at"])
+        for record in terminal[:excess]:
+            del self._jobs[record["id"]]
 
     # -- fan-out ---------------------------------------------------------
 
     def _publish(self, event: PipelineEvent) -> None:
         with self._lock:
             subscribers = list(self._subscribers)
-        for q in subscribers:
-            while True:
+        full = {q: self._offer(q, event) for q in subscribers}
+        with self._lock:
+            for q, was_full in full.items():
+                if q not in self._subscribers:
+                    continue  # unsubscribed while we were publishing
+                self._subscribers[q] = self._subscribers[q] + 1 if was_full else 0
+                if self._subscribers[q] >= SUBSCRIBER_FULL_STREAK_LIMIT:
+                    del self._subscribers[q]  # abandoned consumer
+
+    @staticmethod
+    def _offer(q: queue.Queue[PipelineEvent], event: PipelineEvent) -> bool:
+        """Enqueue *event*, dropping the oldest when full; True when it was full."""
+        was_full = False
+        while True:
+            try:
+                q.put_nowait(event)
+                return was_full
+            except queue.Full:
+                was_full = True
                 try:
-                    q.put_nowait(event)
-                    break
-                except queue.Full:
-                    try:
-                        q.get_nowait()  # drop the oldest event
-                    except queue.Empty:  # pragma: no cover — racing consumer
-                        continue
+                    q.get_nowait()  # drop the oldest event
+                except queue.Empty:  # pragma: no cover — racing consumer
+                    continue
