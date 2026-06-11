@@ -80,15 +80,24 @@ class HealthInfo(BaseModel):
 def create_app(data_dir: Path, store: JobStore, *, heartbeat_s: float = 15.0) -> FastAPI:
     """Build the engine's FastAPI app bound to *store* and *data_dir*."""
     app = FastAPI(title="podcast-reader engine", version=engine_version())
-    expected = f"Bearer {load_engine_state(data_dir)['token']}".encode()
+    expected_token = load_engine_state(data_dir)["token"].encode()
 
     @app.middleware("http")
     async def _require_bearer_token(
         request: Request, call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:
-        supplied = request.headers.get("authorization", "").encode()
-        if not hmac.compare_digest(supplied, expected):
-            return JSONResponse({"detail": "unauthorized"}, status_code=401)
+        # RFC 7235: the scheme token is case-insensitive; only the credentials
+        # are secret, so the constant-time comparison covers just the token.
+        scheme, _, credentials = request.headers.get("authorization", "").partition(" ")
+        authorized = scheme.lower() == "bearer" and hmac.compare_digest(
+            credentials.strip().encode(), expected_token
+        )
+        if not authorized:
+            return JSONResponse(
+                {"detail": "unauthorized"},
+                status_code=401,
+                headers={"WWW-Authenticate": "Bearer"},
+            )
         return await call_next(request)
 
     @app.get("/v1/health")
