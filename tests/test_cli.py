@@ -13,6 +13,17 @@ import pytest
 
 from podcast_reader.cli import InputType, _find_ytdlp_marker, _run_pipeline, classify_input
 
+
+@pytest.fixture(autouse=True)
+def _isolate_anthropic_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Strip ANTHROPIC_API_KEY so no test accidentally calls the real Anthropic API.
+
+    Tests that exercise chapter generation set the key explicitly via
+    @patch.dict, which applies after this fixture runs.
+    """
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+
 _SAMPLE_SEGMENTS = {
     "segments": [
         {"start": 0.0, "end": 5.0, "text": "Hello world."},
@@ -563,10 +574,7 @@ class TestRunPipelineChapters:
         mock_build_html: MagicMock,
         _mock_wsl: MagicMock,
         tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-
         kwargs = _pipeline_defaults(
             input_arg="https://www.youtube.com/watch?v=abc123XYZqq",
             output_dir=tmp_path,
@@ -619,10 +627,7 @@ class TestRunPipelineTranscriptSource:
         mock_build_html: MagicMock,
         _mock_wsl: MagicMock,
         tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-
         kwargs = _pipeline_defaults(
             input_arg="https://www.youtube.com/watch?v=abc123XYZqq",
             output_dir=tmp_path,
@@ -643,10 +648,7 @@ class TestRunPipelineTranscriptSource:
         mock_build_html: MagicMock,
         _mock_wsl: MagicMock,
         tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-
         audio_path = tmp_path / "video_id.mp3"
         audio_path.write_text("fake audio")
         mock_download.return_value = audio_path
@@ -680,11 +682,8 @@ class TestRunPipelineYtdlpIntegration:
         mock_transcribe: MagicMock,
         _mock_wsl: MagicMock,
         tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Download a short public video via yt-dlp, mock whisper, verify HTML output."""
-        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-
         # Use a tiny (~194KB) public mp3 from archive.org
         url = "https://archive.org/details/testmp3testfile"
 
