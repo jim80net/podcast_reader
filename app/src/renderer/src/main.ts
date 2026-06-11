@@ -1,65 +1,140 @@
+import './style.css'
+
+import { el } from './dom'
+import { hrefFor, navigate, onRouteChange, parseHash } from './router'
+import { AppStore } from './store'
+import { mountLibrary } from './views/library'
+import { mountNew } from './views/new'
+import { mountReader } from './views/reader'
+import { mountSettings } from './views/settings'
+import type { Route } from './router'
+import type { ViewCleanup } from './store'
+import type { EngineStatus } from '../../shared/ipc'
+
 /**
- * Minimal renderer shell (groups 2–3): proves the supervision + IPC stack
- * end-to-end by rendering engine status, current state via job-record
- * hydration, and the live forwarded event stream. The real four views are
- * group 4 (tasks 4.1–4.6).
+ * Renderer shell (task 4.1): hash router between the four views, an
+ * engine-status indicator with failure diagnostics, and the IPC push wiring —
+ * job records hydrate the store (source of truth), forwarded SSE events patch
+ * it, and a validated protocol request focuses the New view (task 5.2).
  */
 
-import type { EngineStatus } from '../../shared/ipc'
-import type { JobRecord, PipelineEvent } from '../../shared/types'
+const store = new AppStore()
 
-const statusEl = document.getElementById('status') as HTMLSpanElement
-const detailEl = document.getElementById('detail') as HTMLDivElement
-const logEl = document.getElementById('event-log') as HTMLUListElement
+// ---- static chrome -----------------------------------------------------------
 
-function renderStatus(status: EngineStatus): void {
-  statusEl.dataset['state'] = status.state
+const navLinks = new Map<Route['view'], HTMLAnchorElement>([
+  ['library', el('a', { text: 'Library', attrs: { href: hrefFor({ view: 'library' }) } })],
+  ['new', el('a', { text: 'New', attrs: { href: hrefFor({ view: 'new' }) } })],
+  ['settings', el('a', { text: 'Settings', attrs: { href: hrefFor({ view: 'settings' }) } })]
+])
+
+const enginePill = el('span', {
+  class: 'engine-pill',
+  text: 'engine starting…',
+  attrs: { 'data-state': 'starting', role: 'status' }
+})
+const engineBanner = el('div', { class: 'banner error-banner', attrs: { role: 'alert' } })
+engineBanner.hidden = true
+
+const viewContainer = el('main', { class: 'view', attrs: { id: 'view' } })
+
+const root = document.getElementById('app')
+if (root === null) throw new Error('renderer bootstrap: #app missing from index.html')
+root.append(
+  el(
+    'header',
+    { class: 'app-header' },
+    el('span', { class: 'app-name', text: 'Podcast Reader' }),
+    el('nav', { class: 'app-nav', attrs: { 'aria-label': 'Views' } }, ...navLinks.values()),
+    enginePill
+  ),
+  engineBanner,
+  viewContainer
+)
+
+// ---- engine status indicator ---------------------------------------------------
+
+function renderEngineStatus(status: EngineStatus): void {
+  enginePill.dataset['state'] = status.state
+  engineBanner.hidden = true
   switch (status.state) {
     case 'starting':
-      statusEl.textContent = 'starting…'
+      enginePill.textContent = 'engine starting…'
       break
     case 'ready':
-      statusEl.textContent = `ready — v${status.version} on 127.0.0.1:${status.port} ` +
-        `(pid ${status.pid}, ${status.adopted ? 'adopted' : 'spawned'})`
+      enginePill.textContent = `engine v${status.version}${status.adopted ? ' (adopted)' : ''}`
       break
     case 'failed':
-      statusEl.textContent = 'failed'
-      detailEl.textContent = status.message
+      enginePill.textContent = 'engine failed'
+      engineBanner.textContent = `Engine failed to start: ${status.message}`
+      engineBanner.hidden = false
       break
     case 'stopped':
-      statusEl.textContent = 'stopped'
+      enginePill.textContent = 'engine stopped'
       break
   }
 }
 
-function appendLog(text: string): void {
-  const item = document.createElement('li')
-  item.textContent = `${new Date().toLocaleTimeString()} ${text}`
-  logEl.appendChild(item)
-  logEl.scrollTop = logEl.scrollHeight
-}
+// ---- IPC push wiring (design decision 4) ----------------------------------------
 
-function renderHydration(jobs: JobRecord[]): void {
-  const counts = new Map<string, number>()
-  for (const job of jobs) counts.set(job.state, (counts.get(job.state) ?? 0) + 1)
-  const summary =
-    jobs.length === 0
-      ? 'no jobs'
-      : [...counts.entries()].map(([state, n]) => `${state}: ${n}`).join(', ')
-  detailEl.textContent = `jobs (hydrated from records): ${summary}`
-}
-
-window.api.onEngineStatus(renderStatus)
-window.api.onJobsHydrated((jobs) => {
-  renderHydration(jobs)
-  appendLog(`hydrated ${jobs.length} job record(s)`)
+window.api.onEngineStatus((status) => {
+  store.setEngine(status)
+  renderEngineStatus(status)
 })
-window.api.onPipelineEvent((event: PipelineEvent) => {
-  appendLog(`[${event.kind}] ${event.step ?? '-'} ${event.message}`)
+window.api.onJobsHydrated((jobs) => store.hydrate(jobs))
+window.api.onPipelineEvent((event) => {
+  const needsHydration = store.applyEvent(event)
+  // An event for a job we don't know: the records are the truth — re-fetch.
+  if (needsHydration) {
+    void window.api
+      .listJobs()
+      .then((jobs) => store.hydrate(jobs))
+      .catch(() => undefined)
+  }
 })
 window.api.onProtocolRequest((job) => {
-  appendLog(`protocol request awaiting confirmation: ${job.source} (job ${job.id})`)
+  // Protocol arrivals surface on the New view for explicit Run/Dismiss
+  // (app-shell spec: nothing protocol-initiated ever auto-executes).
+  store.upsert(job)
+  navigate({ view: 'new' })
 })
 
-// Catch up on anything broadcast before this script attached.
-void window.api.getEngineStatus().then(renderStatus)
+// Catch up on state broadcast before this script attached.
+void window.api.getEngineStatus().then((status) => {
+  store.setEngine(status)
+  renderEngineStatus(status)
+})
+void window.api
+  .listJobs()
+  .then((jobs) => store.hydrate(jobs))
+  .catch(() => undefined) // engine not ready yet — the hydration push follows
+
+// ---- routing ---------------------------------------------------------------------
+
+let cleanup: ViewCleanup | null = null
+
+function render(route: Route): void {
+  cleanup?.()
+  viewContainer.replaceChildren()
+  for (const [view, link] of navLinks) {
+    if (view === route.view) link.setAttribute('aria-current', 'page')
+    else link.removeAttribute('aria-current')
+  }
+  switch (route.view) {
+    case 'library':
+      cleanup = mountLibrary(viewContainer)
+      break
+    case 'reader':
+      cleanup = mountReader(viewContainer, route.sourceId)
+      break
+    case 'new':
+      cleanup = mountNew(viewContainer, store)
+      break
+    case 'settings':
+      cleanup = mountSettings(viewContainer)
+      break
+  }
+}
+
+onRouteChange(render)
+render(parseHash(window.location.hash))

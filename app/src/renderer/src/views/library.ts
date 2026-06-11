@@ -1,0 +1,86 @@
+import { el } from '../dom'
+import { extractEngineDetail } from '../engine-error'
+import { formatDate, sourceLabel } from '../job-view'
+import { hrefFor } from '../router'
+import type { ViewCleanup } from '../store'
+import type { LibraryEntry } from '../../../shared/types'
+
+/**
+ * Library view (app-views spec): cards (title, source, date) from
+ * `GET /v1/library`, refreshed on `job_done` events and on hydration so a
+ * completing job appears without a restart; empty state points at New.
+ */
+export function mountLibrary(container: HTMLElement): ViewCleanup {
+  const status = el('p', { class: 'view-status', text: 'Loading library…' })
+  const list = el('div', { class: 'cards', attrs: { role: 'list' } })
+  container.append(el('h2', { text: 'Library' }), status, list)
+
+  let disposed = false
+
+  async function load(): Promise<void> {
+    try {
+      const entries = await window.api.listLibrary()
+      if (disposed) return
+      render(entries)
+    } catch (err) {
+      if (disposed) return
+      status.textContent = `Library unavailable: ${extractEngineDetail(err)}`
+      status.classList.add('error-text')
+    }
+  }
+
+  function render(entries: LibraryEntry[]): void {
+    status.textContent = ''
+    status.classList.remove('error-text')
+    list.replaceChildren()
+    if (entries.length === 0) {
+      list.append(
+        el(
+          'div',
+          { class: 'empty-state' },
+          el('p', { text: 'Nothing here yet.' }),
+          el('a', {
+            class: 'button-link',
+            text: 'Transcribe your first episode',
+            attrs: { href: hrefFor({ view: 'new' }) }
+          })
+        )
+      )
+      return
+    }
+    const sorted = [...entries].sort((a, b) => b.created_at - a.created_at)
+    for (const entry of sorted) {
+      list.append(
+        el(
+          'a',
+          {
+            class: 'card',
+            attrs: { href: hrefFor({ view: 'reader', sourceId: entry.source_id }), role: 'listitem' }
+          },
+          el('h3', { class: 'card-title', text: entry.title }),
+          el('p', { class: 'card-source', text: sourceLabel(entry.source) }),
+          el('time', { class: 'card-date', text: formatDate(entry.created_at) })
+        )
+      )
+    }
+  }
+
+  void load()
+  const unsubscribers = [
+    // A finished job means a new artifact: refresh. Hydration after an SSE
+    // (re)connect may have absorbed a missed job_done, so refresh then too.
+    window.api.onPipelineEvent((event) => {
+      if (event.kind === 'job_done') void load()
+    }),
+    window.api.onJobsHydrated(() => void load()),
+    // The engine may not have been ready on first load; retry once it is.
+    window.api.onEngineStatus((engineStatus) => {
+      if (engineStatus.state === 'ready') void load()
+    })
+  ]
+
+  return () => {
+    disposed = true
+    for (const unsubscribe of unsubscribers) unsubscribe()
+  }
+}
