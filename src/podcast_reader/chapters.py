@@ -5,9 +5,6 @@ from __future__ import annotations
 import json
 from typing import Any
 
-import anthropic
-from anthropic.types import TextBlock
-
 
 def _nearest_segment_time(target: float, seg_starts: list[float]) -> float:
     """Return the segment start time closest to *target*."""
@@ -127,7 +124,19 @@ def format_transcript(segments: list[dict[str, Any]]) -> str:
 def generate_chapters(
     transcript_text: str, model: str = "claude-haiku-4-5-20251001"
 ) -> list[dict[str, Any]]:
-    """Send transcript to Claude and get back structured chapters."""
+    """Send transcript to Claude and get back structured chapters.
+
+    Requires the ``anthropic`` package (install with ``pip install podcast-reader[chapters]``).
+    """
+    try:
+        import anthropic
+        from anthropic.types import TextBlock
+    except ModuleNotFoundError as exc:
+        raise RuntimeError(
+            "Chapter generation requires the 'anthropic' package. "
+            "Install it with: pip install podcast-reader[chapters]"
+        ) from exc
+
     client = anthropic.Anthropic()
 
     response = client.messages.create(

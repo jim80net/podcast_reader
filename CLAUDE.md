@@ -26,8 +26,8 @@ podcast-reader --output-dir ./output https://example.com/video
 Requires: Python 3.10+, `uv`, NVIDIA GPU (optional, falls back to CPU).
 
 ```bash
-# Development
-uv sync --dev
+# Development (includes anthropic for chapter generation)
+uv sync --extra dev --extra chapters
 
 # Run directly
 uv run podcast-reader <url-or-file> [title]
@@ -97,6 +97,14 @@ uv run ruff format --check src/ tests/
 - **mypy**: strict mode, all functions fully typed
 - **ruff**: line-length 100, rules E/F/W/I/N/UP/B/A/SIM/TCH
 - **pytest**: equality matchers preferred, subprocess mocked in unit tests, integration tests marked with `@pytest.mark.integration`
+
+### Change History (OpenSpec)
+
+Historical feature work is captured as OpenSpec changes under `openspec/changes/archive/`. The two major backported changes are:
+- `2026-03-22-youtube-transcript-support`
+- `2026-03-24-x-video-and-packaging`
+
+Use `openspec list --archived`, `openspec show`, or browse the archive directories for proposal / design / tasks / specs.
 
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence

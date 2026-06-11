@@ -8,12 +8,14 @@ version = "0.1.0"
 description = "Transcribe podcast audio or YouTube/X videos to styled HTML transcripts"
 requires-python = ">=3.10"
 dependencies = [
-    "anthropic>=0.40",
     "youtube-transcript-api>=1.0",
     "yt-dlp>=2024.1.1",
 ]
 
 [project.optional-dependencies]
+chapters = [
+    "anthropic>=0.40",
+]
 whisper = [
     "whisper-ctranslate2>=0.5.7",
 ]
@@ -21,6 +23,7 @@ diarization = [
     "pyannote.audio>=4.0",
 ]
 dev = [
+    "anthropic>=0.40",
     "pytest>=7.0",
     "mypy>=1.10",
     "ruff>=0.4",

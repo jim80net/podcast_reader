@@ -66,6 +66,20 @@ def _wsl_path(path: Path) -> str | None:
     return None
 
 
+def _find_ytdlp_marker(output_dir: Path, url: str) -> Path | None:
+    """Find a .ytdlp marker whose content matches *url* and whose mp3 still exists.
+
+    Returns the marker path, or None if no valid cached download exists.
+    Removes orphaned markers (mp3 deleted but marker remains).
+    """
+    for marker in output_dir.glob("*.ytdlp"):
+        if marker.read_text().strip() == url and marker.with_suffix(".mp3").exists():
+            return marker
+        if not marker.with_suffix(".mp3").exists():
+            marker.unlink()
+    return None
+
+
 def _transcribe_if_needed(
     *,
     audio_path: Path,
@@ -147,15 +161,11 @@ def _run_pipeline(
             except RuntimeError:
                 title = None  # will derive from stem later
 
-        # Check if audio was already downloaded by yt-dlp (uses %(id)s template)
-        yt_dlp_mp3s = [
-            p
-            for p in output_dir.glob("*.mp3")
-            if not p.stem.startswith("podcast_")  # skip user files
-        ]
+        # Check for a .ytdlp marker left by a previous download (match by URL)
+        cached_marker = _find_ytdlp_marker(output_dir, input_arg)
         audio_path: Path
-        if yt_dlp_mp3s:
-            audio_path = yt_dlp_mp3s[0]
+        if cached_marker is not None:
+            audio_path = cached_marker.with_suffix(".mp3")
             print(f"Audio already exists: {audio_path} (delete to re-download)")
         else:
             print("Downloading with yt-dlp...")

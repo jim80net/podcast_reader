@@ -85,6 +85,9 @@ class TestDownloadAudio:
             result = download_audio("https://x.com/user/status/123", tmp_path)
 
         assert result == expected_file
+        marker = tmp_path / "123.ytdlp"
+        assert marker.exists()
+        assert marker.read_text() == "https://x.com/user/status/123"
 
     def test_raises_on_failure(self, tmp_path: Path) -> None:
         with patch("podcast_reader.ytdlp.subprocess.run") as mock_run:
