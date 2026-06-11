@@ -32,6 +32,7 @@ from podcast_reader.engine.settings import (
     load_settings,
     token_fingerprint,
 )
+from podcast_reader.tools import live_children, run_child
 from podcast_reader.types import PipelineResult, new_job_record
 
 if TYPE_CHECKING:
@@ -136,16 +137,22 @@ class TestChildManagement:
 
     @pytest.mark.skipif(sys.platform == "win32", reason="POSIX process-group semantics")
     def test_children_spawned_in_new_session(self, tmp_path: Path) -> None:
+        """Tool call sites go through run_child, which spawns each child in its
+        own session and registers it for shutdown reaping."""
         from podcast_reader.transcribe import transcribe
         from podcast_reader.ytdlp import fetch_title
 
-        with patch("podcast_reader.ytdlp.subprocess.run") as mock_ytdlp:
-            mock_ytdlp.return_value = MagicMock(returncode=0, stdout="Title\n", stderr="")
-            fetch_title("https://x.com/user/status/1")
-        assert mock_ytdlp.call_args.kwargs["start_new_session"] is True
+        def _proc(stdout: str) -> MagicMock:
+            proc = MagicMock(pid=12345)
+            proc.communicate.return_value = (stdout, "")
+            proc.wait.return_value = 0
+            return proc
 
-        with patch("podcast_reader.transcribe.subprocess.run") as mock_whisper:
-            mock_whisper.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        with patch("podcast_reader.tools.subprocess.Popen", return_value=_proc("Title\n")) as popen:
+            fetch_title("https://x.com/user/status/1")
+        assert popen.call_args.kwargs["start_new_session"] is True
+
+        with patch("podcast_reader.tools.subprocess.Popen", return_value=_proc("")) as popen:
             transcribe(
                 audio_path=tmp_path / "a.mp3",
                 output_dir=tmp_path,
@@ -153,7 +160,53 @@ class TestChildManagement:
                 lang="en",
                 device="cpu",
             )
-        assert mock_whisper.call_args.kwargs["start_new_session"] is True
+        assert popen.call_args.kwargs["start_new_session"] is True
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX process-group semantics")
+    def test_engine_shutdown_terminates_children(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Spec scenario: engine shutdown terminates a running child subprocess."""
+        monkeypatch.setenv("PODCAST_READER_DATA_DIR", str(tmp_path))
+
+        def fake_runner(record: object, on_event: Callable[[object], None]) -> PipelineResult:
+            run_child([sys.executable, "-c", "import time; time.sleep(60)"])
+            return PipelineResult(json_path="", chapters_path=None, html_path="", title="t")
+
+        monkeypatch.setattr(
+            "podcast_reader.engine.process.make_pipeline_runner", lambda base: fake_runner
+        )
+        discovery = tmp_path / "discovery.json"
+        servers: list[uvicorn.Server] = []
+        thread = threading.Thread(
+            target=serve_engine,
+            kwargs={"discovery_file": discovery, "on_server": servers.append},
+            daemon=True,
+        )
+        thread.start()
+        assert _wait_for(discovery.exists), "discovery file never appeared"
+
+        info = json.loads(discovery.read_text())
+        token = load_engine_state(tmp_path)["token"]
+        headers = {"Authorization": f"Bearer {token}"}
+        url = f"http://127.0.0.1:{info['port']}/v1/jobs"
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline:
+            try:
+                body = {"source": "https://example.com/a"}
+                httpx.post(url, json=body, headers=headers, timeout=2)
+                break
+            except httpx.TransportError:
+                time.sleep(0.05)
+
+        assert _wait_for(lambda: len(live_children()) == 1), "child never registered"
+        child_pid = live_children()[0]
+
+        servers[0].should_exit = True
+        thread.join(timeout=15)
+        assert not thread.is_alive()
+        with pytest.raises(ProcessLookupError):
+            os.killpg(child_pid, 0)  # the child's process group is gone
 
 
 class TestPipelineRunner:

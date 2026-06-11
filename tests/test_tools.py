@@ -2,14 +2,34 @@
 
 from __future__ import annotations
 
+import os
+import sys
+import threading
+import time
 from typing import TYPE_CHECKING
 
+import pytest
+
+from podcast_reader.tools import (
+    kill_children,
+    live_children,
+    resolve_bundled_worker,
+    resolve_tool,
+    run_child,
+)
+
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
-    import pytest
 
-from podcast_reader.tools import resolve_bundled_worker, resolve_tool
+def _wait_for(predicate: Callable[[], bool], timeout: float = 10.0) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.01)
+    return predicate()
 
 
 class _FrozenSys:
@@ -148,3 +168,41 @@ class TestResolveTool:
             _FrozenSys(str(bundle / "engine.exe"), str(bundle)),
         )
         assert resolve_tool("yt-dlp") == str(exe)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX process-group semantics")
+class TestChildRegistry:
+    def test_run_child_captures_output(self) -> None:
+        result = run_child([sys.executable, "-c", "print('out')"])
+        assert result.returncode == 0
+        assert result.stdout.strip() == "out"
+        assert live_children() == []
+
+    def test_run_child_propagates_file_not_found(self, tmp_path: Path) -> None:
+        with pytest.raises(FileNotFoundError):
+            run_child([str(tmp_path / "no-such-tool")])
+
+    def test_kill_children_terminates_process_group(self) -> None:
+        """A live registered child's whole process group dies on kill_children()."""
+        results: list[int] = []
+
+        def run() -> None:
+            sleeper = [sys.executable, "-c", "import time; time.sleep(60)"]
+            results.append(run_child(sleeper).returncode)
+
+        thread = threading.Thread(target=run, daemon=True)
+        thread.start()
+        assert _wait_for(lambda: len(live_children()) == 1)
+        child_pid = live_children()[0]
+
+        kill_children()
+        thread.join(timeout=10)
+        assert not thread.is_alive()
+        assert live_children() == []
+        assert results == [-15]  # SIGTERM
+        with pytest.raises(ProcessLookupError):
+            os.killpg(child_pid, 0)  # the whole process group is gone
+
+    def test_kill_children_noop_when_registry_empty(self) -> None:
+        kill_children()  # must not raise
+        assert live_children() == []

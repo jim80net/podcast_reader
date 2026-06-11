@@ -69,7 +69,7 @@ class TestTranscribe:
         expected_json = tmp_path / "episode.json"
         expected_json.write_text('{"segments": []}')
 
-        with patch("podcast_reader.transcribe.subprocess.run") as mock_run:
+        with patch("podcast_reader.transcribe.run_child") as mock_run:
             mock_run.return_value = subprocess.CompletedProcess(
                 args=[], returncode=0, stdout="", stderr=""
             )
@@ -87,7 +87,7 @@ class TestTranscribe:
         audio_file = tmp_path / "episode.mp3"
         audio_file.touch()
 
-        with patch("podcast_reader.transcribe.subprocess.run") as mock_run:
+        with patch("podcast_reader.transcribe.run_child") as mock_run:
             mock_run.return_value = subprocess.CompletedProcess(
                 args=[], returncode=1, stdout="", stderr="CUDA error"
             )
@@ -108,7 +108,7 @@ class TestTranscribe:
 
         with (
             patch(
-                "podcast_reader.transcribe.subprocess.run",
+                "podcast_reader.transcribe.run_child",
                 side_effect=FileNotFoundError(2, "No such file or directory"),
             ),
             pytest.raises(RuntimeError, match="whisper"),

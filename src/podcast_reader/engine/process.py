@@ -6,10 +6,11 @@ atomically with mode 0600, print the ready sentinel, then hand the pre-bound
 socket to uvicorn. The advertised port is therefore live before any client
 reads the discovery file — no probe-the-port retry loop, no TOCTOU.
 
-Child reaping: POSIX children run in their own session
-(``tools.popen_kwargs``); on Windows the engine joins a Job Object with
-kill-on-job-close at startup so children (which inherit job membership) die
-with the engine.
+Child reaping: POSIX children run in their own session and are registered in
+``tools``' child registry by ``tools.run_child``; shutdown calls
+``tools.kill_children`` to SIGTERM each live process group. On Windows the
+engine joins a Job Object with kill-on-job-close at startup so children
+(which inherit job membership) die with the engine.
 """
 
 from __future__ import annotations
@@ -36,7 +37,10 @@ from podcast_reader.engine.settings import (
     token_fingerprint,
 )
 from podcast_reader.pipeline import run_pipeline
-from podcast_reader.tools import popen_kwargs  # re-export: spawn-time child options
+from podcast_reader.tools import (
+    kill_children,
+    popen_kwargs,  # re-export: spawn-time child options
+)
 from podcast_reader.types import LibraryEntry, PipelineRequest, PipelineResult
 
 if TYPE_CHECKING:
@@ -210,6 +214,7 @@ def serve_engine(
         server.run(sockets=[sock])
     finally:
         remove_discovery(path)
+        kill_children()  # unblock the worker so store.shutdown() can join it
         store.shutdown()
         sock.close()
 

@@ -1,17 +1,29 @@
-"""Locate console-script executables and spawn-time process options.
+"""Locate console-script executables and run registered child processes.
 
 Lives at the bottom of the import graph (no project imports) so both the
 pipeline's tool call sites and the engine process model can share it without
-cycles.
+cycles. Tool call sites spawn children via :func:`run_child`, which keeps a
+registry of live children so :func:`kill_children` can reap them when the
+engine shuts down.
 """
 
 from __future__ import annotations
 
+import contextlib
 import os
 import shutil
+import signal
+import subprocess
 import sys
+import threading
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+_CHILDREN_LOCK = threading.Lock()
+_CHILDREN: dict[int, subprocess.Popen[str]] = {}
 
 
 def resolve_tool(name: str, tools_dir: Path | None = None) -> str:
@@ -70,3 +82,54 @@ def popen_kwargs() -> dict[str, Any]:
     if sys.platform == "win32":
         return {}
     return {"start_new_session": True}
+
+
+def run_child(args: Sequence[str]) -> subprocess.CompletedProcess[str]:
+    """Run an external tool to completion with captured text output.
+
+    Drop-in for ``subprocess.run(args, capture_output=True, text=True,
+    **popen_kwargs())`` that additionally registers the child in the module
+    registry while it runs, so :func:`kill_children` can terminate it on
+    engine shutdown. Raises :class:`FileNotFoundError` when the executable
+    does not exist, exactly like ``subprocess.run``.
+    """
+    proc: subprocess.Popen[str] = subprocess.Popen(
+        args,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        **popen_kwargs(),
+    )
+    with _CHILDREN_LOCK:
+        _CHILDREN[proc.pid] = proc
+    try:
+        stdout, stderr = proc.communicate()
+    finally:
+        with _CHILDREN_LOCK:
+            _CHILDREN.pop(proc.pid, None)
+    return subprocess.CompletedProcess(list(args), proc.wait(), stdout, stderr)
+
+
+def live_children() -> list[int]:
+    """PIDs of registered children that are still running."""
+    with _CHILDREN_LOCK:
+        return [pid for pid, proc in _CHILDREN.items() if proc.poll() is None]
+
+
+def kill_children() -> None:
+    """Terminate every live registered child's process group (POSIX only).
+
+    Each child runs in its own session (:func:`popen_kwargs`), so its pid is
+    also its process-group id; signalling the group reaches grandchildren too.
+    Windows is a no-op: the engine's kill-on-close Job Object reaps children
+    there (see ``podcast_reader.engine.process``).
+    """
+    if sys.platform == "win32":
+        return
+    with _CHILDREN_LOCK:
+        procs = list(_CHILDREN.values())
+    for proc in procs:
+        if proc.poll() is not None:
+            continue
+        with contextlib.suppress(ProcessLookupError):  # finished between poll and kill
+            os.killpg(proc.pid, signal.SIGTERM)
