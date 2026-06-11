@@ -226,6 +226,74 @@ class TestGenerateChapters:
         )
         assert chapters == _CHAPTERS_JSON
 
+    def test_fenced_content_without_trailing_newline_parses(self) -> None:
+        fenced = "```json\n" + json.dumps(_CHAPTERS_JSON) + "```"
+        recorder = _Recorder(httpx.Response(200, json=_completion(fenced)))
+        chapters = generate_chapters(
+            "[0.0] Hello.",
+            spec=self.SPEC,
+            api_key="sk-test",
+            transport=recorder.transport,
+        )
+        assert chapters == _CHAPTERS_JSON
+
+    @pytest.mark.parametrize("content", ["```json", "```", ""])
+    def test_fence_only_or_blank_content_raises_chapter_error(self, content: str) -> None:
+        """A single-line fence (no newline) must not raise IndexError — it is
+        an empty response, reported with a self-authored ChapterError."""
+        recorder = _Recorder(httpx.Response(200, json=_completion(content)))
+        with pytest.raises(ChapterError, match="empty response"):
+            generate_chapters(
+                "[0.0] Hello.",
+                spec=self.SPEC,
+                api_key="sk-test",
+                transport=recorder.transport,
+            )
+
+    def test_null_content_raises_chapter_error(self) -> None:
+        """message.content: null must not parse as the string 'None'."""
+        body = {"choices": [{"finish_reason": "stop", "message": {"content": None}}]}
+        recorder = _Recorder(httpx.Response(200, json=body))
+        with pytest.raises(ChapterError, match="empty response"):
+            generate_chapters(
+                "[0.0] Hello.",
+                spec=self.SPEC,
+                api_key="sk-test",
+                transport=recorder.transport,
+            )
+
+    def test_non_json_response_raises_chapter_error_without_body(self) -> None:
+        """An HTML gateway page (custom provider misconfiguration) must produce
+        a self-authored diagnosis — and never echo the response body."""
+        recorder = _Recorder(httpx.Response(200, text="<html>secret-fragment Bad Gateway</html>"))
+        with pytest.raises(ChapterError, match="unexpected response format") as excinfo:
+            generate_chapters(
+                "[0.0] Hello.",
+                spec=self.SPEC,
+                api_key="sk-test",
+                transport=recorder.transport,
+            )
+        assert "secret-fragment" not in str(excinfo.value)
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            {},  # missing choices
+            {"choices": []},  # empty choices
+            {"choices": [{"finish_reason": "stop"}]},  # missing message
+            [],  # JSON array instead of object
+        ],
+    )
+    def test_malformed_envelope_raises_chapter_error(self, body: Any) -> None:
+        recorder = _Recorder(httpx.Response(200, json=body))
+        with pytest.raises(ChapterError, match="unexpected response format"):
+            generate_chapters(
+                "[0.0] Hello.",
+                spec=self.SPEC,
+                api_key="sk-test",
+                transport=recorder.transport,
+            )
+
     def test_truncation_raises_chapter_error(self) -> None:
         """Spec: Truncation raises — finish_reason 'length' is a ChapterError
         whose self-authored message may be surfaced verbatim (M2)."""

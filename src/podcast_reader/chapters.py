@@ -175,21 +175,39 @@ def generate_chapters(
         # Never include the response body in the message (key-redaction spec).
         raise RuntimeError(f"Chapter provider request failed: HTTP {response.status_code}")
 
-    body: dict[str, Any] = response.json()
-    choice = body["choices"][0]
-    if choice.get("finish_reason") == "length":
+    # Validate the response envelope before trusting its shape: a misconfigured
+    # custom endpoint may return HTML, a non-OpenAI error format, or an empty
+    # choices array. The ChapterError message is self-authored (never derived
+    # from the body) so it is safe to surface verbatim.
+    try:
+        body: dict[str, Any] = response.json()
+        choice = body["choices"][0]
+        finish_reason = choice.get("finish_reason")
+        content = choice["message"]["content"]
+    except (json.JSONDecodeError, LookupError, AttributeError, TypeError) as exc:
+        raise ChapterError(
+            "Chapter provider returned an unexpected response format "
+            "(not an OpenAI-compatible chat completion). "
+            "Check the provider base URL and API key."
+        ) from exc
+    if finish_reason == "length":
         # Self-authored message (no body content) — safe to surface verbatim.
         raise ChapterError(
             "Chapter response was truncated (hit the provider's max_tokens cap). "
             "The transcript may be too long for a single request."
         )
     # Unknown finish_reason values are treated as success-with-parse-attempt.
-    raw = str(choice["message"]["content"]).strip()
+    raw = str(content).strip() if content is not None else ""
 
-    # Strip markdown code fences if present
+    # Strip markdown code fences if present (a single-line fence like "```json"
+    # has no newline and strips to nothing).
     if raw.startswith("```"):
-        raw = raw.split("\n", 1)[1]
+        first_newline = raw.find("\n")
+        raw = raw[first_newline + 1 :] if first_newline != -1 else ""
         if raw.endswith("```"):
             raw = raw.rsplit("```", 1)[0]
+        raw = raw.strip()
+    if not raw:
+        raise ChapterError("Chapter provider returned an empty response (no message content).")
 
     return json.loads(raw)  # type: ignore[no-any-return]
