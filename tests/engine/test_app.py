@@ -46,6 +46,7 @@ _ROUTES = [
     ("GET", "/v1/settings"),
     ("PUT", "/v1/settings"),
     ("PUT", "/v1/keys"),
+    ("POST", "/v1/shutdown"),
 ]
 
 
@@ -75,7 +76,14 @@ class _Engine:
 
         self.store = JobStore(data_dir, runner)
         self.key_store: dict[str, str] = {}
-        self.app = create_app(data_dir, self.store, key_store=self.key_store, heartbeat_s=0.05)
+        self.shutdown_requests: list[bool] = []
+        self.app = create_app(
+            data_dir,
+            self.store,
+            key_store=self.key_store,
+            heartbeat_s=0.05,
+            on_shutdown=lambda: self.shutdown_requests.append(True),
+        )
         self.token = load_engine_state(data_dir)["token"]
         self.headers = {"Authorization": f"Bearer {self.token}"}
         self.client = TestClient(self.app)
@@ -376,6 +384,31 @@ class TestAwaitingConfirmationRoutes:
             assert after["events"] == []
         finally:
             restarted.store.shutdown()
+
+
+class TestShutdownRoute:
+    """Spec: Graceful shutdown endpoint (the full-process exit lives in
+    test_process.py — here: 202, hook invocation, auth, and the no-hook case)."""
+
+    def test_shutdown_returns_202_and_invokes_hook(self, engine: _Engine) -> None:
+        response = engine.client.post("/v1/shutdown", headers=engine.headers)
+        assert response.status_code == 202
+        assert engine.shutdown_requests == [True]
+
+    def test_unauthenticated_shutdown_rejected_and_hook_untouched(self, engine: _Engine) -> None:
+        """Spec scenario: Unauthenticated shutdown rejected."""
+        response = engine.client.post("/v1/shutdown")
+        assert response.status_code == 401
+        assert engine.shutdown_requests == []
+        # the app keeps serving
+        assert engine.client.get("/v1/health", headers=engine.headers).status_code == 200
+
+    def test_shutdown_without_hook_is_503(self, engine: _Engine, tmp_path: Path) -> None:
+        """An app built without a shutdown hook refuses loudly, not silently."""
+        bare_app = create_app(tmp_path, engine.store, key_store={})
+        client = TestClient(bare_app)
+        response = client.post("/v1/shutdown", headers=engine.headers)
+        assert response.status_code == 503
 
 
 class TestEvents:

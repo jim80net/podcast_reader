@@ -15,7 +15,7 @@ import queue
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from fastapi import FastAPI, HTTPException, Request, Response, status
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, Response, status
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
@@ -114,12 +114,17 @@ def create_app(
     *,
     key_store: dict[str, str] | None = None,
     heartbeat_s: float = 15.0,
+    on_shutdown: Callable[[], None] | None = None,
 ) -> FastAPI:
     """Build the engine's FastAPI app bound to *store* and *data_dir*.
 
     *key_store* is the process-memory chapter-API-key dict shared with the job
     runner (created in ``serve_engine``); keys live only there — never in any
     file or response.
+
+    *on_shutdown* backs ``POST /v1/shutdown``: ``serve_engine`` injects a hook
+    that sets the uvicorn server's ``should_exit`` (the server object exists
+    only there). Without one, the endpoint answers 503 — never a silent no-op.
     """
     app = FastAPI(title="podcast-reader engine", version=engine_version())
     expected_token = load_engine_state(data_dir)["token"].encode()
@@ -150,6 +155,17 @@ def create_app(
             version=engine_version(),
             token_fingerprint=token_fingerprint(state["token"]),
         )
+
+    @app.post("/v1/shutdown", status_code=status.HTTP_202_ACCEPTED)
+    def shutdown(background: BackgroundTasks) -> None:
+        """Request graceful engine shutdown (portable: Windows has no SIGTERM).
+
+        Responds 202 first — the hook runs as a background task after the
+        response is sent, so the reply never races the server's exit.
+        """
+        if on_shutdown is None:
+            raise HTTPException(status_code=503, detail="shutdown hook not configured")
+        background.add_task(on_shutdown)
 
     @app.post("/v1/jobs", status_code=status.HTTP_201_CREATED)
     def submit_job(body: JobSubmission) -> JobRecord:

@@ -259,8 +259,21 @@ def serve_engine(
     # (the runner closure is built before the app, so app state can't host it).
     key_store: dict[str, str] = {}
     store = JobStore(base, make_pipeline_runner(base, key_store))
-    app = create_app(base, store, key_store=key_store)
-    server = uvicorn.Server(uvicorn.Config(app, log_level="info"))
+
+    # POST /v1/shutdown hook: the server object is created after the app, so
+    # the hook reaches it through this list (filled before any request runs).
+    servers: list[uvicorn.Server] = []
+
+    def request_shutdown() -> None:
+        for srv in servers:
+            srv.should_exit = True
+
+    app = create_app(base, store, key_store=key_store, on_shutdown=request_shutdown)
+    # timeout_graceful_shutdown bounds exit even when a client leaves an SSE
+    # stream open — an open /v1/events response would otherwise hold graceful
+    # shutdown forever (per P1).
+    server = uvicorn.Server(uvicorn.Config(app, log_level="info", timeout_graceful_shutdown=3))
+    servers.append(server)
     if on_server is not None:
         on_server(server)
     path = discovery_file if discovery_file is not None else base / DISCOVERY_FILE
@@ -270,6 +283,10 @@ def serve_engine(
         server.run(sockets=[sock])
     finally:
         remove_discovery(path)
+        # Mark the store stopping BEFORE reaping children: the in-flight job
+        # fails when its child dies, and that failure must already be
+        # attributable to shutdown (journaled interrupted, per P2).
+        store.begin_shutdown()
         kill_children()  # unblock the worker so store.shutdown() can join it
         store.shutdown()
         sock.close()
