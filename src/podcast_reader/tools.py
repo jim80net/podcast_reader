@@ -16,6 +16,7 @@ import signal
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -131,11 +132,13 @@ def live_children() -> list[int]:
         return [pid for pid, proc in _CHILDREN.items() if proc.poll() is None]
 
 
-def kill_children() -> None:
+def kill_children(grace_s: float = 5.0) -> None:
     """Terminate every live registered child's process group (POSIX only).
 
     Each child runs in its own session (:func:`popen_kwargs`), so its pid is
     also its process-group id; signalling the group reaches grandchildren too.
+    SIGTERM goes out first; children that have not exited after *grace_s*
+    seconds (e.g. a tool that traps TERM) get SIGKILL on the whole group.
     Windows is a no-op: the engine's kill-on-close Job Object reaps children
     there (see ``podcast_reader.engine.process``).
     """
@@ -143,8 +146,18 @@ def kill_children() -> None:
         return
     with _CHILDREN_LOCK:
         procs = list(_CHILDREN.values())
+    survivors: list[subprocess.Popen[str]] = []
     for proc in procs:
         if proc.poll() is not None:
             continue
         with contextlib.suppress(ProcessLookupError):  # finished between poll and kill
             os.killpg(proc.pid, signal.SIGTERM)
+        survivors.append(proc)
+    deadline = time.monotonic() + grace_s
+    for proc in survivors:
+        try:
+            proc.wait(timeout=max(deadline - time.monotonic(), 0))
+        except subprocess.TimeoutExpired:
+            with contextlib.suppress(ProcessLookupError):  # exited at the last moment
+                os.killpg(proc.pid, signal.SIGKILL)
+            proc.wait()
