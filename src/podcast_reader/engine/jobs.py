@@ -187,7 +187,9 @@ class JobStore:
             self._write_journal()
 
     def _recover_journal(self) -> None:
-        """Load the journal, flipping any ``running`` job to ``interrupted``."""
+        """Load the journal, flipping ``running`` → ``interrupted`` and
+        re-enqueueing persisted ``queued`` jobs in ``created_at`` order so the
+        FIFO promise survives a restart."""
         path = self._data_dir / JOURNAL_FILE
         if not path.exists():
             return
@@ -201,6 +203,9 @@ class JobStore:
             self._jobs[record["id"]] = record
         if interrupted:
             self._write_journal()
+        queued = [r for r in self._jobs.values() if r["state"] == "queued"]
+        for record in sorted(queued, key=lambda r: r["created_at"]):
+            self._queue.put(record["id"])
 
     def _write_journal(self) -> None:
         """Atomic journal write; caller must hold the lock."""

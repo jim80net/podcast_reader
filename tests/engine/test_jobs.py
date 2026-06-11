@@ -193,6 +193,48 @@ class TestPersistence:
         on_disk = json.loads((tmp_path / "jobs.json").read_text())
         assert {r["id"]: r["state"] for r in on_disk}["j-running"] == "interrupted"
 
+    def test_restart_reenqueues_queued_jobs_in_created_order(self, tmp_path: Path) -> None:
+        """Persisted queued jobs must run after a restart (FIFO by created_at),
+        while the interrupted running job stays interrupted."""
+
+        def _record(job_id: str, state: str, created_at: float) -> dict[str, object]:
+            return {
+                "id": job_id,
+                "source": f"https://example.com/{job_id}",
+                "title": None,
+                "state": state,
+                "error": None,
+                "events": [],
+                "result": None,
+                "created_at": created_at,
+                "updated_at": created_at,
+            }
+
+        # journal order deliberately disagrees with created_at order
+        journal = [
+            _record("j-running", "running", 1.0),
+            _record("j-queued-late", "queued", 3.0),
+            _record("j-queued-early", "queued", 2.0),
+        ]
+        (tmp_path / "jobs.json").write_text(json.dumps(journal))
+
+        run_order: list[str] = []
+
+        def ordered_runner(
+            record: JobRecord, on_event: Callable[[PipelineEvent], None]
+        ) -> PipelineResult:
+            run_order.append(record["id"])
+            return _RESULT
+
+        store = JobStore(tmp_path, ordered_runner)
+        assert store.get("j-running")["state"] == "interrupted"
+        store.start_worker()
+        assert _wait_for(lambda: store.get("j-queued-late")["state"] == "done")
+        assert store.get("j-queued-early")["state"] == "done"
+        assert store.get("j-running")["state"] == "interrupted"
+        assert run_order == ["j-queued-early", "j-queued-late"]
+        store.shutdown()
+
     def test_retry_by_resubmission(self, tmp_path: Path) -> None:
         journal = [
             {
