@@ -230,10 +230,10 @@ def serve_engine(
     server = uvicorn.Server(uvicorn.Config(app, log_level="info"))
     if on_server is not None:
         on_server(server)
-    store.start_worker()
     path = discovery_file if discovery_file is not None else base / DISCOVERY_FILE
-    write_discovery(path, state, sock)
     try:
+        store.start_worker()
+        write_discovery(path, state, sock)
         server.run(sockets=[sock])
     finally:
         remove_discovery(path)

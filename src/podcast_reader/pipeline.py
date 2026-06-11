@@ -114,6 +114,7 @@ def run_pipeline(
                 f"Transcript JSON already exists: {json_path} (delete to re-fetch)",
                 {"cached": True},
             )
+            _emit(on_event, "step_finished", "captions", "", {"cached": True})
         else:
             _emit(
                 on_event,
@@ -163,6 +164,7 @@ def run_pipeline(
                 f"Audio already exists: {audio_path} (delete to re-download)",
                 {"cached": True},
             )
+            _emit(on_event, "step_finished", "download", "", {"cached": True})
         else:
             _emit(on_event, "step_started", "download", "Downloading with yt-dlp...", {})
             audio_path = download_audio(source, output_dir, cookies=cookies)
@@ -221,6 +223,7 @@ def run_pipeline(
             {"cached": True},
         )
         chapters = json.loads(chapters_path.read_text())
+        _emit(on_event, "step_finished", "chapters", "", {"cached": True})
     elif os.environ.get("ANTHROPIC_API_KEY"):
         _emit(
             on_event,
@@ -374,6 +377,7 @@ def _transcribe_if_needed(
             f"Transcript JSON already exists: {json_path} (delete to re-transcribe)",
             {"cached": True},
         )
+        _emit(on_event, "step_finished", "transcribe", "", {"cached": True})
         return
     _emit(
         on_event,

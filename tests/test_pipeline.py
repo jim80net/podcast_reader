@@ -685,6 +685,54 @@ class TestEvents:
         assert started[0] == "resolve" and "render" in started
         assert events[-1]["kind"] == "job_done"
 
+    @patch("podcast_reader.pipeline._wsl_path", return_value=None)
+    @patch("podcast_reader.pipeline.build_html", return_value="<html></html>")
+    @patch("podcast_reader.pipeline.fetch_transcript")
+    def test_cached_captions_and_chapters_emit_paired_finished(
+        self,
+        mock_fetch: MagicMock,
+        _b: MagicMock,
+        _w: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        """Cache hits must close their step: every step_started gets a step_finished,
+        so SSE consumers tracking step lifecycle never see a step stuck open."""
+        (tmp_path / "abc123XYZqq.json").write_text(json.dumps(_SAMPLE_SEGMENTS))
+        (tmp_path / "abc123XYZqq_chapters.json").write_text(json.dumps(_SAMPLE_CHAPTERS))
+        events: list[PipelineEvent] = []
+        run_pipeline(_request(input_arg=_YT_URL, output_dir=tmp_path), on_event=events.append)
+        mock_fetch.assert_not_called()
+        started = [e["step"] for e in events if e["kind"] == "step_started"]
+        finished = [e["step"] for e in events if e["kind"] == "step_finished"]
+        assert "captions" in started and "chapters" in started  # the cache-hit steps
+        assert sorted(started) == sorted(finished)
+
+    @patch("podcast_reader.pipeline._wsl_path", return_value=None)
+    @patch("podcast_reader.pipeline.build_html", return_value="<html></html>")
+    @patch("podcast_reader.pipeline.transcribe")
+    @patch("podcast_reader.pipeline.download_audio")
+    def test_cached_download_and_transcribe_emit_paired_finished(
+        self,
+        mock_download: MagicMock,
+        mock_transcribe: MagicMock,
+        _b: MagicMock,
+        _w: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        """The cached download and transcribe paths must also pair their events."""
+        url = "https://x.com/user/status/123456"
+        (tmp_path / "video_id.mp3").write_text("fake audio")
+        (tmp_path / "video_id.ytdlp").write_text(url)
+        (tmp_path / "video_id.json").write_text(json.dumps(_SAMPLE_SEGMENTS))
+        events: list[PipelineEvent] = []
+        run_pipeline(_request(input_arg=url, output_dir=tmp_path), on_event=events.append)
+        mock_download.assert_not_called()
+        mock_transcribe.assert_not_called()
+        started = [e["step"] for e in events if e["kind"] == "step_started"]
+        finished = [e["step"] for e in events if e["kind"] == "step_finished"]
+        assert "download" in started and "transcribe" in started  # the cache-hit steps
+        assert sorted(started) == sorted(finished)
+
 
 class TestRunPipelineTranscriptSource:
     """Verify the correct transcript source label is passed to build_html."""
