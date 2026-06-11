@@ -244,9 +244,27 @@ def serve_engine(
 
 if sys.platform == "win32":  # pragma: no cover — exercised on Windows only
     import ctypes
+    from ctypes import wintypes
 
     _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000
     _JOB_OBJECT_EXTENDED_LIMIT_INFORMATION = 9
+
+    # Declare restype/argtypes explicitly: ctypes defaults every result to a
+    # C int, which truncates 64-bit HANDLEs on 64-bit Windows.
+    _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    _kernel32.CreateJobObjectW.restype = wintypes.HANDLE
+    _kernel32.CreateJobObjectW.argtypes = (wintypes.LPVOID, wintypes.LPCWSTR)
+    _kernel32.SetInformationJobObject.restype = wintypes.BOOL
+    _kernel32.SetInformationJobObject.argtypes = (
+        wintypes.HANDLE,  # hJob
+        ctypes.c_int,  # JOBOBJECTINFOCLASS
+        wintypes.LPVOID,  # lpJobObjectInformation
+        wintypes.DWORD,  # cbJobObjectInformationLength
+    )
+    _kernel32.AssignProcessToJobObject.restype = wintypes.BOOL
+    _kernel32.AssignProcessToJobObject.argtypes = (wintypes.HANDLE, wintypes.HANDLE)
+    _kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+    _kernel32.GetCurrentProcess.argtypes = ()
 
     class _IoCounters(ctypes.Structure):
         _fields_ = [
@@ -283,20 +301,19 @@ if sys.platform == "win32":  # pragma: no cover — exercised on Windows only
 
     def _windows_job() -> int:
         """Create a Job Object whose processes are killed when its handle closes."""
-        kernel32 = ctypes.windll.kernel32
-        job = kernel32.CreateJobObjectW(None, None)
+        job = _kernel32.CreateJobObjectW(None, None)
         if not job:
-            raise OSError("CreateJobObjectW failed")
+            raise ctypes.WinError(ctypes.get_last_error())
         limits = _ExtendedLimits()
         limits.BasicLimitInformation.LimitFlags = _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
-        ok = kernel32.SetInformationJobObject(
+        ok = _kernel32.SetInformationJobObject(
             job,
             _JOB_OBJECT_EXTENDED_LIMIT_INFORMATION,
             ctypes.byref(limits),
             ctypes.sizeof(limits),
         )
         if not ok:
-            raise OSError("SetInformationJobObject failed")
+            raise ctypes.WinError(ctypes.get_last_error())
         return int(job)
 
     _job_handle: int | None = None
@@ -306,8 +323,7 @@ if sys.platform == "win32":  # pragma: no cover — exercised on Windows only
         global _job_handle
         if _job_handle is not None:
             return
-        kernel32 = ctypes.windll.kernel32
         job = _windows_job()
-        if not kernel32.AssignProcessToJobObject(job, kernel32.GetCurrentProcess()):
-            raise OSError("AssignProcessToJobObject failed")
+        if not _kernel32.AssignProcessToJobObject(job, _kernel32.GetCurrentProcess()):
+            raise ctypes.WinError(ctypes.get_last_error())
         _job_handle = job  # keep the handle alive for the engine's lifetime

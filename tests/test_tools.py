@@ -229,3 +229,47 @@ class TestChildRegistry:
         proc = captured[0]
         assert proc.returncode is not None, "child must be killed and reaped on interrupt"
         assert live_children() == []
+
+    def test_run_child_kills_grandchildren_when_communicate_raises(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The whole process group dies on interrupt, not just the direct child (C2).
+
+        yt-dlp spawns ffmpeg; a bare ``proc.kill()`` would orphan it. The child
+        spawns its own sleeper, then signals readiness on stdout so the
+        interrupt cannot race the grandchild's spawn.
+        """
+        import subprocess
+
+        captured: list[subprocess.Popen[str]] = []
+        real_popen = subprocess.Popen
+
+        class SpyPopen(real_popen):  # type: ignore[type-arg]
+            def communicate(self, *args: object, **kwargs: object) -> tuple[str, str]:
+                captured.append(self)
+                assert self.stdout is not None
+                assert self.stdout.readline().strip() == "ready"
+                raise KeyboardInterrupt
+
+        monkeypatch.setattr("podcast_reader.tools.subprocess.Popen", SpyPopen)
+        spawner = (
+            "import subprocess, sys, time\n"
+            "subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
+            "print('ready', flush=True)\n"
+            "time.sleep(60)\n"
+        )
+        with pytest.raises(KeyboardInterrupt):
+            run_child([sys.executable, "-c", spawner])
+
+        proc = captured[0]
+        assert proc.returncode is not None, "child must be killed and reaped on interrupt"
+        assert live_children() == []
+
+        def group_gone() -> bool:
+            try:
+                os.killpg(proc.pid, 0)
+            except ProcessLookupError:
+                return True
+            return False
+
+        assert _wait_for(group_gone), "grandchild must die with the process group"

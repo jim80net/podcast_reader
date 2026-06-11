@@ -107,8 +107,16 @@ def run_child(args: Sequence[str]) -> subprocess.CompletedProcess[str]:
     except BaseException:
         # Preserve subprocess.run's kill-on-exception guarantee: without it a
         # KeyboardInterrupt would orphan the detached child (start_new_session
-        # insulates it from the terminal's SIGINT).
-        proc.kill()
+        # insulates it from the terminal's SIGINT). On POSIX kill the whole
+        # process group (pid == pgid via start_new_session) so grandchildren
+        # like yt-dlp's ffmpeg die too — mirroring kill_children. On Windows
+        # the engine's Job Object reaps descendants, so killing the direct
+        # child suffices.
+        if sys.platform == "win32":
+            proc.kill()
+        else:
+            with contextlib.suppress(ProcessLookupError):  # already exited
+                os.killpg(proc.pid, signal.SIGKILL)
         proc.wait()
         raise
     finally:
