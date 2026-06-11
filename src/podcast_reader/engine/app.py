@@ -50,7 +50,11 @@ class JobSubmission(BaseModel):
 
 
 class SettingsBody(BaseModel):
-    """Body of ``PUT /v1/settings`` — mirrors :class:`EngineSettings`."""
+    """Body of ``PUT /v1/settings`` — mirrors :class:`EngineSettings`.
+
+    Fields added after Phase 1 default to ``None`` ("keep the current value"),
+    so PUTs from pre-change clients keep succeeding without resetting them.
+    """
 
     whisper_model: str
     whisper_lang: str
@@ -58,8 +62,10 @@ class SettingsBody(BaseModel):
     sentences: int
     library_dir: str
     chapter_model: str
+    chapter_provider: str | None = None
+    custom_provider_url: str | None = None
 
-    def to_settings(self) -> EngineSettings:
+    def to_settings(self, current: EngineSettings) -> EngineSettings:
         return EngineSettings(
             whisper_model=self.whisper_model,
             whisper_lang=self.whisper_lang,
@@ -67,6 +73,16 @@ class SettingsBody(BaseModel):
             sentences=self.sentences,
             library_dir=str(Path(self.library_dir).expanduser()),
             chapter_model=self.chapter_model,
+            chapter_provider=(
+                self.chapter_provider
+                if self.chapter_provider is not None
+                else current["chapter_provider"]
+            ),
+            custom_provider_url=(
+                self.custom_provider_url
+                if self.custom_provider_url is not None
+                else current["custom_provider_url"]
+            ),
         )
 
 
@@ -158,7 +174,7 @@ def create_app(data_dir: Path, store: JobStore, *, heartbeat_s: float = 15.0) ->
 
     @app.put("/v1/settings")
     def put_settings(body: SettingsBody) -> EngineSettings:
-        settings = body.to_settings()
+        settings = body.to_settings(load_settings(data_dir))
         save_settings(data_dir, settings)
         return settings
 

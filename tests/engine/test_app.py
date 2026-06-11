@@ -347,3 +347,39 @@ class TestSettings:
         assert put.status_code == 200
         assert put.json()["library_dir"] == str(tmp_path / "lib")
         assert load_settings(tmp_path)["library_dir"] == str(tmp_path / "lib")
+
+    def test_provider_fields_roundtrip(self, engine: _Engine, tmp_path: Path) -> None:
+        current = engine.client.get("/v1/settings", headers=engine.headers).json()
+        assert current["chapter_provider"] == "anthropic"
+        assert current["chapter_model"] == ""  # provider default
+
+        current["chapter_provider"] = "custom"
+        current["custom_provider_url"] = "https://llm.example.com/v1"
+        put = engine.client.put("/v1/settings", json=current, headers=engine.headers)
+        assert put.status_code == 200
+
+        fetched = engine.client.get("/v1/settings", headers=engine.headers).json()
+        assert fetched["chapter_provider"] == "custom"
+        assert fetched["custom_provider_url"] == "https://llm.example.com/v1"
+        assert load_settings(tmp_path)["chapter_provider"] == "custom"
+
+    def test_old_shape_put_succeeds_and_keeps_new_field_values(self, engine: _Engine) -> None:
+        """Spec scenario: Old-shape PUT succeeds — pre-change clients omit the
+        new fields; the request succeeds and the new fields keep current values."""
+        current = engine.client.get("/v1/settings", headers=engine.headers).json()
+        current["chapter_provider"] = "deepseek"
+        assert (
+            engine.client.put("/v1/settings", json=current, headers=engine.headers).status_code
+            == 200
+        )
+
+        old_shape = {
+            k: v for k, v in current.items() if k not in ("chapter_provider", "custom_provider_url")
+        }
+        old_shape["sentences"] = 7
+        put = engine.client.put("/v1/settings", json=old_shape, headers=engine.headers)
+        assert put.status_code == 200
+
+        fetched = engine.client.get("/v1/settings", headers=engine.headers).json()
+        assert fetched["sentences"] == 7
+        assert fetched["chapter_provider"] == "deepseek"  # kept, not reset

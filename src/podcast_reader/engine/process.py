@@ -38,6 +38,7 @@ from podcast_reader.engine.settings import (
     token_fingerprint,
 )
 from podcast_reader.pipeline import PipelineError, run_pipeline
+from podcast_reader.providers import PROVIDERS
 from podcast_reader.tools import (
     kill_children,
     popen_kwargs,  # re-export: spawn-time child options
@@ -162,20 +163,21 @@ def make_pipeline_runner(base: Path) -> JobRunner:
         staging = library.staging_dir(library_dir, source_id)
         staging.mkdir(parents=True, exist_ok=True)
 
+        provider = settings["chapter_provider"]
         request = PipelineRequest(
             source=record["source"],
             title=record["title"],
             output_dir=str(staging),
-            model=settings["chapter_model"],
+            model=settings["chapter_model"] or None,
             whisper_model=settings["whisper_model"],
             whisper_lang=settings["whisper_lang"],
             whisper_device=settings["whisper_device"],
             hf_token=os.environ.get("HF_TOKEN"),
             sentences=settings["sentences"],
             cookies=os.environ.get("YT_DLP_COOKIES"),
-            chapter_provider="anthropic",
-            chapter_api_key=os.environ.get("ANTHROPIC_API_KEY"),
-            custom_provider_url="",
+            chapter_provider=provider,
+            chapter_api_key=_resolve_chapter_key(provider),
+            custom_provider_url=settings["custom_provider_url"],
         )
         staged = run_pipeline(request, on_event)
         result = _commit_artifacts(staged, library.entry_dir(library_dir, source_id))
@@ -192,6 +194,19 @@ def make_pipeline_runner(base: Path) -> JobRunner:
         return result
 
     return run
+
+
+def _resolve_chapter_key(provider: str) -> str | None:
+    """Resolve the chapter API key for *provider* from its environment variable.
+
+    The env fallback preserves headless ``podcast-reader serve`` deployments
+    that export ``ANTHROPIC_API_KEY`` today. An unknown provider resolves to
+    no key, which the pipeline degrades to a ``chapters_skipped`` warning.
+    """
+    spec = PROVIDERS.get(provider)
+    if spec is None:
+        return None
+    return os.environ.get(spec["key_env"])
 
 
 def _commit_artifacts(staged: PipelineResult, entry: Path) -> PipelineResult:

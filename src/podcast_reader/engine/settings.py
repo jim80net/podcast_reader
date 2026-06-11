@@ -80,6 +80,10 @@ def save_engine_state(base: Path, state: EngineState) -> None:
 def load_settings(base: Path) -> EngineSettings:
     """Load user settings, falling back to defaults without persisting them.
 
+    Loaded values are merged over :func:`default_settings`, so a settings file
+    persisted by an earlier version (lacking newer fields) upgrades cleanly —
+    no job may fail because the file predates a release.
+
     A malformed settings file is quarantined to ``settings.json.corrupt``
     (with a warning, mirroring the job-journal handling) and defaults are
     returned — bad settings must never prevent the engine from serving.
@@ -94,7 +98,7 @@ def load_settings(base: Path) -> EngineSettings:
     except (OSError, ValueError, TypeError) as exc:
         _quarantine(path, exc)
         return default_settings(base)
-    return cast("EngineSettings", loaded)
+    return cast("EngineSettings", {**default_settings(base), **loaded})
 
 
 def save_settings(base: Path, settings: EngineSettings) -> None:
@@ -110,7 +114,9 @@ def default_settings(base: Path) -> EngineSettings:
         whisper_device="cuda",
         sentences=5,
         library_dir=str(base / "library"),
-        chapter_model="claude-haiku-4-5-20251001",
+        chapter_model="",  # "" means: the chapter provider's default model
+        chapter_provider="anthropic",
+        custom_provider_url="",
     )
 
 

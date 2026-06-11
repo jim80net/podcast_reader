@@ -32,6 +32,7 @@ from podcast_reader.engine.settings import (
     engine_version,
     load_engine_state,
     load_settings,
+    save_settings,
     token_fingerprint,
 )
 from podcast_reader.tools import live_children, run_child
@@ -43,6 +44,23 @@ if TYPE_CHECKING:
     import uvicorn
 
     from podcast_reader.engine.settings import EngineState
+
+
+def _noop(event: object) -> None:
+    """Discard pipeline events."""
+
+
+def _fake_run_pipeline(request: object, on_event: object) -> PipelineResult:
+    """Stand-in pipeline: writes minimal artifacts into the staging dir."""
+    out = Path(request["output_dir"])  # type: ignore[index]
+    (out / "ep.json").write_text('{"segments": []}')
+    (out / "ep.html").write_text("<html>done</html>")
+    return PipelineResult(
+        json_path=str(out / "ep.json"),
+        chapters_path=None,
+        html_path=str(out / "ep.html"),
+        title="Episode",
+    )
 
 
 def _wait_for(predicate: Callable[[], bool], timeout: float = 15.0) -> bool:
@@ -267,6 +285,46 @@ class TestPipelineRunner:
         assert [e["source_id"] for e in entries] == [source_id]
         assert entries[0]["html_path"] == str(edir / "ep.html")
         assert entries[0]["title"] == "Episode"
+
+    def test_runner_falls_back_to_provider_env_key(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Spec scenario: Headless env var still works — no pushed key means the
+        configured provider's env var is injected at job dequeue."""
+        monkeypatch.setenv("PODCAST_READER_DATA_DIR", str(tmp_path))
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-env")
+
+        with patch(
+            "podcast_reader.engine.process.run_pipeline", side_effect=_fake_run_pipeline
+        ) as mock_run:
+            runner = make_pipeline_runner(tmp_path)
+            runner(new_job_record(job_id="j1", source="https://example.com/e", title=None), _noop)
+
+        request = mock_run.call_args.args[0]
+        assert request["chapter_provider"] == "anthropic"
+        assert request["chapter_api_key"] == "sk-ant-env"
+        assert request["model"] is None  # chapter_model "" -> provider default
+
+    def test_runner_provider_comes_from_settings_snapshot(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Spec scenario: Provider change applies to the next job (snapshot at dequeue)."""
+        monkeypatch.setenv("PODCAST_READER_DATA_DIR", str(tmp_path))
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-ds-env")
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-env")
+        settings = load_settings(tmp_path)
+        settings["chapter_provider"] = "deepseek"
+        save_settings(tmp_path, settings)
+
+        with patch(
+            "podcast_reader.engine.process.run_pipeline", side_effect=_fake_run_pipeline
+        ) as mock_run:
+            runner = make_pipeline_runner(tmp_path)
+            runner(new_job_record(job_id="j1", source="https://example.com/e", title=None), _noop)
+
+        request = mock_run.call_args.args[0]
+        assert request["chapter_provider"] == "deepseek"
+        assert request["chapter_api_key"] == "sk-ds-env"
 
     def test_missing_local_file_fails_with_structured_not_found(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

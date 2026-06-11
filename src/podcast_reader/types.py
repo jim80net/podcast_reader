@@ -84,7 +84,9 @@ class EngineSettings(TypedDict):
     whisper_device: str
     sentences: int
     library_dir: str
-    chapter_model: str
+    chapter_model: str  # "" means: the chapter provider's default model
+    chapter_provider: str  # a podcast_reader.providers.PROVIDERS key
+    custom_provider_url: str  # base URL for the "custom" provider ("" otherwise)
 
 
 def new_job_record(*, job_id: str, source: str, title: str | None) -> JobRecord:

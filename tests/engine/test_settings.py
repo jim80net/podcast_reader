@@ -128,12 +128,36 @@ class TestUserSettings:
         assert settings["whisper_lang"] == "en"
         assert settings["whisper_device"] == "cuda"
         assert settings["sentences"] == 5
-        assert settings["chapter_model"] == "claude-haiku-4-5-20251001"
+        # "" means "the provider's default model" (multi-provider-chapters).
+        assert settings["chapter_model"] == ""
+        assert settings["chapter_provider"] == "anthropic"
+        assert settings["custom_provider_url"] == ""
         assert settings["library_dir"] == str(tmp_path / "library")
 
     def test_defaults_not_persisted_until_saved(self, tmp_path: Path) -> None:
         load_settings(tmp_path)
         assert not (tmp_path / "settings.json").exists()
+
+    def test_stale_phase1_settings_file_loads_with_defaults_merged(self, tmp_path: Path) -> None:
+        """Spec scenario: Phase 1 settings file loads — new fields get defaults,
+        existing fields are preserved; no KeyError can reach the job runner."""
+        phase1 = {
+            "whisper_model": "medium",
+            "whisper_lang": "en",
+            "whisper_device": "cpu",
+            "sentences": 3,
+            "library_dir": str(tmp_path / "library"),
+            "chapter_model": "claude-haiku-4-5-20251001",
+        }
+        (tmp_path / "settings.json").write_text(json.dumps(phase1))
+
+        settings = load_settings(tmp_path)
+
+        assert settings["chapter_provider"] == "anthropic"
+        assert settings["custom_provider_url"] == ""
+        assert settings["whisper_model"] == "medium"  # file values win over defaults
+        assert settings["sentences"] == 3
+        assert settings["chapter_model"] == "claude-haiku-4-5-20251001"
 
 
 class TestCorruptSettings:
