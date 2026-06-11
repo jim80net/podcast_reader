@@ -11,14 +11,17 @@ from __future__ import annotations
 
 import hmac
 import json
+import os
 import queue
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import httpx
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, Response, status
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
+from podcast_reader.chapters import verify_key
 from podcast_reader.engine.jobs import JobStateError
 from podcast_reader.engine.library import get_entry, list_entries
 from podcast_reader.engine.settings import (
@@ -28,7 +31,7 @@ from podcast_reader.engine.settings import (
     save_settings,
     token_fingerprint,
 )
-from podcast_reader.providers import PROVIDERS, validate_custom_url
+from podcast_reader.providers import PROVIDERS, resolve_provider, validate_custom_url
 
 # JobRecord/LibraryEntry back FastAPI response models, so they must be
 # importable at runtime (a TYPE_CHECKING import leaves unresolvable ForwardRefs).
@@ -62,6 +65,24 @@ class KeyBody(BaseModel):
 
     provider: str
     api_key: str
+
+
+class KeyTestBody(BaseModel):
+    """Body of ``POST /v1/keys/test`` — *api_key* absent tests the stored key."""
+
+    provider: str
+    api_key: str | None = None
+
+
+class KeyTestResult(BaseModel):
+    """Body of the ``POST /v1/keys/test`` response.
+
+    *detail* is always self-authored (HTTP status, transport error class, or
+    our own missing-key text) — never provider response content, never a key.
+    """
+
+    ok: bool
+    detail: str | None = None
 
 
 class SettingsBody(BaseModel):
@@ -115,6 +136,7 @@ def create_app(
     key_store: dict[str, str] | None = None,
     heartbeat_s: float = 15.0,
     on_shutdown: Callable[[], None] | None = None,
+    key_test_transport: httpx.BaseTransport | None = None,
 ) -> FastAPI:
     """Build the engine's FastAPI app bound to *store* and *data_dir*.
 
@@ -125,6 +147,9 @@ def create_app(
     *on_shutdown* backs ``POST /v1/shutdown``: ``serve_engine`` injects a hook
     that sets the uvicorn server's ``should_exit`` (the server object exists
     only there). Without one, the endpoint answers 503 — never a silent no-op.
+
+    *key_test_transport* lets tests route ``POST /v1/keys/test`` traffic
+    through an ``httpx.MockTransport``; production uses the default transport.
     """
     app = FastAPI(title="podcast-reader engine", version=engine_version())
     expected_token = load_engine_state(data_dir)["token"].encode()
@@ -247,6 +272,49 @@ def create_app(
                 status_code=400, detail=f"unknown chapter provider: {body.provider!r}"
             )
         keys[body.provider] = body.api_key
+
+    @app.post("/v1/keys/test")
+    def test_key(body: KeyTestBody) -> KeyTestResult:
+        """Minimal completion round-trip validating a key (never storing it).
+
+        Key resolution order: supplied > pushed > the provider's env variable
+        (an empty pushed value means "cleared", falling through to env — the
+        same truthiness as job-time resolution). The result detail is always
+        self-authored: provider response bodies echo key fragments, so they
+        never reach the response or the logs (K4).
+        """
+        if body.provider not in PROVIDERS:
+            raise HTTPException(
+                status_code=400, detail=f"unknown chapter provider: {body.provider!r}"
+            )
+        settings = load_settings(data_dir)
+        try:
+            spec = resolve_provider(body.provider, custom_base_url=settings["custom_provider_url"])
+        except ValueError as exc:  # missing/invalid custom URL — self-authored (per P9)
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        api_key = body.api_key or keys.get(body.provider) or os.environ.get(spec["key_env"]) or ""
+        if not api_key:
+            return KeyTestResult(
+                ok=False,
+                detail=(
+                    f"no API key available for provider {body.provider!r} "
+                    f"(supply one, push one via PUT /v1/keys, or set {spec['key_env']})"
+                ),
+            )
+        # Mirror job-time model selection: the configured chapter_model applies
+        # to the configured provider only; other providers use their default.
+        model = settings["chapter_model"] if body.provider == settings["chapter_provider"] else ""
+        try:
+            verify_key(
+                spec=spec, api_key=api_key, model=model or None, transport=key_test_transport
+            )
+        except RuntimeError as exc:  # HTTP >= 400; message is status-only
+            return KeyTestResult(ok=False, detail=str(exc))
+        except httpx.HTTPError as exc:  # transport failure; keep detail self-authored
+            return KeyTestResult(
+                ok=False, detail=f"connection to provider failed ({type(exc).__name__})"
+            )
+        return KeyTestResult(ok=True)
 
     @app.get("/v1/settings")
     def get_settings() -> EngineSettings:

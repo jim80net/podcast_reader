@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import threading
 import time
 from typing import TYPE_CHECKING
@@ -16,7 +17,8 @@ from fastapi.testclient import TestClient
 from podcast_reader.engine.app import create_app
 from podcast_reader.engine.jobs import JobStore
 from podcast_reader.engine.library import add_entry, entry_dir, source_identity
-from podcast_reader.engine.settings import load_engine_state, load_settings
+from podcast_reader.engine.settings import load_engine_state, load_settings, save_settings
+from podcast_reader.providers import PROVIDERS
 from podcast_reader.types import LibraryEntry, PipelineEvent, PipelineResult
 
 if TYPE_CHECKING:
@@ -32,6 +34,12 @@ _RESULT = PipelineResult(
     title="Title",
 )
 
+
+def _completion(content: str) -> dict[str, object]:
+    """Minimal OpenAI-compatible /chat/completions response body."""
+    return {"choices": [{"finish_reason": "stop", "message": {"content": content}}]}
+
+
 # (method, path) for every route the app exposes
 _ROUTES = [
     ("GET", "/v1/health"),
@@ -46,6 +54,7 @@ _ROUTES = [
     ("GET", "/v1/settings"),
     ("PUT", "/v1/settings"),
     ("PUT", "/v1/keys"),
+    ("POST", "/v1/keys/test"),
     ("POST", "/v1/shutdown"),
 ]
 
@@ -77,12 +86,23 @@ class _Engine:
         self.store = JobStore(data_dir, runner)
         self.key_store: dict[str, str] = {}
         self.shutdown_requests: list[bool] = []
+        # POST /v1/keys/test outbound traffic: tests set key_test_handler;
+        # recorded requests land in key_test_requests.
+        self.key_test_handler: Callable[[httpx.Request], httpx.Response] | None = None
+        self.key_test_requests: list[httpx.Request] = []
+
+        def key_test_transport_handler(request: httpx.Request) -> httpx.Response:
+            assert self.key_test_handler is not None, "test must set engine.key_test_handler"
+            self.key_test_requests.append(request)
+            return self.key_test_handler(request)
+
         self.app = create_app(
             data_dir,
             self.store,
             key_store=self.key_store,
             heartbeat_s=0.05,
             on_shutdown=lambda: self.shutdown_requests.append(True),
+            key_test_transport=httpx.MockTransport(key_test_transport_handler),
         )
         self.token = load_engine_state(data_dir)["token"]
         self.headers = {"Authorization": f"Bearer {self.token}"}
@@ -649,6 +669,185 @@ class TestKeys:
             headers=engine.headers,
         )
         assert engine.client.get("/v1/keys", headers=engine.headers).status_code == 405
+
+    def test_key_resolution_order_supplied_then_pushed_then_env(
+        self, engine: _Engine, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Key resolution order: supplied > pushed > env."""
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-env")
+        engine.key_test_handler = lambda request: httpx.Response(200, json=_completion("ok"))
+
+        engine.client.put(
+            "/v1/keys",
+            json={"provider": "anthropic", "api_key": "sk-pushed"},
+            headers=engine.headers,
+        )
+        engine.client.post(
+            "/v1/keys/test",
+            json={"provider": "anthropic", "api_key": "sk-supplied"},
+            headers=engine.headers,
+        )
+        engine.client.post("/v1/keys/test", json={"provider": "anthropic"}, headers=engine.headers)
+        engine.client.put(
+            "/v1/keys", json={"provider": "anthropic", "api_key": ""}, headers=engine.headers
+        )
+        engine.client.post("/v1/keys/test", json={"provider": "anthropic"}, headers=engine.headers)
+
+        used = [r.headers["authorization"] for r in engine.key_test_requests]
+        assert used == ["Bearer sk-supplied", "Bearer sk-pushed", "Bearer sk-env"]
+
+    def test_invalid_key_fails_with_sanitized_detail(
+        self, engine: _Engine, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Spec scenario: Invalid key fails with sanitized detail — the
+        provider's 401 body echoes the key; neither the key nor the body may
+        appear in the response or the logs (K4)."""
+        api_key = "sk-test-invalid-key-0123456789"
+        provider_body = f"Incorrect API key provided: {api_key}"
+        engine.key_test_handler = lambda request: httpx.Response(
+            401, json={"error": {"message": provider_body}}
+        )
+        with caplog.at_level(logging.DEBUG):
+            response = engine.client.post(
+                "/v1/keys/test",
+                json={"provider": "anthropic", "api_key": api_key},
+                headers=engine.headers,
+            )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["ok"] is False
+        assert "401" in body["detail"]
+        assert api_key not in response.text
+        assert "Incorrect API key" not in response.text
+        assert api_key not in caplog.text
+        assert "Incorrect API key" not in caplog.text
+
+    def test_valid_key_tests_successfully(self, engine: _Engine) -> None:
+        """Spec scenario: Valid key tests successfully (a real round-trip
+        through the injected transport)."""
+        engine.key_test_handler = lambda request: httpx.Response(200, json=_completion("ok"))
+        response = engine.client.post(
+            "/v1/keys/test",
+            json={"provider": "anthropic", "api_key": "sk-valid"},
+            headers=engine.headers,
+        )
+        assert response.status_code == 200
+        assert response.json()["ok"] is True
+        assert len(engine.key_test_requests) == 1
+        url = str(engine.key_test_requests[0].url)
+        assert url == "https://api.anthropic.com/v1/chat/completions"
+
+    def test_unknown_provider_400_without_outbound_call(self, engine: _Engine) -> None:
+        """Spec scenario: Unknown provider rejected."""
+        engine.key_test_handler = lambda request: httpx.Response(200, json=_completion("ok"))
+        response = engine.client.post(
+            "/v1/keys/test",
+            json={"provider": "nonsense", "api_key": "sk-x"},
+            headers=engine.headers,
+        )
+        assert response.status_code == 400
+        assert engine.key_test_requests == []
+
+    def test_no_key_available_fails_without_outbound_call(
+        self, engine: _Engine, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        engine.key_test_handler = lambda request: httpx.Response(200, json=_completion("ok"))
+        response = engine.client.post(
+            "/v1/keys/test", json={"provider": "anthropic"}, headers=engine.headers
+        )
+        assert response.status_code == 200
+        assert response.json()["ok"] is False
+        assert "anthropic" in response.json()["detail"]
+        assert engine.key_test_requests == []
+
+    def test_tested_key_is_not_stored(
+        self, engine: _Engine, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Spec scenario: Testing does not store — after a test, the key store
+        is untouched, so subsequent jobs cannot use the tested key."""
+        from podcast_reader.engine.process import _resolve_chapter_key
+
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        engine.key_test_handler = lambda request: httpx.Response(200, json=_completion("ok"))
+        engine.client.post(
+            "/v1/keys/test",
+            json={"provider": "anthropic", "api_key": "sk-tested-only"},
+            headers=engine.headers,
+        )
+        assert engine.key_store == {}
+        assert _resolve_chapter_key("anthropic", engine.key_store) is None
+
+    def test_custom_provider_resolves_url_from_settings(self, engine: _Engine) -> None:
+        """Per P9: provider=custom uses custom_provider_url from the current
+        settings for the round-trip."""
+        current = engine.client.get("/v1/settings", headers=engine.headers).json()
+        current["chapter_provider"] = "custom"
+        current["custom_provider_url"] = "https://llm.example.com/v1"
+        assert (
+            engine.client.put("/v1/settings", json=current, headers=engine.headers).status_code
+            == 200
+        )
+        engine.key_test_handler = lambda request: httpx.Response(200, json=_completion("ok"))
+        response = engine.client.post(
+            "/v1/keys/test",
+            json={"provider": "custom", "api_key": "sk-custom"},
+            headers=engine.headers,
+        )
+        assert response.json()["ok"] is True
+        assert str(engine.key_test_requests[0].url) == "https://llm.example.com/v1/chat/completions"
+
+    def test_custom_provider_without_url_400_no_outbound_call(self, engine: _Engine) -> None:
+        """Per P9: empty custom_provider_url is a 400, not an outbound request."""
+        engine.key_test_handler = lambda request: httpx.Response(200, json=_completion("ok"))
+        response = engine.client.post(
+            "/v1/keys/test",
+            json={"provider": "custom", "api_key": "sk-custom"},
+            headers=engine.headers,
+        )
+        assert response.status_code == 400
+        assert "base URL" in response.json()["detail"]
+        assert engine.key_test_requests == []
+
+    def test_custom_provider_invalid_url_400_no_outbound_call(
+        self, engine: _Engine, tmp_path: Path
+    ) -> None:
+        """Per P9: an invalid persisted URL (e.g. written by an older version)
+        fails the test request with the validator's self-authored message."""
+        settings = load_settings(tmp_path)
+        settings["custom_provider_url"] = "http://evil.example.com"
+        save_settings(tmp_path, settings)
+        engine.key_test_handler = lambda request: httpx.Response(200, json=_completion("ok"))
+        response = engine.client.post(
+            "/v1/keys/test",
+            json={"provider": "custom", "api_key": "sk-custom"},
+            headers=engine.headers,
+        )
+        assert response.status_code == 400
+        assert "must be https" in response.json()["detail"]
+        assert engine.key_test_requests == []
+
+    def test_model_follows_settings_only_for_the_active_provider(self, engine: _Engine) -> None:
+        """The test mirrors what a job would send: the configured
+        chapter_model applies to the configured provider; any other provider
+        is tested against its registry default model."""
+        current = engine.client.get("/v1/settings", headers=engine.headers).json()
+        current["chapter_model"] = "my-anthropic-model"  # provider stays anthropic
+        engine.client.put("/v1/settings", json=current, headers=engine.headers)
+        engine.key_test_handler = lambda request: httpx.Response(200, json=_completion("ok"))
+
+        engine.client.post(
+            "/v1/keys/test",
+            json={"provider": "anthropic", "api_key": "sk-a"},
+            headers=engine.headers,
+        )
+        engine.client.post(
+            "/v1/keys/test",
+            json={"provider": "openai", "api_key": "sk-o"},
+            headers=engine.headers,
+        )
+        models = [json.loads(r.content)["model"] for r in engine.key_test_requests]
+        assert models == ["my-anthropic-model", PROVIDERS["openai"]["default_model"]]
 
     def test_keys_are_write_only_sweep(self, engine: _Engine, tmp_path: Path) -> None:
         """Spec scenario: after a key is PUT, no endpoint response and no
