@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Podcast Reader</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family: system-ui, sans-serif;
+      }
+      body {
+        margin: 0;
+        padding: 1.5rem;
+        line-height: 1.5;
+      }
+      h1 {
+        font-size: 1.2rem;
+      }
+      #status {
+        font-weight: 600;
+      }
+      #status[data-state='ready'] {
+        color: #1a7f37;
+      }
+      #status[data-state='failed'] {
+        color: #cf222e;
+      }
+      #detail,
+      #event-log {
+        font-family: ui-monospace, monospace;
+        font-size: 0.85rem;
+        background: rgba(127, 127, 127, 0.12);
+        border-radius: 6px;
+        padding: 0.75rem;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      #event-log {
+        max-height: 50vh;
+        overflow-y: auto;
+        margin: 0;
+        list-style: none;
+      }
+      #event-log li {
+        padding: 0.1rem 0;
+        border-bottom: 1px solid rgba(127, 127, 127, 0.2);
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Podcast Reader — engine shell</h1>
+    <p>Engine: <span id="status" data-state="starting">starting…</span></p>
+    <div id="detail">waiting for engine…</div>
+    <h2>Live events</h2>
+    <ul id="event-log"></ul>
+    <script type="module" src="./src/main.ts"></script>
+  </body>
+</html>
