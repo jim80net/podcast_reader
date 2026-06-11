@@ -206,3 +206,26 @@ class TestChildRegistry:
     def test_kill_children_noop_when_registry_empty(self) -> None:
         kill_children()  # must not raise
         assert live_children() == []
+
+    def test_run_child_kills_child_when_communicate_raises(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """KeyboardInterrupt mid-run must not orphan the detached child (N1)."""
+        import subprocess
+
+        captured: list[subprocess.Popen[str]] = []
+        real_popen = subprocess.Popen
+
+        class SpyPopen(real_popen):  # type: ignore[type-arg]
+            def communicate(self, *args: object, **kwargs: object) -> tuple[str, str]:
+                captured.append(self)
+                raise KeyboardInterrupt
+
+        monkeypatch.setattr("podcast_reader.tools.subprocess.Popen", SpyPopen)
+        sleeper = [sys.executable, "-c", "import time; time.sleep(60)"]
+        with pytest.raises(KeyboardInterrupt):
+            run_child(sleeper)
+
+        proc = captured[0]
+        assert proc.returncode is not None, "child must be killed and reaped on interrupt"
+        assert live_children() == []

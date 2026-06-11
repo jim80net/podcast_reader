@@ -104,6 +104,13 @@ def run_child(args: Sequence[str]) -> subprocess.CompletedProcess[str]:
         _CHILDREN[proc.pid] = proc
     try:
         stdout, stderr = proc.communicate()
+    except BaseException:
+        # Preserve subprocess.run's kill-on-exception guarantee: without it a
+        # KeyboardInterrupt would orphan the detached child (start_new_session
+        # insulates it from the terminal's SIGINT).
+        proc.kill()
+        proc.wait()
+        raise
     finally:
         with _CHILDREN_LOCK:
             _CHILDREN.pop(proc.pid, None)
