@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import stat
+import sys
 from typing import TYPE_CHECKING
+
+import pytest
 
 from podcast_reader.engine.settings import (
     EngineState,
@@ -19,8 +23,6 @@ from podcast_reader.engine.settings import (
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-    import pytest
 
 
 class TestDataDir:
@@ -66,6 +68,19 @@ class TestEngineState:
         save_engine_state(tmp_path, state)
         assert load_engine_state(tmp_path)["port"] == 4242
         assert stat.S_IMODE((tmp_path / "engine-state.json").stat().st_mode) == 0o600
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX mode bits are a no-op on Windows")
+    def test_permissive_preexisting_state_rehardened_on_load(self, tmp_path: Path) -> None:
+        """A pre-existing engine-state.json with permissive mode is chmod'd
+        back to 0600 when loaded (D2)."""
+        state_file = tmp_path / "engine-state.json"
+        state_file.write_text(json.dumps({"port": 4242, "token": "t" * 43}))
+        state_file.chmod(0o644)
+
+        state = load_engine_state(tmp_path)
+
+        assert state == {"port": 4242, "token": "t" * 43}
+        assert stat.S_IMODE(state_file.stat().st_mode) == 0o600
 
 
 class TestSecureWrites:
@@ -119,6 +134,49 @@ class TestUserSettings:
     def test_defaults_not_persisted_until_saved(self, tmp_path: Path) -> None:
         load_settings(tmp_path)
         assert not (tmp_path / "settings.json").exists()
+
+
+class TestCorruptSettings:
+    def test_garbage_settings_quarantined_and_defaults_returned(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Malformed settings.json must not crash the engine (D4): quarantine
+        to settings.json.corrupt, warn, and fall back to defaults."""
+        (tmp_path / "settings.json").write_text("{ not json at all")
+
+        with caplog.at_level(logging.WARNING, logger="podcast_reader.engine.settings"):
+            settings = load_settings(tmp_path)
+
+        assert settings == load_settings(tmp_path)  # defaults, stable
+        assert settings["whisper_model"] == "large-v3"
+        assert (tmp_path / "settings.json.corrupt").read_text() == "{ not json at all"
+        assert not (tmp_path / "settings.json").exists()
+        assert "settings.json.corrupt" in caplog.text
+        # the store remains fully usable: a save round-trips again
+        save_settings(tmp_path, settings)
+        assert load_settings(tmp_path) == settings
+
+    def test_wrong_shape_settings_treated_as_corrupt(self, tmp_path: Path) -> None:
+        (tmp_path / "settings.json").write_text('["not", "an", "object"]')
+        settings = load_settings(tmp_path)
+        assert settings["whisper_model"] == "large-v3"
+        assert (tmp_path / "settings.json.corrupt").exists()
+
+    def test_quarantine_rename_failure_logged_and_defaults_returned(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        import pathlib
+
+        (tmp_path / "settings.json").write_text("{ not json at all")
+
+        def deny_replace(self: pathlib.Path, target: object) -> pathlib.Path:
+            raise OSError("read-only data dir")
+
+        monkeypatch.setattr(pathlib.Path, "replace", deny_replace)
+        with caplog.at_level(logging.WARNING, logger="podcast_reader.engine.settings"):
+            settings = load_settings(tmp_path)
+        assert settings["whisper_model"] == "large-v3"
+        assert "read-only data dir" in caplog.text
 
 
 class TestTokenFingerprint:
