@@ -1,13 +1,15 @@
 # Desktop Packaging & Distribution — Design
 
 **Date:** 2026-06-11
-**Status:** Approved design v2, pre-implementation
+**Status:** Approved design v3, pre-implementation
 **Author:** Jim Park, with Claude
 **Review history:** v1 approved in brainstorm; v2 applies systems-review findings F1–F13
 (frozen-bundle/runtime split, cookie strategy, pairing/discovery, MV3 lifecycle, fault
 isolation, self-update layout, concurrency, key handling, protocol hardening, ffmpeg
 licensing, handshake, pack versioning). F8's CLI-journal proposal simplified: engine is
-sole library writer; CLI keeps writing loose files.
+sole library writer; CLI keeps writing loose files. v3 applies verification findings
+N1–N3 (fixed per-install port replaces random port + asserted re-handshake; phase-aware
+error hints; diarization merge-glue added to the Phase 1 spike scope).
 
 ## Problem
 
@@ -78,10 +80,12 @@ API surface (v1, all under `/v1`):
 | `GET/PUT /settings` | Whisper model/device, paragraph size, storage dir, toggles |
 | `GET /health` | Liveness + version + token fingerprint check |
 
-**Process & discovery model** *(per F3, F7, F12)*: the engine binds `127.0.0.1` on a
-random port and writes a discovery file (`<userData>/engine.json`, mode 0600:
-`{port, pid, token_fingerprint, version}`) whose path it receives via argv; it then
-prints a single ready sentinel. The app watches the file rather than parsing uvicorn
+**Process & discovery model** *(per F3, F7, F12; port model revised per N1)*: the
+engine binds `127.0.0.1` on a **fixed per-install port** — chosen once at first run
+(random free port from the ephemeral range) and persisted; the bearer token, not port
+secrecy, is the security boundary. The engine writes a discovery file
+(`<userData>/engine.json`, mode 0600: `{port, pid, token_fingerprint, version}`) whose
+path it receives via argv; it then prints a single ready sentinel. The app watches the file rather than parsing uvicorn
 stdout. On startup the app probes any existing discovery file (`GET /health` with
 token): adopt a live engine, or kill the stale PID — never two engines. The engine
 owns its children (whisper, yt-dlp) via a Windows Job Object with
@@ -223,10 +227,14 @@ Toolbar button, active on YouTube/X pages (and any page via context menu):
   completion notification via `chrome.alarms` polling (30 s floor) — no reliance on
   long-lived SSE in the MV3 service worker (terminated at ~30 s idle; the Chrome 116
   lifetime extension covers WebSockets, not SSE).
-- **Discovery & re-pairing:** extension stores `{port, token}` from pairing. On
-  connection failure it triggers `podcast-reader://reconnect` once; the running app
-  answers with a silent re-handshake (token unchanged, port refreshed). Pairing
-  remains a one-time user confirmation in the app window.
+- **Pairing & reconnection** *(per N1 — fixed port removes the need for any
+  app→extension push channel)*: one-time pairing is user-mediated — the app's pairing
+  screen displays the port and a short-lived 6-character code; the user enters the
+  code in the extension popup; the popup exchanges code for the bearer token at that
+  port and stores `{port, token}`. Because the port is fixed per install, reconnection
+  is simply retrying it; an unreachable engine means the app isn't running, so the
+  extension offers a `podcast-reader://` launch. Token rotation (rare, user-initiated)
+  re-runs pairing.
 - **Protocol hardening:** `podcast-reader://transcribe?url=...` never auto-executes.
   Protocol-initiated jobs land in `awaiting-confirmation`, rendered in the app's New
   view with the URL shown; one click runs. Scheme/host shape validated before display.
@@ -235,10 +243,12 @@ Toolbar button, active on YouTube/X pages (and any page via context menu):
 
 ## Error handling
 
-Jobs fail into a structured `{code, message, hint}` where `hint` is user-actionable
-and **per-platform** *(per F2)* — e.g., on Windows: "This X post requires login —
-click 'Grant access' to let the extension share your X login with Podcast Reader",
-never "enable browser cookies." Chapters failures degrade to a chapterless transcript
+Jobs fail into a structured `{code, message, hint}` where `hint` is user-actionable,
+**per-platform** *(per F2)*, and **phase-aware** *(per N2)*: until the extension ships
+(Phase 5), auth-failure hints point at cookie-file import and Firefox/Safari options —
+only after Phase 5 do they reference "let the extension share your login." Hints never
+recommend the broken Chrome/Windows cookies-from-browser path. Hint mapping
+(platform × installed-components → copy) is part of the failure-mapping test matrix. Chapters failures degrade to a chapterless transcript
 with a visible warning *(per F5)*. Interrupted jobs (engine/app crash) are marked and
 retryable *(per F7)*. The app's error surface includes a "save diagnostic bundle"
 button (engine log + job record, no keys, no cookies).
@@ -276,7 +286,11 @@ Each phase is an independent openspec change and PR, in order:
    PyInstaller/ctranslate2/CUDA spike** — it determines the transcription invocation
    (frozen whisper worker), freeze-aware `resolve_tool`, and the diarization
    cut-line decision, all of which shape the engine API. The spike is on Phase 1's
-   critical path, not Phase 4's.
+   critical path, not Phase 4's. Spike scope explicitly includes *(per N3)* the
+   diarization interface that `whisper-ctranslate2` used to provide: the frozen
+   whisper worker's segment output must be consumable by the diarization worker's
+   speaker-merge step, and the diarization worker (torchcodec) must be pointed at the
+   `<userData>/tools/` ffmpeg — the cut-line decision prices this glue in.
 2. **Multi-provider chapters** — provider registry, keys-in-memory push channel,
    env-var compatibility for the CLI.
 3. **Electron MVP** — app shell, four views, engine spawn/adopt/quit sequence,
@@ -297,7 +311,7 @@ Afterwards: floating video player design conversation (tracked separately).
 | Diarization worker pack too heavy | Explicit cut-line: ships post-v1, CLI-only meanwhile |
 | Cookie capture UX confuses users | One-click grant flow via extension; per-platform hints; file import always available |
 | Code signing / notarization logistics | Treated as explicit phase-3 prerequisite tasks, not afterthoughts |
-| Engine port/token drift between app and extension | Discovery file + `podcast-reader://reconnect` re-handshake; app adopts-or-kills stale engines |
+| Engine port/token drift between app and extension | Fixed per-install port + token auth (per N1); discovery file for the app; app adopts-or-kills stale engines |
 | Orphaned GPU jobs / double engines | Job Object / process group child reaping; health-probe + PID adoption on startup |
 | Pack/app version skew | Pack manifests with compat ranges validated at engine startup |
 | Scope creep toward the video player | Out of scope here; Reader view is designed to host it later |
