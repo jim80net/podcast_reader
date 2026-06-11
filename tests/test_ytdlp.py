@@ -4,15 +4,16 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from podcast_reader.ytdlp import build_download_args, build_title_args, download_audio, fetch_title
 
 
+@patch("podcast_reader.ytdlp.resolve_tool", return_value="yt-dlp")
 class TestBuildDownloadArgs:
-    def test_basic_url(self) -> None:
+    def test_basic_url(self, _mock_resolve: MagicMock) -> None:
         result = build_download_args("https://x.com/user/status/123", Path("/tmp/out"))
         assert result == [
             "yt-dlp",
@@ -24,7 +25,7 @@ class TestBuildDownloadArgs:
             "https://x.com/user/status/123",
         ]
 
-    def test_with_cookies(self) -> None:
+    def test_with_cookies(self, _mock_resolve: MagicMock) -> None:
         result = build_download_args(
             "https://x.com/user/status/123",
             Path("/tmp/out"),
@@ -44,7 +45,8 @@ class TestBuildDownloadArgs:
 
 
 class TestBuildTitleArgs:
-    def test_basic(self) -> None:
+    @patch("podcast_reader.ytdlp.resolve_tool", return_value="yt-dlp")
+    def test_basic(self, _mock_resolve: MagicMock) -> None:
         result = build_title_args("https://x.com/user/status/123")
         assert result == [
             "yt-dlp",
@@ -52,6 +54,13 @@ class TestBuildTitleArgs:
             "title",
             "https://x.com/user/status/123",
         ]
+
+    @patch("podcast_reader.ytdlp.resolve_tool", return_value="/tool-venv/bin/yt-dlp")
+    def test_uses_resolved_executable(self, _mock_resolve: MagicMock) -> None:
+        """Builders must use the resolved path so yt-dlp bundled in an isolated
+        venv (e.g. uv tool install) is found even when it's not on PATH."""
+        result = build_title_args("https://x.com/user/status/123")
+        assert result[0] == "/tool-venv/bin/yt-dlp"
 
 
 class TestFetchTitle:

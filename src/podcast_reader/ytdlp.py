@@ -5,11 +5,13 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path  # noqa: TC003 — used at runtime in glob/return
 
+from podcast_reader.tools import resolve_tool
+
 
 def build_download_args(url: str, output_dir: Path, cookies: Path | None = None) -> list[str]:
     """Build the yt-dlp command-line arguments for audio extraction."""
     args = [
-        "yt-dlp",
+        resolve_tool("yt-dlp"),
         "-x",
         "--audio-format",
         "mp3",
@@ -22,7 +24,7 @@ def build_download_args(url: str, output_dir: Path, cookies: Path | None = None)
 
 def build_title_args(url: str) -> list[str]:
     """Build the yt-dlp command-line arguments for title extraction."""
-    return ["yt-dlp", "--print", "title", url]
+    return [resolve_tool("yt-dlp"), "--print", "title", url]
 
 
 def fetch_title(url: str) -> str:

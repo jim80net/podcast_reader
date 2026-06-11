@@ -32,8 +32,8 @@ uv sync --extra dev --extra chapters
 # Run directly
 uv run podcast-reader <url-or-file> [title]
 
-# Install as standalone tool
-uv tool install .
+# Install as standalone tool (whisper extra needed for non-YouTube sources)
+uv tool install '.[whisper,chapters]'
 ```
 
 For speaker diarization, set `HF_TOKEN` and accept model terms at:
@@ -60,6 +60,7 @@ For speaker diarization, set `HF_TOKEN` and accept model terms at:
 | `src/podcast_reader/youtube.py` | Fetch YouTube captions as whisper-compatible JSON |
 | `src/podcast_reader/ytdlp.py` | Download audio from X/Twitter and other platforms via yt-dlp |
 | `src/podcast_reader/transcribe.py` | Run whisper-ctranslate2 on audio files |
+| `src/podcast_reader/tools.py` | Resolve bundled console scripts (yt-dlp, whisper) not on PATH |
 | `src/podcast_reader/chapters.py` | Generate chapter markers via Claude |
 | `src/podcast_reader/html.py` | Convert whisper JSON to styled HTML with TOC, key points, pull quotes |
 | `pyproject.toml` | Dependencies, entry point, tool configuration |

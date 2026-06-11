@@ -4,15 +4,16 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from podcast_reader.transcribe import build_whisper_args, transcribe
 
 
+@patch("podcast_reader.transcribe.resolve_tool", return_value="whisper-ctranslate2")
 class TestBuildWhisperArgs:
-    def test_basic_args(self) -> None:
+    def test_basic_args(self, _mock_resolve: MagicMock) -> None:
         result = build_whisper_args(
             audio_path=Path("/tmp/episode.mp3"),
             output_dir=Path("/tmp/out"),
@@ -37,7 +38,7 @@ class TestBuildWhisperArgs:
             "False",
         ]
 
-    def test_with_hf_token(self) -> None:
+    def test_with_hf_token(self, _mock_resolve: MagicMock) -> None:
         result = build_whisper_args(
             audio_path=Path("/tmp/episode.mp3"),
             output_dir=Path("/tmp/out"),
@@ -50,7 +51,7 @@ class TestBuildWhisperArgs:
         idx = result.index("--hf_token")
         assert result[idx + 1] == "hf_abc123"
 
-    def test_without_hf_token(self) -> None:
+    def test_without_hf_token(self, _mock_resolve: MagicMock) -> None:
         result = build_whisper_args(
             audio_path=Path("/tmp/episode.mp3"),
             output_dir=Path("/tmp/out"),
@@ -98,3 +99,24 @@ class TestTranscribe:
                     lang="en",
                     device="cuda",
                 )
+
+    def test_missing_executable_suggests_whisper_extra(self, tmp_path: Path) -> None:
+        """whisper-ctranslate2 is an optional extra; a missing binary should
+        explain how to install it instead of raising a bare FileNotFoundError."""
+        audio_file = tmp_path / "episode.mp3"
+        audio_file.touch()
+
+        with (
+            patch(
+                "podcast_reader.transcribe.subprocess.run",
+                side_effect=FileNotFoundError(2, "No such file or directory"),
+            ),
+            pytest.raises(RuntimeError, match="whisper"),
+        ):
+            transcribe(
+                audio_path=audio_file,
+                output_dir=tmp_path,
+                model="large-v3",
+                lang="en",
+                device="cpu",
+            )
