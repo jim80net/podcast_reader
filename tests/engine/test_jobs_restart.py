@@ -95,3 +95,53 @@ class TestWorkerRestart:
         third = store.submit("https://example.com/third", None)
         assert _wait_for(lambda: store.get(third["id"])["state"] == "done")
         store.shutdown()
+
+    def test_restart_during_slow_shutdown_does_not_revive_old_worker(self, tmp_path: Path) -> None:
+        """start_worker() racing a shutdown() blocked on a slow job must not
+        clear the old worker's stop signal (cubic P1 on the D7 fix).
+
+        With a shared, clearable stop event the old worker — released after
+        the restart — would see stop cleared, drain the backlog, and loop
+        forever alongside the new worker. Per-generation stop events keep the
+        old worker's signal set regardless of restarts.
+        """
+        release = threading.Event()
+        started = threading.Event()
+
+        def blocking(
+            record: JobRecord, on_event: Callable[[PipelineEvent], None]
+        ) -> PipelineResult:
+            started.set()
+            assert release.wait(timeout=10)
+            return _RESULT
+
+        store = JobStore(tmp_path, blocking)
+        store.start_worker()
+        first = store.submit("https://example.com/first", None)
+        second = store.submit("https://example.com/second", None)  # backlog
+        assert started.wait(timeout=10)
+
+        old_stop = store._stop
+        old_worker = store._worker
+        assert old_worker is not None
+        shutdown_thread = threading.Thread(target=store.shutdown)
+        shutdown_thread.start()  # blocks joining the worker mid-job
+        assert _wait_for(old_stop.is_set)
+
+        # Restart while the old worker is still finishing its job.
+        store.start_worker()
+        assert old_stop.is_set(), "restart must not clear the old worker's stop signal"
+        new_worker = store._worker
+        assert new_worker is not None
+        assert new_worker is not old_worker
+
+        release.set()
+        shutdown_thread.join(timeout=10)
+        assert not shutdown_thread.is_alive()
+
+        # The new worker processes the backlog; the old worker exits.
+        assert _wait_for(lambda: store.get(second["id"])["state"] == "done")
+        assert store.get(first["id"])["state"] == "done"
+        assert _wait_for(lambda: not old_worker.is_alive()), "old worker must exit"
+        assert new_worker.is_alive()
+        store.shutdown()

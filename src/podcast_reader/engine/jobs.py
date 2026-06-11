@@ -89,30 +89,37 @@ class JobStore:
     def start_worker(self) -> None:
         """Start the single worker thread (idempotent; restartable after shutdown).
 
-        Clears the stop event so a store restarted after :meth:`shutdown`
-        processes jobs again instead of exiting on its first dequeue.
+        Each worker generation gets its own stop event — never cleared — so a
+        restart racing a slow :meth:`shutdown` cannot un-signal the old worker
+        (which would otherwise drain the backlog and loop forever alongside
+        the new one).
         """
         with self._lock:
             if self._worker is not None:
                 return
-            self._stop.clear()
-            self._worker = threading.Thread(target=self._work_loop, name="job-worker", daemon=True)
+            stop = threading.Event()
+            self._stop = stop
+            self._worker = threading.Thread(
+                target=self._work_loop, args=(stop,), name="job-worker", daemon=True
+            )
             self._worker.start()
 
     def shutdown(self) -> None:
         """Stop the worker after the current job finishes, skipping the backlog.
 
         The stop event makes the worker exit on its next dequeue instead of
-        draining queued jobs first; those jobs stay ``queued`` in the journal
-        and startup recovery re-enqueues them on the next run. The sentinel
-        only wakes a worker blocked on an empty queue.
+        draining queued jobs first; a job it dequeues on the way out is handed
+        back to the live queue (and is still ``queued`` in the journal, so
+        startup recovery covers the no-restart case too). The sentinel only
+        wakes a worker blocked on an empty queue.
         """
         with self._lock:
             worker = self._worker
+            stop = self._stop
             self._worker = None
         if worker is None:
             return
-        self._stop.set()
+        stop.set()
         self._queue.put(None)
         worker.join(timeout=30)
 
@@ -136,12 +143,15 @@ class JobStore:
 
     # -- worker ----------------------------------------------------------
 
-    def _work_loop(self) -> None:
+    def _work_loop(self, stop: threading.Event) -> None:
         while True:
             job_id = self._queue.get()
-            if self._stop.is_set():
-                # On stop, a dequeued job is left untouched: it is still
-                # ``queued`` in the journal, so recovery re-enqueues it.
+            if stop.is_set():
+                # On stop, hand a dequeued job back for a successor worker;
+                # it is also still ``queued`` in the journal, so startup
+                # recovery covers the no-restart case.
+                if job_id is not None:
+                    self._queue.put(job_id)
                 return
             if job_id is None:
                 # Stale wake-up sentinel from a previous shutdown (the exiting
