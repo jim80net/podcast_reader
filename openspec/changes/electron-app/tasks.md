@@ -24,17 +24,17 @@
 
 ## 4. Renderer views
 
-- [ ] 4.1 Renderer shell: hash router + typed DOM helpers, nav between the four views, engine-status indicator (starting / ready / failed with diagnostics)
-- [ ] 4.2 Library view: cards (title, source, date) from `GET /v1/library`, refresh on `job_done` events, empty-state CTA, card → Reader
-- [ ] 4.3 Reader view: main-process fetch of the artifact HTML → sandboxed iframe `srcdoc` with `allow-scripts` only (no `allow-same-origin`); chapter scroll script works; isolation assertions in e2e
-- [ ] 4.4 New view: paste-URL + drop-file submission; live step progress from forwarded events with record hydration; failed jobs render `{code, message, hint}`; interrupted jobs offer retry (re-submit)
-- [ ] 4.5 New view confirmations: list `awaiting-confirmation` jobs with source URL, Run (confirm) and Dismiss (delete) actions; focus + surface on protocol arrival
-- [ ] 4.6 Settings view: provider dropdown populated from `GET /v1/providers` (ids, default models, key-availability; incl. custom + base-URL field) (per P4), masked write-only key entry + Test button (`POST /v1/keys/test` result display), whisper model/device/lang, sentences, library dir; save = `PUT /v1/settings` + vault/push for keys; inline engine validation errors; safeStorage-unavailable warning
+- [x] 4.1 Renderer shell: hash router + typed DOM helpers, nav between the four views, engine-status indicator (starting / ready / failed with diagnostics)
+- [x] 4.2 Library view: cards (title, source, date) from `GET /v1/library`, refresh on `job_done` events, empty-state CTA, card → Reader
+- [x] 4.3 Reader view: main-process fetch of the artifact HTML → sandboxed iframe `srcdoc` with `allow-scripts` only (no `allow-same-origin`); chapter scroll script works; isolation assertions in e2e
+- [x] 4.4 New view: paste-URL + drop-file submission; live step progress from forwarded events with record hydration; failed jobs render `{code, message, hint}`; interrupted jobs offer retry (re-submit)
+- [x] 4.5 New view confirmations: list `awaiting-confirmation` jobs with source URL, Run (confirm) and Dismiss (delete) actions; focus + surface on protocol arrival
+- [x] 4.6 Settings view: provider dropdown populated from `GET /v1/providers` (ids, default models, key-availability; incl. custom + base-URL field) (per P4), masked write-only key entry + Test button (`POST /v1/keys/test` result display), whisper model/device/lang, sentences, library dir; save = `PUT /v1/settings` + vault/push for keys; inline engine validation errors; safeStorage-unavailable warning
 
 ## 5. Protocol handler
 
-- [ ] 5.1 Single-instance lock; `podcast-reader://` via `app.setAsDefaultProtocolClient` (dev; on Windows dev mode this requires passing `process.execPath` + the app path as args, per P8) + `open-url` (macOS) + `second-instance` argv (Windows — select the `commandLine` entry matching `^podcast-reader://`, never pop blindly, per P8); strict validation (scheme/host `transcribe`/http(s) `url` param), reject-and-log otherwise
-- [ ] 5.2 Valid protocol URL → `POST /v1/jobs {requires_confirmation: true}` → focus New view; e2e: protocol job never executes without click; malformed URL creates nothing
+- [x] 5.1 Single-instance lock; `podcast-reader://` via `app.setAsDefaultProtocolClient` (dev; on Windows dev mode this requires passing `process.execPath` + the app path as args, per P8) + `open-url` (macOS) + `second-instance` argv (Windows — select the `commandLine` entry matching `^podcast-reader://`, never pop blindly, per P8); strict validation (scheme/host `transcribe`/http(s) `url` param), reject-and-log otherwise
+- [x] 5.2 Valid protocol URL → `POST /v1/jobs {requires_confirmation: true}` → focus New view; e2e: protocol job never executes without click; malformed URL creates nothing (e2e assertions ride with task 7.2's Playwright suite)
 
 ## 6. Packaging & auto-update
 
