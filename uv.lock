@@ -852,6 +852,22 @@ wheels = [
 ]
 
 [[package]]
+name = "fastapi"
+version = "0.136.3"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "annotated-doc" },
+    { name = "pydantic" },
+    { name = "starlette" },
+    { name = "typing-extensions" },
+    { name = "typing-inspection" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/81/2d/ff8d91d7b564d464629a0fd50a4489c97fcb836ac230bf3a7269232a9b1f/fastapi-0.136.3.tar.gz", hash = "sha256:e487fae93ad408e6f47641ee4dfe389864fd7bec92e547ea8498fc13f43e83ab", size = 396410, upload-time = "2026-05-23T18:53:15.192Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e0/82/45359b62a067409bd929ae8a56b8ed13e5a8c8a61194b3c236920999ab83/fastapi-0.136.3-py3-none-any.whl", hash = "sha256:3d2a69bdf04b7e9f3afa292c3bc7a98816bbfafa10bc9b45f3f3700d2f761620", size = 117481, upload-time = "2026-05-23T18:53:16.924Z" },
+]
+
+[[package]]
 name = "faster-whisper"
 version = "1.2.1"
 source = { registry = "https://pypi.org/simple" }
@@ -2916,6 +2932,8 @@ name = "podcast-reader"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "fastapi" },
+    { name = "uvicorn" },
     { name = "youtube-transcript-api" },
     { name = "yt-dlp" },
 ]
@@ -2926,6 +2944,7 @@ chapters = [
 ]
 dev = [
     { name = "anthropic" },
+    { name = "httpx" },
     { name = "mypy" },
     { name = "pytest" },
     { name = "ruff" },
@@ -2941,10 +2960,13 @@ whisper = [
 requires-dist = [
     { name = "anthropic", marker = "extra == 'chapters'", specifier = ">=0.40" },
     { name = "anthropic", marker = "extra == 'dev'", specifier = ">=0.40" },
+    { name = "fastapi", specifier = ">=0.111" },
+    { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.10" },
     { name = "pyannote-audio", marker = "extra == 'diarization'", specifier = ">=4.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.4" },
+    { name = "uvicorn", specifier = ">=0.30" },
     { name = "whisper-ctranslate2", marker = "extra == 'whisper'", specifier = ">=0.5.7" },
     { name = "youtube-transcript-api", specifier = ">=1.0" },
     { name = "yt-dlp", specifier = ">=2024.1.1" },
@@ -3951,6 +3973,19 @@ wheels = [
 ]
 
 [[package]]
+name = "starlette"
+version = "1.3.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "anyio" },
+    { name = "typing-extensions", marker = "python_full_version < '3.13'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/c1/37/cc24e33974e1439cf5ca62b0735b63026eabb768f472d8775f52d5851ed9/starlette-1.3.0.tar.gz", hash = "sha256:bb58cbb7a699da4ee4be9ed4cdfe4bc5b0390aa6dac1d1ac714ebebe8dc3c8df", size = 2702493, upload-time = "2026-06-11T06:27:41.869Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/16/42/56d31c5ee52dab0ad893d67d4f9c00f5ba2b4c5d87f392eca2c3fdce01cf/starlette-1.3.0-py3-none-any.whl", hash = "sha256:ff4ca1bc23de6a45cdfbbeb9b3caaea524c9221cdd8a6684ad7a4f651a83890b", size = 73492, upload-time = "2026-06-11T06:27:40.444Z" },
+]
+
+[[package]]
 name = "sympy"
 version = "1.14.0"
 source = { registry = "https://pypi.org/simple" }
@@ -4300,6 +4335,20 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/c7/24/5f1b3bdffd70275f6661c76461e25f024d5a38a46f04aaca912426a2b1d3/urllib3-2.6.3.tar.gz", hash = "sha256:1b62b6884944a57dbe321509ab94fd4d3b307075e0c2eae991ac71ee15ad38ed", size = 435556, upload-time = "2026-01-07T16:24:43.925Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/39/08/aaaad47bc4e9dc8c725e68f9d04865dbcb2052843ff09c97b08904852d84/urllib3-2.6.3-py3-none-any.whl", hash = "sha256:bf272323e553dfb2e87d9bfd225ca7b0f467b919d7bbd355436d3fd37cb0acd4", size = 131584, upload-time = "2026-01-07T16:24:42.685Z" },
+]
+
+[[package]]
+name = "uvicorn"
+version = "0.49.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "click" },
+    { name = "h11" },
+    { name = "typing-extensions", marker = "python_full_version < '3.11'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/c4/1f/fa18009dea8469069cca78a4e877a008ab78f08b064bfc9ab891579077ff/uvicorn-0.49.0.tar.gz", hash = "sha256:ebf4271aa580d9de97f93192d4595176df6e91f9aae919ca73e4fc07df1e66a3", size = 91284, upload-time = "2026-06-03T22:01:30.448Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/88/fa/e1388bbcf24ef3274f45c0c1c7b501fd14971037c1b6ee23610553307497/uvicorn-0.49.0-py3-none-any.whl", hash = "sha256:ba3d14c3ee7e41c6c654c46c9eb489d33213cdd30aa1696eab1374337c13f68f", size = 71376, upload-time = "2026-06-03T22:01:29.037Z" },
 ]
 
 [[package]]
