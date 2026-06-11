@@ -5,7 +5,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path  # noqa: TC003 — used at runtime in path operations
 
-from podcast_reader.tools import resolve_tool
+from podcast_reader.tools import popen_kwargs, resolve_tool
 
 
 def build_whisper_args(
@@ -49,7 +49,7 @@ def transcribe(
     """Run whisper-ctranslate2 on an audio file and return the path to the JSON output."""
     args = build_whisper_args(audio_path, output_dir, model, lang, device, hf_token)
     try:
-        result = subprocess.run(args, capture_output=True, text=True)
+        result = subprocess.run(args, capture_output=True, text=True, **popen_kwargs())
     except FileNotFoundError as exc:
         raise RuntimeError(
             "whisper-ctranslate2 not found — install the 'whisper' extra, e.g. "

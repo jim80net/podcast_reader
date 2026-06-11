@@ -22,6 +22,7 @@ from podcast_reader.chapters import (
     snap_chapters_to_segments,
 )
 from podcast_reader.html import build_html
+from podcast_reader.tools import popen_kwargs
 from podcast_reader.transcribe import transcribe
 from podcast_reader.types import PipelineEvent, PipelineResult
 from podcast_reader.youtube import (
@@ -316,10 +317,11 @@ def _wsl_path(path: Path) -> str | None:
     if shutil.which("wslpath") is None:
         return None
     try:
-        result = subprocess.run(
+        result: subprocess.CompletedProcess[str] = subprocess.run(
             ["wslpath", "-w", str(path)],
             capture_output=True,
             text=True,
+            **popen_kwargs(),
         )
         if result.returncode == 0:
             return result.stdout.strip()

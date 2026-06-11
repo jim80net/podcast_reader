@@ -1,0 +1,245 @@
+"""Tests for podcast_reader.engine.process."""
+
+from __future__ import annotations
+
+import json
+import os
+import socket
+import stat
+import sys
+import threading
+import time
+from pathlib import Path
+from typing import TYPE_CHECKING
+from unittest.mock import MagicMock, patch
+
+import httpx
+import pytest
+
+from podcast_reader.engine.library import entry_dir, list_entries, source_identity
+from podcast_reader.engine.process import (
+    READY_SENTINEL,
+    bind_engine_socket,
+    make_pipeline_runner,
+    popen_kwargs,
+    remove_discovery,
+    serve_engine,
+    write_discovery,
+)
+from podcast_reader.engine.settings import (
+    engine_version,
+    load_engine_state,
+    load_settings,
+    token_fingerprint,
+)
+from podcast_reader.types import PipelineResult, new_job_record
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    import uvicorn
+
+    from podcast_reader.engine.settings import EngineState
+
+
+def _wait_for(predicate: Callable[[], bool], timeout: float = 15.0) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.05)
+    return predicate()
+
+
+class TestBindAndDiscovery:
+    def test_bind_persists_port_and_writes_discovery(self, tmp_path: Path) -> None:
+        state = load_engine_state(tmp_path)
+        sock = bind_engine_socket(tmp_path, state)
+        try:
+            port = sock.getsockname()[1]
+            assert port != 0
+            assert state["port"] == port
+            assert load_engine_state(tmp_path)["port"] == port
+
+            discovery = tmp_path / "engine.json"
+            write_discovery(discovery, state, sock)
+            info = json.loads(discovery.read_text())
+            assert info == {
+                "port": port,
+                "pid": os.getpid(),
+                "token_fingerprint": token_fingerprint(state["token"]),
+                "version": engine_version(),
+            }
+            assert stat.S_IMODE(discovery.stat().st_mode) == 0o600
+            assert list(tmp_path.glob("*.tmp")) == []
+        finally:
+            sock.close()
+
+        # second start reuses the persisted port
+        reused: EngineState = load_engine_state(tmp_path)
+        sock2 = bind_engine_socket(tmp_path, reused)
+        try:
+            assert sock2.getsockname()[1] == port
+        finally:
+            sock2.close()
+
+    def test_bind_falls_back_when_persisted_port_taken(self, tmp_path: Path) -> None:
+        blocker = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        blocker.bind(("127.0.0.1", 0))
+        blocker.listen(1)
+        taken_port = blocker.getsockname()[1]
+        try:
+            state = load_engine_state(tmp_path)
+            state["port"] = taken_port
+            sock = bind_engine_socket(tmp_path, state)
+            try:
+                new_port = sock.getsockname()[1]
+                assert new_port != taken_port
+                assert load_engine_state(tmp_path)["port"] == new_port
+            finally:
+                sock.close()
+        finally:
+            blocker.close()
+
+    def test_discovery_removed_on_close(self, tmp_path: Path) -> None:
+        state = load_engine_state(tmp_path)
+        sock = bind_engine_socket(tmp_path, state)
+        discovery = tmp_path / "engine.json"
+        write_discovery(discovery, state, sock)
+        sock.close()
+        assert discovery.exists()
+        remove_discovery(discovery)
+        assert not discovery.exists()
+        remove_discovery(discovery)  # idempotent
+
+    def test_sentinel_printed_after_discovery(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        state = load_engine_state(tmp_path)
+        sock = bind_engine_socket(tmp_path, state)
+        discovery = tmp_path / "engine.json"
+        printed: list[tuple[tuple[object, ...], bool]] = []
+        monkeypatch.setattr(
+            "builtins.print",
+            lambda *args, **kwargs: printed.append((args, discovery.exists())),
+        )
+        write_discovery(discovery, state, sock)
+        sock.close()
+        # exactly one sentinel line, printed only once the file existed
+        assert printed == [((READY_SENTINEL,), True)]
+
+
+class TestChildManagement:
+    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX process-group semantics")
+    def test_popen_kwargs_posix(self) -> None:
+        assert popen_kwargs() == {"start_new_session": True}
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX process-group semantics")
+    def test_children_spawned_in_new_session(self, tmp_path: Path) -> None:
+        from podcast_reader.transcribe import transcribe
+        from podcast_reader.ytdlp import fetch_title
+
+        with patch("podcast_reader.ytdlp.subprocess.run") as mock_ytdlp:
+            mock_ytdlp.return_value = MagicMock(returncode=0, stdout="Title\n", stderr="")
+            fetch_title("https://x.com/user/status/1")
+        assert mock_ytdlp.call_args.kwargs["start_new_session"] is True
+
+        with patch("podcast_reader.transcribe.subprocess.run") as mock_whisper:
+            mock_whisper.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            transcribe(
+                audio_path=tmp_path / "a.mp3",
+                output_dir=tmp_path,
+                model="tiny",
+                lang="en",
+                device="cpu",
+            )
+        assert mock_whisper.call_args.kwargs["start_new_session"] is True
+
+
+class TestPipelineRunner:
+    def test_runner_commits_artifacts_to_library(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("PODCAST_READER_DATA_DIR", str(tmp_path))
+        source = "https://example.com/episode"
+
+        def fake_run_pipeline(request: object, on_event: object) -> PipelineResult:
+            out = Path(request["output_dir"])  # type: ignore[index]
+            (out / "ep.json").write_text('{"segments": []}')
+            (out / "ep.html").write_text("<html>done</html>")
+            return PipelineResult(
+                json_path=str(out / "ep.json"),
+                chapters_path=None,
+                html_path=str(out / "ep.html"),
+                title="Episode",
+            )
+
+        with patch(
+            "podcast_reader.engine.process.run_pipeline", side_effect=fake_run_pipeline
+        ) as mock_run:
+            runner = make_pipeline_runner(tmp_path)
+            record = new_job_record(job_id="j1", source=source, title="Episode")
+            result = runner(record, lambda e: None)
+
+        settings = load_settings(tmp_path)
+        library_dir = Path(settings["library_dir"])
+        source_id = source_identity(source)
+        edir = entry_dir(library_dir, source_id)
+
+        # pipeline ran inside the entry's staging dir (settings snapshot applied)
+        request = mock_run.call_args.args[0]
+        assert Path(request["output_dir"]) == edir / "staging"
+        assert request["whisper_model"] == settings["whisper_model"]
+
+        # committed artifacts live in the entry dir; staging keeps its cache copy
+        assert (edir / "ep.json").read_text() == '{"segments": []}'
+        assert (edir / "ep.html").read_text() == "<html>done</html>"
+        assert (edir / "staging" / "ep.json").exists()
+        assert result["html_path"] == str(edir / "ep.html")
+        assert result["json_path"] == str(edir / "ep.json")
+
+        # and the library index gained the entry
+        entries = list_entries(library_dir)
+        assert [e["source_id"] for e in entries] == [source_id]
+        assert entries[0]["html_path"] == str(edir / "ep.html")
+        assert entries[0]["title"] == "Episode"
+
+
+class TestServeSmoke:
+    def test_serve_smoke(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("PODCAST_READER_DATA_DIR", str(tmp_path))
+        discovery = tmp_path / "discovery.json"
+        servers: list[uvicorn.Server] = []
+
+        thread = threading.Thread(
+            target=serve_engine,
+            kwargs={"discovery_file": discovery, "on_server": servers.append},
+            daemon=True,
+        )
+        thread.start()
+        assert _wait_for(discovery.exists), "discovery file never appeared"
+
+        info = json.loads(discovery.read_text())
+        token = load_engine_state(tmp_path)["token"]
+        url = f"http://127.0.0.1:{info['port']}/v1/health"
+        headers = {"Authorization": f"Bearer {token}"}
+
+        response: httpx.Response | None = None
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline:
+            try:
+                response = httpx.get(url, headers=headers, timeout=2)
+                break
+            except httpx.TransportError:
+                time.sleep(0.05)
+        assert response is not None
+        assert response.status_code == 200
+        assert response.json()["token_fingerprint"] == info["token_fingerprint"]
+
+        # health without the token is rejected even over the live socket
+        assert httpx.get(url, timeout=2).status_code == 401
+
+        servers[0].should_exit = True
+        thread.join(timeout=15)
+        assert not thread.is_alive()
+        assert not discovery.exists(), "clean shutdown must remove the discovery file"

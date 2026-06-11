@@ -1,4 +1,9 @@
-"""Locate console-script executables bundled with this installation."""
+"""Locate console-script executables and spawn-time process options.
+
+Lives at the bottom of the import graph (no project imports) so both the
+pipeline's tool call sites and the engine process model can share it without
+cycles.
+"""
 
 from __future__ import annotations
 
@@ -6,6 +11,7 @@ import os
 import shutil
 import sys
 from pathlib import Path
+from typing import Any
 
 
 def resolve_tool(name: str, tools_dir: Path | None = None) -> str:
@@ -36,3 +42,17 @@ def resolve_tool(name: str, tools_dir: Path | None = None) -> str:
         return found if found else name
     found = shutil.which(name, path=str(Path(sys.executable).parent))
     return found if found else name
+
+
+def popen_kwargs() -> dict[str, Any]:
+    """Extra ``subprocess`` keyword arguments so children die with the engine.
+
+    POSIX: each child gets its own session (process group), letting the engine
+    kill the whole group on shutdown. Windows: returns no extra kwargs — child
+    reaping is handled by the engine joining a Job Object with
+    kill-on-job-close at startup (children inherit job membership), see
+    ``podcast_reader.engine.process``.
+    """
+    if sys.platform == "win32":
+        return {}
+    return {"start_new_session": True}

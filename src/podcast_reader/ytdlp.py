@@ -5,7 +5,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path  # noqa: TC003 — used at runtime in glob/return
 
-from podcast_reader.tools import resolve_tool
+from podcast_reader.tools import popen_kwargs, resolve_tool
 
 
 def build_download_args(url: str, output_dir: Path, cookies: Path | None = None) -> list[str]:
@@ -29,10 +29,11 @@ def build_title_args(url: str) -> list[str]:
 
 def fetch_title(url: str) -> str:
     """Fetch the video/post title using yt-dlp."""
-    result = subprocess.run(
+    result: subprocess.CompletedProcess[str] = subprocess.run(
         build_title_args(url),
         capture_output=True,
         text=True,
+        **popen_kwargs(),
     )
     if result.returncode != 0:
         raise RuntimeError(f"yt-dlp failed to fetch title: {result.stderr.strip()}")
@@ -45,7 +46,7 @@ def download_audio(url: str, output_dir: Path, cookies: Path | None = None) -> P
     Returns the path to the downloaded mp3 file.
     """
     args = build_download_args(url, output_dir, cookies)
-    result = subprocess.run(args, capture_output=True, text=True)
+    result = subprocess.run(args, capture_output=True, text=True, **popen_kwargs())
     if result.returncode != 0:
         stderr = result.stderr.strip()
         msg = f"yt-dlp failed: {stderr}"
