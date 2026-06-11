@@ -41,11 +41,22 @@ The CLI SHALL resolve the API key from the selected provider's environment varia
 
 #### Scenario: Missing key skips
 - **WHEN** the selected provider has no key available
-- **THEN** the pipeline emits `chapters_skipped` and renders a chapterless transcript
+- **THEN** the pipeline emits `chapters_skipped` with a provider-aware hint and renders a chapterless transcript
+
+### Requirement: Model precedence
+When no model is explicitly specified (CLI `--model` omitted; engine `chapter_model` empty), the selected provider's default model SHALL be used. An explicitly specified model SHALL be passed through verbatim. Switching providers without specifying a model SHALL never send another provider's model identifier.
+
+#### Scenario: Provider flag without model flag
+- **WHEN** `--provider deepseek` is passed without `--model`
+- **THEN** the request uses the DeepSeek registry entry's default model
+
+#### Scenario: Explicit model passes through
+- **WHEN** `--provider openrouter --model meta-llama/llama-4-maverick` is passed
+- **THEN** the request uses exactly that model identifier
 
 ### Requirement: Key redaction
-API keys SHALL NOT appear in pipeline events, job records, journal entries, log output, or error messages produced by the chapters step.
+API keys SHALL NOT appear in pipeline events, job records, journal entries, log output, or error messages produced by the chapters step. Error messages SHALL NOT include provider response bodies (the practical leak vector: auth-error bodies echo key fragments).
 
-#### Scenario: Failure message contains no key
-- **WHEN** the provider request fails with an HTTP error
-- **THEN** the resulting warning event and job record contain no fragment of the API key
+#### Scenario: Failure message contains no key material
+- **WHEN** the provider request fails with an HTTP 401 whose response body echoes the key
+- **THEN** neither the full key nor its first 12 characters appear in any emitted event, job record, or persisted file
