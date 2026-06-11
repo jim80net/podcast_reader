@@ -1,0 +1,4 @@
+{
+  "//": "Scopes ESM to the mock engine so Node runs server.ts directly (type stripping) without reparse warnings; the app package itself stays typeless for electron-vite's CJS main output.",
+  "type": "module"
+}

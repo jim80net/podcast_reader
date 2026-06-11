@@ -7,10 +7,13 @@
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
-    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.e2e.json",
     "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest",
+    "e2e": "playwright test --project e2e",
+    "e2e:integration": "playwright test --project integration",
+    "e2e:all": "playwright test",
     "dist": "electron-vite build && node scripts/dist.mjs",
     "dist:dir": "electron-vite build && node scripts/dist.mjs --dir"
   },
