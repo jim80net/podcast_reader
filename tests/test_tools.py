@@ -9,7 +9,7 @@ if TYPE_CHECKING:
 
     import pytest
 
-from podcast_reader.tools import resolve_tool
+from podcast_reader.tools import resolve_bundled_worker, resolve_tool
 
 
 class _FrozenSys:
@@ -106,6 +106,35 @@ class TestResolveTool:
         )
         # bundle tools dir empty; interpreter dir NOT searched
         assert resolve_tool("yt-dlp") == "yt-dlp"
+
+    def test_bundled_worker_resolved_when_frozen(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Frozen onedir bundles place worker EXEs next to the main executable."""
+        bundle = tmp_path / "bundle"
+        bundle.mkdir()
+        worker = bundle / "whisper-worker"
+        worker.touch()
+        worker.chmod(0o755)
+        monkeypatch.setattr(
+            "podcast_reader.tools.sys",
+            _FrozenSys(str(bundle / "engine"), str(bundle)),
+        )
+        assert resolve_bundled_worker("whisper-worker") == str(worker)
+
+    def test_bundled_worker_none_when_unfrozen(self) -> None:
+        assert resolve_bundled_worker("whisper-worker") is None
+
+    def test_bundled_worker_none_when_absent(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        bundle = tmp_path / "bundle"
+        bundle.mkdir()
+        monkeypatch.setattr(
+            "podcast_reader.tools.sys",
+            _FrozenSys(str(bundle / "engine"), str(bundle)),
+        )
+        assert resolve_bundled_worker("whisper-worker") is None
 
     def test_frozen_bundle_tools_dir(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Under sys.frozen the bundle's tools directory is searched."""

@@ -44,6 +44,20 @@ def resolve_tool(name: str, tools_dir: Path | None = None) -> str:
     return found if found else name
 
 
+def resolve_bundled_worker(name: str) -> str | None:
+    """Locate a sibling worker executable inside a frozen onedir bundle.
+
+    Bundled workers (e.g. ``whisper-worker``) are a distinct class from
+    external tools: in a onedir bundle both entry points sit at bundle root,
+    which is exactly ``Path(sys.executable).parent`` (spike evidence in
+    spike/SPIKE_REPORT.md). Unfrozen runs have no bundled workers — callers
+    fall back to external tool resolution via :func:`resolve_tool`.
+    """
+    if not getattr(sys, "frozen", False):
+        return None
+    return shutil.which(name, path=str(Path(sys.executable).parent))
+
+
 def popen_kwargs() -> dict[str, Any]:
     """Extra ``subprocess`` keyword arguments so children die with the engine.
 
