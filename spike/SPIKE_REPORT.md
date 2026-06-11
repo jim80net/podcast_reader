@@ -108,8 +108,10 @@ programmatic field diff in `parity_diff.txt`.
 - Top-level keys: both produce `{"text", "segments", "language"}` — identical.
 - Segment keys, whisper-ctranslate2: `id, seek, start, end, text, tokens,
   temperature, avg_logprob, compression_ratio, no_speech_prob, words`.
-- Segment keys, our worker: all of the above **except `words`**
+- Segment keys, our worker: all of the above **except `words`** at spike time
   (whisper-ctranslate2 emits `"words": null` unless `--word_timestamps True`).
+  The worker has since been updated to emit `"words": null` per the
+  recommendation below (cubic D5, PR #7).
 - **Values on all shared keys: bit-identical** (same library underneath —
   whisper-ctranslate2 is itself a faster-whisper wrapper).
 - The repo fixture `tests/fixtures/sample_whisper.json` is a hand-simplified
