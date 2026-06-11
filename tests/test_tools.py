@@ -22,10 +22,24 @@ class TestResolveTool:
         (bin_dir / "python").touch()
         sibling = bin_dir / "yt-dlp"
         sibling.touch()
+        sibling.chmod(0o755)
 
         monkeypatch.setattr("podcast_reader.tools.sys.executable", str(bin_dir / "python"))
 
         assert resolve_tool("yt-dlp") == str(sibling)
+
+    def test_ignores_non_executable_sibling(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A non-executable file of the same name must not shadow PATH lookup."""
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        (bin_dir / "python").touch()
+        (bin_dir / "yt-dlp").touch()  # exists but not executable
+
+        monkeypatch.setattr("podcast_reader.tools.sys.executable", str(bin_dir / "python"))
+
+        assert resolve_tool("yt-dlp") == "yt-dlp"
 
     def test_falls_back_to_bare_name_for_path_lookup(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
