@@ -46,6 +46,10 @@ def transcribe(
                 "avg_logprob": seg.avg_logprob,
                 "compression_ratio": seg.compression_ratio,
                 "no_speech_prob": seg.no_speech_prob,
+                # whisper-ctranslate2 emits "words": null unless word
+                # timestamps are requested; mirror it for byte-level shape
+                # parity (SPIKE_REPORT.md section 2 recommendation).
+                "words": None,
             }
         )
         print(f"progress segment_end={seg.end:.2f}", file=sys.stderr, flush=True)

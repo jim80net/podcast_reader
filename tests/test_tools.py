@@ -207,6 +207,32 @@ class TestChildRegistry:
         kill_children()  # must not raise
         assert live_children() == []
 
+    def test_kill_children_escalates_to_sigkill_when_sigterm_ignored(self, tmp_path: Path) -> None:
+        """A child that traps/ignores SIGTERM must still die: after the grace
+        period kill_children escalates to SIGKILL on the group (D3)."""
+        ready = tmp_path / "ready"
+        stubborn = (
+            "import pathlib, signal, time\n"
+            "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+            f"pathlib.Path({str(ready)!r}).touch()\n"
+            "time.sleep(60)\n"
+        )
+        results: list[int] = []
+
+        def run() -> None:
+            results.append(run_child([sys.executable, "-c", stubborn]).returncode)
+
+        thread = threading.Thread(target=run, daemon=True)
+        thread.start()
+        # wait until the SIGTERM handler is installed, not just until spawn
+        assert _wait_for(ready.exists)
+
+        kill_children(grace_s=0.5)
+        thread.join(timeout=10)
+        assert not thread.is_alive()
+        assert results == [-9]  # SIGKILL, not SIGTERM
+        assert live_children() == []
+
     def test_run_child_kills_child_when_communicate_raises(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:

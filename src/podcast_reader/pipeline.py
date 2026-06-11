@@ -26,6 +26,7 @@ from podcast_reader.tools import run_child
 from podcast_reader.transcribe import transcribe
 from podcast_reader.types import PipelineEvent, PipelineResult
 from podcast_reader.youtube import (
+    NoTranscriptError,
     extract_video_id,
     fetch_transcript,
     fetch_video_title,
@@ -113,6 +114,7 @@ def run_pipeline(
                 f"Transcript JSON already exists: {json_path} (delete to re-fetch)",
                 {"cached": True},
             )
+            _emit(on_event, "step_finished", "captions", "", {"cached": True})
         else:
             _emit(
                 on_event,
@@ -121,7 +123,14 @@ def run_pipeline(
                 f"Fetching transcript for {video_id}...",
                 {},
             )
-            snippets = fetch_transcript(video_id)
+            try:
+                snippets = fetch_transcript(video_id)
+            except NoTranscriptError as exc:
+                raise PipelineError(
+                    "no_transcript",
+                    str(exc),
+                    "Only videos with English captions are supported on the captions path.",
+                ) from exc
             data = snippets_to_whisper_segments(snippets)
             json_path.write_text(json.dumps(data, indent=2))
             _emit(
@@ -155,6 +164,7 @@ def run_pipeline(
                 f"Audio already exists: {audio_path} (delete to re-download)",
                 {"cached": True},
             )
+            _emit(on_event, "step_finished", "download", "", {"cached": True})
         else:
             _emit(on_event, "step_started", "download", "Downloading with yt-dlp...", {})
             audio_path = download_audio(source, output_dir, cookies=cookies)
@@ -213,6 +223,7 @@ def run_pipeline(
             {"cached": True},
         )
         chapters = json.loads(chapters_path.read_text())
+        _emit(on_event, "step_finished", "chapters", "", {"cached": True})
     elif os.environ.get("ANTHROPIC_API_KEY"):
         _emit(
             on_event,
@@ -366,6 +377,7 @@ def _transcribe_if_needed(
             f"Transcript JSON already exists: {json_path} (delete to re-transcribe)",
             {"cached": True},
         )
+        _emit(on_event, "step_finished", "transcribe", "", {"cached": True})
         return
     _emit(
         on_event,

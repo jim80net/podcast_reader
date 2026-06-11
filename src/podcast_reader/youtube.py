@@ -9,6 +9,16 @@ from typing import Any
 
 from youtube_transcript_api import YouTubeTranscriptApi
 
+
+class NoTranscriptError(Exception):
+    """No usable (English) transcript exists for the requested video.
+
+    A plain ``Exception`` on purpose: callers (CLI and engine worker) map it to
+    their own failure handling; raising ``SystemExit`` here would escape the
+    engine worker's ``except Exception`` and kill the job thread.
+    """
+
+
 _YT_PATTERNS = [
     re.compile(r"(?:https?://)?(?:www\.)?youtube\.com/watch\?.*v=([a-zA-Z0-9_-]{11})"),
     re.compile(r"(?:https?://)?youtu\.be/([a-zA-Z0-9_-]{11})"),
@@ -43,7 +53,10 @@ def snippets_to_whisper_segments(snippets: list[dict[str, Any]]) -> dict[str, An
 
 
 def fetch_transcript(video_id: str) -> list[dict[str, Any]]:
-    """Fetch transcript for a YouTube video. Prefers manual captions over auto-generated."""
+    """Fetch transcript for a YouTube video. Prefers manual captions over auto-generated.
+
+    Raises :class:`NoTranscriptError` when no English transcript exists.
+    """
     from youtube_transcript_api import NoTranscriptFound
 
     ytt_api = YouTubeTranscriptApi()
@@ -52,7 +65,7 @@ def fetch_transcript(video_id: str) -> list[dict[str, Any]]:
     try:
         transcript = transcript_list.find_transcript(["en"])
     except NoTranscriptFound as exc:
-        raise SystemExit(f"Error: No English transcript available for {video_id}") from exc
+        raise NoTranscriptError(f"No English transcript available for {video_id}") from exc
 
     fetched = transcript.fetch()
     return fetched.to_raw_data()

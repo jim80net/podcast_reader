@@ -322,3 +322,31 @@ class TestServeSmoke:
         thread.join(timeout=15)
         assert not thread.is_alive()
         assert not discovery.exists(), "clean shutdown must remove the discovery file"
+
+    def test_serve_cleans_up_when_discovery_write_fails(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A discovery-write failure must still close the socket and stop the worker."""
+        monkeypatch.setenv("PODCAST_READER_DATA_DIR", str(tmp_path))
+        shutdowns: list[bool] = []
+        orig_shutdown = JobStore.shutdown
+
+        def spy_shutdown(store: JobStore) -> None:
+            shutdowns.append(True)
+            orig_shutdown(store)
+
+        monkeypatch.setattr(JobStore, "shutdown", spy_shutdown)
+        monkeypatch.setattr(
+            "podcast_reader.engine.process.write_discovery",
+            MagicMock(side_effect=OSError("disk full")),
+        )
+        with pytest.raises(OSError, match="disk full"):
+            serve_engine(discovery_file=tmp_path / "discovery.json")
+        assert shutdowns == [True]
+        # the engine socket was closed: its port is immediately bindable again
+        port = load_engine_state(tmp_path)["port"]
+        probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            probe.bind(("127.0.0.1", port))
+        finally:
+            probe.close()

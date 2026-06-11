@@ -143,6 +143,29 @@ class TestAuth:
         response = engine.client.get("/v1/health", headers=engine.headers)
         assert response.status_code == 200
 
+    @pytest.mark.parametrize("scheme", ["bearer", "BEARER", "BeArEr"])
+    def test_scheme_is_case_insensitive(self, engine: _Engine, scheme: str) -> None:
+        """RFC 7235: the auth scheme token is case-insensitive (D6)."""
+        response = engine.client.get(
+            "/v1/health", headers={"Authorization": f"{scheme} {engine.token}"}
+        )
+        assert response.status_code == 200
+
+    @pytest.mark.parametrize(("method", "path"), _ROUTES)
+    def test_401_carries_www_authenticate_challenge(
+        self, engine: _Engine, method: str, path: str
+    ) -> None:
+        """RFC 7235: a 401 must include a WWW-Authenticate challenge (D6)."""
+        response = engine.client.request(method, path)
+        assert response.status_code == 401
+        assert response.headers["WWW-Authenticate"] == "Bearer"
+
+    def test_wrong_scheme_rejected(self, engine: _Engine) -> None:
+        response = engine.client.get(
+            "/v1/health", headers={"Authorization": f"Basic {engine.token}"}
+        )
+        assert response.status_code == 401
+
 
 class TestHealth:
     def test_health_returns_version_and_fingerprint(self, engine: _Engine) -> None:
