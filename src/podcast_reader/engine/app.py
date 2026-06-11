@@ -19,6 +19,7 @@ from fastapi import FastAPI, HTTPException, Request, Response, status
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
+from podcast_reader.engine.jobs import JobStateError
 from podcast_reader.engine.library import get_entry, list_entries
 from podcast_reader.engine.settings import (
     engine_version,
@@ -44,10 +45,16 @@ if TYPE_CHECKING:
 
 
 class JobSubmission(BaseModel):
-    """Body of ``POST /v1/jobs``."""
+    """Body of ``POST /v1/jobs``.
+
+    ``requires_confirmation`` defaults to false so pre-change clients are
+    unchanged; true journals the job in ``awaiting-confirmation`` without
+    enqueueing it (it runs only after ``POST /v1/jobs/{id}/confirm``).
+    """
 
     source: str
     title: str | None = None
+    requires_confirmation: bool = False
 
 
 class KeyBody(BaseModel):
@@ -146,7 +153,9 @@ def create_app(
 
     @app.post("/v1/jobs", status_code=status.HTTP_201_CREATED)
     def submit_job(body: JobSubmission) -> JobRecord:
-        return store.submit(body.source, body.title)
+        return store.submit(
+            body.source, body.title, requires_confirmation=body.requires_confirmation
+        )
 
     @app.get("/v1/jobs")
     def list_jobs() -> list[JobRecord]:
@@ -158,6 +167,26 @@ def create_app(
             return store.get(job_id)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="job not found") from exc
+
+    @app.post("/v1/jobs/{job_id}/confirm")
+    def confirm_job(job_id: str) -> JobRecord:
+        """Transition an awaiting-confirmation job to ``queued`` and enqueue it."""
+        try:
+            return store.confirm(job_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="job not found") from exc
+        except JobStateError as exc:  # self-authored message, safe to echo
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.delete("/v1/jobs/{job_id}", status_code=status.HTTP_204_NO_CONTENT)
+    def discard_job(job_id: str) -> None:
+        """Discard a job — allowed only while it awaits confirmation."""
+        try:
+            store.discard(job_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="job not found") from exc
+        except JobStateError as exc:  # self-authored message, safe to echo
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     @app.get("/v1/events")
     def events() -> StreamingResponse:

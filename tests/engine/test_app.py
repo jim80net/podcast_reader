@@ -38,6 +38,8 @@ _ROUTES = [
     ("POST", "/v1/jobs"),
     ("GET", "/v1/jobs"),
     ("GET", "/v1/jobs/some-id"),
+    ("POST", "/v1/jobs/some-id/confirm"),
+    ("DELETE", "/v1/jobs/some-id"),
     ("GET", "/v1/events"),
     ("GET", "/v1/library"),
     ("GET", "/v1/transcripts/abc123.html"),
@@ -230,6 +232,150 @@ class TestJobs:
         kinds = [e["kind"] for e in record["events"]]
         assert "step_started" in kinds
         assert kinds[-1] == "job_done"
+
+
+class TestAwaitingConfirmationRoutes:
+    """Spec: Awaiting-confirmation state — reachable through the API."""
+
+    def _submit_pending(self, engine: _Engine) -> str:
+        response = engine.client.post(
+            "/v1/jobs",
+            json={"source": "https://example.com/p", "requires_confirmation": True},
+            headers=engine.headers,
+        )
+        assert response.status_code == 201
+        assert response.json()["state"] == "awaiting-confirmation"
+        return str(response.json()["id"])
+
+    def test_default_submission_stays_queued(self, engine: _Engine) -> None:
+        """Spec scenario: Default submission stays queued — existing clients
+        (no requires_confirmation field) are unchanged by this change."""
+        response = engine.client.post(
+            "/v1/jobs", json={"source": "https://example.com/a"}, headers=engine.headers
+        )
+        assert response.status_code == 201
+        job_id = response.json()["id"]
+        assert response.json()["state"] == "queued"
+        assert _wait_for(
+            lambda: (
+                engine.client.get(f"/v1/jobs/{job_id}", headers=engine.headers).json()["state"]
+                == "done"
+            )
+        )
+
+    def test_confirmation_required_job_does_not_execute(self, engine: _Engine) -> None:
+        """Spec scenario: Confirmation-required job does not execute."""
+        pending_id = self._submit_pending(engine)
+        # a later default job completing proves the worker drained past it
+        baseline = engine.client.post(
+            "/v1/jobs", json={"source": "https://example.com/b"}, headers=engine.headers
+        ).json()["id"]
+        assert _wait_for(
+            lambda: (
+                engine.client.get(f"/v1/jobs/{baseline}", headers=engine.headers).json()["state"]
+                == "done"
+            )
+        )
+        record = engine.client.get(f"/v1/jobs/{pending_id}", headers=engine.headers).json()
+        assert record["state"] == "awaiting-confirmation"
+        assert record["events"] == []  # no pipeline step ran
+
+    def test_confirm_enqueues_and_executes(self, engine: _Engine) -> None:
+        """Spec scenario: Confirm enqueues."""
+        pending_id = self._submit_pending(engine)
+        response = engine.client.post(f"/v1/jobs/{pending_id}/confirm", headers=engine.headers)
+        assert response.status_code == 200
+        assert response.json()["state"] == "queued"
+        assert _wait_for(
+            lambda: (
+                engine.client.get(f"/v1/jobs/{pending_id}", headers=engine.headers).json()["state"]
+                == "done"
+            )
+        )
+
+    def test_confirm_unknown_job_404(self, engine: _Engine) -> None:
+        response = engine.client.post("/v1/jobs/unknown/confirm", headers=engine.headers)
+        assert response.status_code == 404
+
+    def test_confirm_wrong_state_409(self, engine: _Engine) -> None:
+        """Spec scenario: Confirm rejected in other states."""
+        done_id = engine.client.post(
+            "/v1/jobs", json={"source": "https://example.com/a"}, headers=engine.headers
+        ).json()["id"]
+        assert _wait_for(
+            lambda: (
+                engine.client.get(f"/v1/jobs/{done_id}", headers=engine.headers).json()["state"]
+                == "done"
+            )
+        )
+        response = engine.client.post(f"/v1/jobs/{done_id}/confirm", headers=engine.headers)
+        assert response.status_code == 409
+        assert "done" in response.json()["detail"]
+        # the job is unchanged
+        record = engine.client.get(f"/v1/jobs/{done_id}", headers=engine.headers).json()
+        assert record["state"] == "done"
+
+    def test_delete_discards_awaiting_confirmation_job(self, engine: _Engine) -> None:
+        """Spec scenario: Dismiss discards only pending confirmations."""
+        pending_id = self._submit_pending(engine)
+        response = engine.client.delete(f"/v1/jobs/{pending_id}", headers=engine.headers)
+        assert response.status_code == 204
+        assert (
+            engine.client.get(f"/v1/jobs/{pending_id}", headers=engine.headers).status_code == 404
+        )
+
+    def test_delete_unknown_job_404(self, engine: _Engine) -> None:
+        response = engine.client.delete("/v1/jobs/unknown", headers=engine.headers)
+        assert response.status_code == 404
+
+    def test_delete_wrong_state_409(self, engine: _Engine) -> None:
+        done_id = engine.client.post(
+            "/v1/jobs", json={"source": "https://example.com/a"}, headers=engine.headers
+        ).json()["id"]
+        assert _wait_for(
+            lambda: (
+                engine.client.get(f"/v1/jobs/{done_id}", headers=engine.headers).json()["state"]
+                == "done"
+            )
+        )
+        response = engine.client.delete(f"/v1/jobs/{done_id}", headers=engine.headers)
+        assert response.status_code == 409
+        assert engine.client.get(f"/v1/jobs/{done_id}", headers=engine.headers).status_code == 200
+
+    def test_pending_confirmation_survives_restart_unenqueued(self, tmp_path: Path) -> None:
+        """Spec scenario: Pending confirmation survives restart — exercised
+        through the API of a second engine instance over the same data dir."""
+        release = threading.Event()
+        release.set()
+        first = _Engine(tmp_path, release)
+        first.store.start_worker()
+        pending_id = TestAwaitingConfirmationRoutes._submit_pending(self, first)
+        first.store.shutdown()
+
+        restarted = _Engine(tmp_path, release)
+        restarted.store.start_worker()
+        try:
+            record = restarted.client.get(
+                f"/v1/jobs/{pending_id}", headers=restarted.headers
+            ).json()
+            assert record["state"] == "awaiting-confirmation"
+            # still un-enqueued: a baseline job completes while it sits there
+            baseline = restarted.client.post(
+                "/v1/jobs", json={"source": "https://example.com/b"}, headers=restarted.headers
+            ).json()["id"]
+            assert _wait_for(
+                lambda: (
+                    restarted.client.get(f"/v1/jobs/{baseline}", headers=restarted.headers).json()[
+                        "state"
+                    ]
+                    == "done"
+                )
+            )
+            after = restarted.client.get(f"/v1/jobs/{pending_id}", headers=restarted.headers).json()
+            assert after["state"] == "awaiting-confirmation"
+            assert after["events"] == []
+        finally:
+            restarted.store.shutdown()
 
 
 class TestEvents:
