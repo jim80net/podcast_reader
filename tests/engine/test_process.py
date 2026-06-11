@@ -247,19 +247,8 @@ class TestPipelineRunner:
         monkeypatch.setenv("PODCAST_READER_DATA_DIR", str(tmp_path))
         source = "https://example.com/episode"
 
-        def fake_run_pipeline(request: object, on_event: object) -> PipelineResult:
-            out = Path(request["output_dir"])  # type: ignore[index]
-            (out / "ep.json").write_text('{"segments": []}')
-            (out / "ep.html").write_text("<html>done</html>")
-            return PipelineResult(
-                json_path=str(out / "ep.json"),
-                chapters_path=None,
-                html_path=str(out / "ep.html"),
-                title="Episode",
-            )
-
         with patch(
-            "podcast_reader.engine.process.run_pipeline", side_effect=fake_run_pipeline
+            "podcast_reader.engine.process.run_pipeline", side_effect=_fake_run_pipeline
         ) as mock_run:
             runner = make_pipeline_runner(tmp_path)
             record = new_job_record(job_id="j1", source=source, title="Episode")
