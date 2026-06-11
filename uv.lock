@@ -2933,6 +2933,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
+    { name = "typing-extensions" },
     { name = "uvicorn" },
     { name = "youtube-transcript-api" },
     { name = "yt-dlp" },
@@ -2966,6 +2967,7 @@ requires-dist = [
     { name = "pyannote-audio", marker = "extra == 'diarization'", specifier = ">=4.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.4" },
+    { name = "typing-extensions", specifier = ">=4.6" },
     { name = "uvicorn", specifier = ">=0.30" },
     { name = "whisper-ctranslate2", marker = "extra == 'whisper'", specifier = ">=0.5.7" },
     { name = "youtube-transcript-api", specifier = ">=1.0" },

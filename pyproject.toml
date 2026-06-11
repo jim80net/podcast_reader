@@ -12,6 +12,7 @@ dependencies = [
     "yt-dlp>=2024.1.1",
     "fastapi>=0.111",
     "uvicorn>=0.30",
+    "typing-extensions>=4.6",
 ]
 
 [project.optional-dependencies]

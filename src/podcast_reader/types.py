@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal, TypedDict
+from typing import Any, Literal
+
+# pydantic (FastAPI response models) requires typing_extensions.TypedDict on
+# Python < 3.12; typing.TypedDict raises PydanticUserError there.
+from typing_extensions import TypedDict
 
 StepName = Literal["resolve", "captions", "download", "transcribe", "chapters", "render"]
 EventKind = Literal["step_started", "step_finished", "warning", "job_done", "job_failed"]
