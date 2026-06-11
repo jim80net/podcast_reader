@@ -80,7 +80,7 @@ test('stale discovery + failing spawn surfaces structured startup failure', asyn
         port: 1,
         pid: deadPid,
         token_fingerprint: tokenFingerprint('stale-token'),
-        version: '0.1.0'
+        version: '0.2.0'
       }),
       { mode: 0o600 }
     )

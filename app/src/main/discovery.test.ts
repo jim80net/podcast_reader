@@ -6,7 +6,7 @@ const VALID_DISCOVERY = JSON.stringify({
   port: 51234,
   pid: 4242,
   token_fingerprint: 'abcd1234abcd1234',
-  version: '0.1.0'
+  version: '0.2.0'
 })
 
 describe('parseDiscovery', () => {
@@ -15,7 +15,7 @@ describe('parseDiscovery', () => {
       port: 51234,
       pid: 4242,
       token_fingerprint: 'abcd1234abcd1234',
-      version: '0.1.0'
+      version: '0.2.0'
     })
   })
 

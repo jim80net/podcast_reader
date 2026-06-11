@@ -9,7 +9,7 @@ const handleFixture: EngineHandle = {
   port: 50000,
   pid: 4242,
   token: 'tok',
-  version: '0.1.0',
+  version: '0.2.0',
   adopted: true,
   posture: 'adopted',
   child: null,
@@ -105,7 +105,7 @@ describe('EngineManager.start', () => {
     expect(world.sends[0]).toEqual({ channel: 'engine:status', payload: { state: 'starting' } })
     expect(world.sends.at(-1)).toEqual({
       channel: 'engine:status',
-      payload: { state: 'ready', port: 50000, pid: 4242, version: '0.1.0', adopted: true }
+      payload: { state: 'ready', port: 50000, pid: 4242, version: '0.2.0', adopted: true }
     })
     expect(world.manager.status.state).toBe('ready')
   })

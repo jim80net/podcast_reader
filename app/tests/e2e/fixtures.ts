@@ -139,7 +139,7 @@ export async function writeDiscoveryFiles(dataDir: string, mock: MockEngine): Pr
       port: mock.port,
       pid: mock.pid,
       token_fingerprint: tokenFingerprint(mock.token),
-      version: '0.1.0'
+      version: '0.2.0'
     }),
     { mode: 0o600 }
   )

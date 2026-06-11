@@ -44,4 +44,14 @@ describe('MIN_ENGINE_VERSION', () => {
   it('is a plain dotted version', () => {
     expect(MIN_ENGINE_VERSION).toMatch(/^\d+(\.\d+)*$/)
   })
+
+  it('puts a 0.1.0 engine (lacking shutdown/providers/keys-test) below the floor', () => {
+    expect(versionAtLeast('0.1.0', MIN_ENGINE_VERSION)).toBe(false)
+  })
+
+  it('admits 0.2.0 and newer engines', () => {
+    expect(versionAtLeast('0.2.0', MIN_ENGINE_VERSION)).toBe(true)
+    expect(versionAtLeast('0.2.1', MIN_ENGINE_VERSION)).toBe(true)
+    expect(versionAtLeast('1.0.0', MIN_ENGINE_VERSION)).toBe(true)
+  })
 })

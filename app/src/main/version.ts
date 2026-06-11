@@ -3,12 +3,13 @@
  *
  * The minimum engine version carrying this change's endpoints
  * (`POST /v1/shutdown`, `GET /v1/providers`, `POST /v1/keys/test`,
- * confirm/discard). The engine package version (pyproject.toml) is 0.1.0 and
- * has not been bumped across phases, so the floor currently equals it; bump
- * this constant together with any future engine version bump that this app
- * depends on.
+ * confirm/discard). This change bumps the engine package version
+ * (pyproject.toml) to 0.2.0 alongside those endpoints, so a 0.1.0 engine
+ * (Phase 1/2, lacking them) falls below the floor and is stale-killed;
+ * bump this constant together with any future engine version bump that
+ * this app depends on.
  */
-export const MIN_ENGINE_VERSION = '0.1.0'
+export const MIN_ENGINE_VERSION = '0.2.0'
 
 /**
  * `version >= min`, by dotted numeric core with missing parts as 0.

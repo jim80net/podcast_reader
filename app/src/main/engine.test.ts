@@ -77,7 +77,7 @@ function makeWorld(opts: {
       const disc = discText !== undefined ? (JSON.parse(discText) as Record<string, unknown>) : {}
       return new Response(
         JSON.stringify({
-          version: disc['version'] ?? '0.1.0',
+          version: disc['version'] ?? '0.2.0',
           token_fingerprint: disc['token_fingerprint'] ?? FP
         }),
         { status: 200 }
@@ -102,7 +102,7 @@ function makeWorld(opts: {
           // the engine writes discovery (its own pid) strictly before the sentinel
           files.set(
             `${DATA_DIR}/engine.json`,
-            JSON.stringify({ port: 50000, pid: child.pid, token_fingerprint: FP, version: '0.1.0' })
+            JSON.stringify({ port: 50000, pid: child.pid, token_fingerprint: FP, version: '0.2.0' })
           )
           child.stdout.write('PODCAST_READER_READY\n')
         }
@@ -129,7 +129,7 @@ function makeWorld(opts: {
   return { deps, files, spawns, killedPids, shutdownPosts, child }
 }
 
-const liveDiscovery = { port: 50000, pid: 4242, token_fingerprint: FP, version: '0.1.0' }
+const liveDiscovery = { port: 50000, pid: 4242, token_fingerprint: FP, version: '0.2.0' }
 
 describe('ensureEngine — adopt', () => {
   it('adopts a live, healthy, version-sufficient engine without spawning', async () => {
@@ -179,8 +179,11 @@ describe('ensureEngine — adopt', () => {
   })
 
   it('gracefully stops an engine older than MIN_ENGINE_VERSION, then respawns (per P3/Q1)', async () => {
+    // 0.1.0 is the Phase 1/2 engine version — it lacks /v1/shutdown,
+    // /v1/providers, /v1/keys/test, and confirm/discard, so it sits below
+    // the 0.2.0 floor and takes the kill path.
     const world = makeWorld({
-      discovery: { ...liveDiscovery, version: '0.0.1' },
+      discovery: { ...liveDiscovery, version: '0.1.0' },
       pidDiesAfterShutdownPost: true
     })
     const handle = await ensureEngine(world.deps)
@@ -193,7 +196,7 @@ describe('ensureEngine — adopt', () => {
 
   it('force-kills an old engine that ignores graceful shutdown', async () => {
     const world = makeWorld({
-      discovery: { ...liveDiscovery, version: '0.0.1' },
+      discovery: { ...liveDiscovery, version: '0.1.0' },
       pidDiesAfterShutdownPost: false
     })
     const handle = await ensureEngine(world.deps)
@@ -212,7 +215,7 @@ describe('ensureEngine — spawn', () => {
       pid: 7777,
       port: 50000,
       token: TOKEN,
-      version: '0.1.0'
+      version: '0.2.0'
     })
     expect(handle.child).not.toBeNull()
   })
