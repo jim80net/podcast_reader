@@ -237,6 +237,20 @@ class TestGenerateChapters:
         )
         assert chapters == _CHAPTERS_JSON
 
+    @pytest.mark.parametrize("tag", ["json", ""])
+    def test_single_line_fenced_payload_parses(self, tag: str) -> None:
+        """A whole fenced response on ONE line must keep its payload — the
+        no-newline branch must not discard it (cubic P2 on the OCR fix)."""
+        fenced = f"```{tag} " + json.dumps(_CHAPTERS_JSON) + "```"
+        recorder = _Recorder(httpx.Response(200, json=_completion(fenced)))
+        chapters = generate_chapters(
+            "[0.0] Hello.",
+            spec=self.SPEC,
+            api_key="sk-test",
+            transport=recorder.transport,
+        )
+        assert chapters == _CHAPTERS_JSON
+
     @pytest.mark.parametrize("content", ["```json", "```", ""])
     def test_fence_only_or_blank_content_raises_chapter_error(self, content: str) -> None:
         """A single-line fence (no newline) must not raise IndexError — it is

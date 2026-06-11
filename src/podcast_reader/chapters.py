@@ -8,6 +8,7 @@ OpenAI-compat endpoint, so no provider SDK is required.
 from __future__ import annotations
 
 import json
+import re
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -199,11 +200,12 @@ def generate_chapters(
     # Unknown finish_reason values are treated as success-with-parse-attempt.
     raw = str(content).strip() if content is not None else ""
 
-    # Strip markdown code fences if present (a single-line fence like "```json"
-    # has no newline and strips to nothing).
+    # Strip markdown code fences if present. Drop only the fence marker and
+    # optional language tag, so a payload sharing the fence's line survives
+    # (e.g. "```json [...]```" on one line); a bare "```json" strips to
+    # nothing and is reported as an empty response below.
     if raw.startswith("```"):
-        first_newline = raw.find("\n")
-        raw = raw[first_newline + 1 :] if first_newline != -1 else ""
+        raw = re.sub(r"^```[A-Za-z0-9]*[ \t]*\n?", "", raw)
         if raw.endswith("```"):
             raw = raw.rsplit("```", 1)[0]
         raw = raw.strip()
