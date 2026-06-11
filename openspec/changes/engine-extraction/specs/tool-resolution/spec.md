@@ -3,7 +3,7 @@
 ## ADDED Requirements
 
 ### Requirement: Freeze-aware tool resolution
-`resolve_tool` SHALL resolve external tool names in this precedence order: (1) the user-data tools directory when configured, (2) under `sys.frozen`, the frozen bundle's tools directory; otherwise the directory containing `sys.executable` (current behavior), (3) bare name for PATH lookup. Under `sys.frozen`, `Path(sys.executable).parent` SHALL NOT be searched for console scripts (no console scripts exist there in a frozen app).
+`resolve_tool` SHALL resolve external tool names in this precedence order: (1) the user-data tools directory — supplied as an explicit `tools_dir` parameter, defaulting to the `PODCAST_READER_TOOLS_DIR` environment variable when set, (2) under `sys.frozen`, the frozen bundle's tools directory; otherwise the directory containing `sys.executable` (current behavior), (3) bare name for PATH lookup. Under `sys.frozen`, `Path(sys.executable).parent` SHALL NOT be searched for console scripts (no console scripts exist there in a frozen app).
 
 #### Scenario: User-data copy wins
 - **WHEN** a tool exists in both the user-data tools directory and the bundle/interpreter directory

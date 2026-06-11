@@ -29,11 +29,15 @@ The engine SHALL require `Authorization: Bearer <token>` on every endpoint, incl
 - **THEN** the request is processed
 
 ### Requirement: Discovery file lifecycle
-The engine SHALL write a discovery file (mode 0600) containing `{port, pid, token_fingerprint, version}` atomically on startup at a path supplied via CLI argument, print a single ready sentinel line to stdout after the file is written, and remove the file on clean shutdown.
+The engine SHALL write a discovery file (mode 0600) containing `{port, pid, token_fingerprint, version}` atomically on startup — default path `<data_dir>/engine.json`, overridable via `--discovery-file` — print a single ready sentinel line to stdout after the file is written, and remove the file on clean shutdown. The advertised port SHALL already be bound when the file is written (the engine binds the socket itself before advertising and hands it to the HTTP server).
 
 #### Scenario: Discovery file written before sentinel
-- **WHEN** the engine starts with `--discovery-file <path>`
-- **THEN** `<path>` exists with the engine's port, PID, token fingerprint, and version before the ready sentinel is printed
+- **WHEN** the engine starts (with or without `--discovery-file <path>`)
+- **THEN** the discovery file exists at the chosen path with the engine's port, PID, token fingerprint, and version before the ready sentinel is printed
+
+#### Scenario: Advertised port is live
+- **WHEN** the ready sentinel has been printed
+- **THEN** a connection to the advertised port succeeds without a probe-the-port retry loop
 
 #### Scenario: Clean shutdown removes the file
 - **WHEN** the engine shuts down gracefully

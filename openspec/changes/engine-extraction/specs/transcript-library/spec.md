@@ -27,6 +27,13 @@ The engine SHALL be the sole writer of the library index, and every index write 
 - **WHEN** the engine is killed during an index write
 - **THEN** the previous index version is still readable on next start
 
+### Requirement: Staged artifact writes
+Engine pipeline steps SHALL produce artifacts in a staging location and move them into the library entry atomically on step completion, so a crash mid-write never leaves a torn artifact in the entry directory.
+
+#### Scenario: Crash mid-transcription leaves no torn artifact
+- **WHEN** the engine is killed while a step is writing an artifact
+- **THEN** the library entry contains either the complete artifact or none, never a partial file
+
 ### Requirement: Cache re-validation
 A cached artifact SHALL only be treated as a cache hit if it validates (JSON parses; HTML is non-empty). Invalid artifacts SHALL be discarded and regenerated rather than served or crashing the job.
 

@@ -29,7 +29,7 @@ The CLI one-shot mode and the engine job runner SHALL execute the same pipeline 
 
 #### Scenario: CLI uses the shared pipeline
 - **WHEN** the CLI one-shot mode runs
-- **THEN** it invokes the shared pipeline with a print-adapter event consumer and produces the same artifacts as the engine would for the same source
+- **THEN** it invokes the shared pipeline with a print-adapter event consumer and produces equivalent artifact contents (transcript JSON, chapters, HTML) to an engine job for the same source, differing only in storage location and naming
 
 ### Requirement: Chapters fault isolation
 Any error in the chapters step (provider failure, truncation, malformed output, missing key) SHALL NOT fail the job or the CLI run: the pipeline SHALL record a structured warning and proceed to render a chapterless transcript. This applies to both engine and CLI execution.
@@ -42,12 +42,30 @@ Any error in the chapters step (provider failure, truncation, malformed output, 
 - **WHEN** chapter generation raises during a CLI one-shot run
 - **THEN** the CLI writes the chapterless HTML, prints the warning, and exits 0
 
+### Requirement: Job persistence
+Job records, including their accumulated events, SHALL persist across engine restarts in a journal owned and written solely by the engine, with atomic writes (temp file + rename) on every state transition.
+
+#### Scenario: Records survive restart
+- **WHEN** the engine restarts after completing a job
+- **THEN** `GET /v1/jobs/{id}` for that job returns its terminal state and events
+
 ### Requirement: Interruption semantics
-Jobs found in `running` state when the engine starts SHALL be marked `interrupted` and be retryable.
+Jobs found in `running` state when the engine starts SHALL be marked `interrupted`. Retry is an idempotent re-submission: a `POST /v1/jobs` with the same source reuses cached artifacts and creates a new job.
 
 #### Scenario: Crash recovery marks interrupted
-- **WHEN** the engine starts and the job store contains a job in `running` state
+- **WHEN** the engine starts and the job journal contains a job in `running` state
 - **THEN** that job is transitioned to `interrupted`
+
+#### Scenario: Retry via re-submission
+- **WHEN** a source whose previous job ended `interrupted` is submitted again
+- **THEN** a new job runs, reusing any valid cached artifacts
+
+### Requirement: Awaiting-confirmation state (forward compatibility)
+The state machine SHALL include `awaiting-confirmation`, though no Phase 1 API path creates such jobs (protocol-initiated jobs arrive with the desktop app and extension phases). State-machine unit tests SHALL cover it.
+
+#### Scenario: State exists but unreachable via API
+- **WHEN** any Phase 1 endpoint creates a job
+- **THEN** the job enters `queued`, never `awaiting-confirmation`
 
 ### Requirement: Single-job execution
 The engine SHALL run at most one job at a time, queueing additional submissions in FIFO order.
