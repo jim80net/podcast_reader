@@ -14,8 +14,8 @@
 
 ## 3. Engine key store
 
-- [ ] 3.1 Shared key store `dict[str, str]` created in `serve_engine`, passed to both `make_pipeline_runner` and `create_app` (per K7 — app.state can't host it; the runner closure is built first); `engine/app.py`: `PUT /v1/keys` (write-only, auth matrix coverage); TestClient tests incl. keys-are-write-only sweep (no endpoint echoes the key)
-- [ ] 3.2 `engine/settings.py`: new fields + defaults-merge in `load_settings` (per K3, stale Phase 1 file test); `engine/app.py` `SettingsBody` gains new fields with defaults (old-shape PUT test); `engine/process.py`: runner injects `keys.get(provider) or os.environ.get(spec.key_env)` at dequeue (per K1; env-fallback test + pushed-key-wins test); restart-loses-keys test; no-key-in-journal/files sweep test (grep persisted files for the key after a run)
+- [x] 3.1 Shared key store `dict[str, str]` created in `serve_engine`, passed to both `make_pipeline_runner` and `create_app` (per K7 — app.state can't host it; the runner closure is built first); `engine/app.py`: `PUT /v1/keys` (write-only, auth matrix coverage); TestClient tests incl. keys-are-write-only sweep (no endpoint echoes the key)
+- [x] 3.2 `engine/settings.py`: new fields + defaults-merge in `load_settings` (per K3, stale Phase 1 file test); `engine/app.py` `SettingsBody` gains new fields with defaults (old-shape PUT test); `engine/process.py`: runner injects `keys.get(provider) or os.environ.get(spec.key_env)` at dequeue (per K1; env-fallback test + pushed-key-wins test); restart-loses-keys test; no-key-in-journal/files sweep test (grep persisted files for the key after a run)
 
 ## 4. Docs, gates, integration
 

@@ -16,6 +16,7 @@ from unittest.mock import MagicMock, patch
 import httpx
 import pytest
 
+from podcast_reader.engine.app import create_app
 from podcast_reader.engine.jobs import JobStore
 from podcast_reader.engine.library import entry_dir, list_entries, source_identity
 from podcast_reader.engine.process import (
@@ -203,7 +204,8 @@ class TestChildManagement:
             return PipelineResult(json_path="", chapters_path=None, html_path="", title="t")
 
         monkeypatch.setattr(
-            "podcast_reader.engine.process.make_pipeline_runner", lambda base: fake_runner
+            "podcast_reader.engine.process.make_pipeline_runner",
+            lambda base, key_store=None: fake_runner,
         )
         discovery = tmp_path / "discovery.json"
         servers: list[uvicorn.Server] = []
@@ -326,6 +328,42 @@ class TestPipelineRunner:
         assert request["chapter_provider"] == "deepseek"
         assert request["chapter_api_key"] == "sk-ds-env"
 
+    def test_pushed_key_wins_over_env(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Spec scenario: Pushed key wins over env."""
+        monkeypatch.setenv("PODCAST_READER_DATA_DIR", str(tmp_path))
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-env")
+
+        with patch(
+            "podcast_reader.engine.process.run_pipeline", side_effect=_fake_run_pipeline
+        ) as mock_run:
+            runner = make_pipeline_runner(tmp_path, key_store={"anthropic": "sk-ant-pushed"})
+            runner(new_job_record(job_id="j1", source="https://example.com/e", title=None), _noop)
+
+        assert mock_run.call_args.args[0]["chapter_api_key"] == "sk-ant-pushed"
+
+    def test_restart_loses_pushed_keys(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Spec scenario: Keys do not survive restart — a fresh key store plus no
+        env var injects no key, and the pipeline's missing-key path then skips
+        chapters with ``chapters_skipped`` (covered by the pipeline tests)."""
+        monkeypatch.setenv("PODCAST_READER_DATA_DIR", str(tmp_path))
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+        before_restart = {"anthropic": "sk-ant-pushed"}  # key pushed into the old process
+        fresh_store: dict[str, str] = {}  # what a restarted serve_engine creates
+        assert before_restart != fresh_store
+
+        with patch(
+            "podcast_reader.engine.process.run_pipeline", side_effect=_fake_run_pipeline
+        ) as mock_run:
+            runner = make_pipeline_runner(tmp_path, key_store=fresh_store)
+            runner(new_job_record(job_id="j1", source="https://example.com/e", title=None), _noop)
+
+        assert mock_run.call_args.args[0]["chapter_api_key"] is None
+
     def test_missing_local_file_fails_with_structured_not_found(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -340,6 +378,41 @@ class TestPipelineRunner:
         assert error["code"] == "not_found"
         assert "File not found" in error["message"]
         store.shutdown()
+
+
+class TestServeKeyStoreWiring:
+    def test_serve_engine_shares_one_key_store_between_runner_and_app(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Per K7: serve_engine creates the key store and passes the same dict
+        object to both make_pipeline_runner and create_app (the runner closure
+        is constructed before the app, so app state cannot host it)."""
+        monkeypatch.setenv("PODCAST_READER_DATA_DIR", str(tmp_path))
+        captured: dict[str, object] = {}
+
+        real_make = make_pipeline_runner
+        real_create = create_app
+
+        def spy_make(base: Path, key_store: dict[str, str] | None = None) -> object:
+            captured["runner_store"] = key_store
+            return real_make(base, key_store=key_store)
+
+        def spy_create(
+            data_dir: Path, store: object, *, key_store: dict[str, str] | None = None
+        ) -> object:
+            captured["app_store"] = key_store
+            return real_create(data_dir, store, key_store=key_store)  # type: ignore[arg-type]
+
+        monkeypatch.setattr("podcast_reader.engine.process.make_pipeline_runner", spy_make)
+        monkeypatch.setattr("podcast_reader.engine.process.create_app", spy_create)
+        monkeypatch.setattr(
+            "uvicorn.Server.run", lambda self, sockets=None: None
+        )  # serve and return immediately
+
+        serve_engine(discovery_file=tmp_path / "discovery.json")
+
+        assert isinstance(captured["runner_store"], dict)
+        assert captured["runner_store"] is captured["app_store"]
 
 
 class TestServeSmoke:

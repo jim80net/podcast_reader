@@ -43,6 +43,7 @@ _ROUTES = [
     ("GET", "/v1/transcripts/abc123.html"),
     ("GET", "/v1/settings"),
     ("PUT", "/v1/settings"),
+    ("PUT", "/v1/keys"),
 ]
 
 
@@ -71,7 +72,8 @@ class _Engine:
             return _RESULT
 
         self.store = JobStore(data_dir, runner)
-        self.app = create_app(data_dir, self.store, heartbeat_s=0.05)
+        self.key_store: dict[str, str] = {}
+        self.app = create_app(data_dir, self.store, key_store=self.key_store, heartbeat_s=0.05)
         self.token = load_engine_state(data_dir)["token"]
         self.headers = {"Authorization": f"Bearer {self.token}"}
         self.client = TestClient(self.app)
@@ -383,3 +385,75 @@ class TestSettings:
         fetched = engine.client.get("/v1/settings", headers=engine.headers).json()
         assert fetched["sentences"] == 7
         assert fetched["chapter_provider"] == "deepseek"  # kept, not reset
+
+
+class TestKeys:
+    """Spec: In-memory key store — PUT /v1/keys, write-only, memory-only."""
+
+    def test_put_key_stores_in_shared_memory_dict(self, engine: _Engine) -> None:
+        response = engine.client.put(
+            "/v1/keys",
+            json={"provider": "anthropic", "api_key": "sk-ant-pushed"},
+            headers=engine.headers,
+        )
+        assert response.status_code == 204
+        assert engine.key_store == {"anthropic": "sk-ant-pushed"}
+
+    def test_put_key_overwrites_previous(self, engine: _Engine) -> None:
+        for key in ("sk-first", "sk-second"):
+            engine.client.put(
+                "/v1/keys",
+                json={"provider": "openai", "api_key": key},
+                headers=engine.headers,
+            )
+        assert engine.key_store == {"openai": "sk-second"}
+
+    def test_unknown_provider_rejected(self, engine: _Engine) -> None:
+        response = engine.client.put(
+            "/v1/keys",
+            json={"provider": "nonsense", "api_key": "sk-x"},
+            headers=engine.headers,
+        )
+        assert response.status_code == 400
+        assert engine.key_store == {}
+
+    def test_keys_cannot_be_read_back(self, engine: _Engine) -> None:
+        engine.client.put(
+            "/v1/keys",
+            json={"provider": "anthropic", "api_key": "sk-ant-pushed"},
+            headers=engine.headers,
+        )
+        assert engine.client.get("/v1/keys", headers=engine.headers).status_code == 405
+
+    def test_keys_are_write_only_sweep(self, engine: _Engine, tmp_path: Path) -> None:
+        """Spec scenario: after a key is PUT, no endpoint response and no
+        persisted file contains the key value."""
+        key = "sk-test-write-only-0123456789abcdef"
+        put = engine.client.put(
+            "/v1/keys",
+            json={"provider": "anthropic", "api_key": key},
+            headers=engine.headers,
+        )
+        assert key not in put.text
+
+        # run a job so journal/library files exist and events flow
+        submitted = engine.client.post(
+            "/v1/jobs", json={"source": "https://example.com/a"}, headers=engine.headers
+        )
+        job_id = submitted.json()["id"]
+        assert _wait_for(
+            lambda: (
+                engine.client.get(f"/v1/jobs/{job_id}", headers=engine.headers).json()["state"]
+                == "done"
+            )
+        )
+
+        for method, path in _ROUTES:
+            if method != "GET" or path == "/v1/events":
+                continue  # SSE stream blocks forever under TestClient
+            response = engine.client.request(method, path, headers=engine.headers)
+            assert key not in response.text, f"key leaked via {method} {path}"
+
+        for path in tmp_path.rglob("*"):
+            if path.is_file():
+                assert key not in path.read_text(errors="replace"), f"key leaked into {path}"

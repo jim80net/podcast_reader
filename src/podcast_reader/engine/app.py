@@ -27,6 +27,7 @@ from podcast_reader.engine.settings import (
     save_settings,
     token_fingerprint,
 )
+from podcast_reader.providers import PROVIDERS
 
 # JobRecord/LibraryEntry back FastAPI response models, so they must be
 # importable at runtime (a TYPE_CHECKING import leaves unresolvable ForwardRefs).
@@ -47,6 +48,13 @@ class JobSubmission(BaseModel):
 
     source: str
     title: str | None = None
+
+
+class KeyBody(BaseModel):
+    """Body of ``PUT /v1/keys`` — write-only; no endpoint ever returns a key."""
+
+    provider: str
+    api_key: str
 
 
 class SettingsBody(BaseModel):
@@ -93,10 +101,22 @@ class HealthInfo(BaseModel):
     token_fingerprint: str
 
 
-def create_app(data_dir: Path, store: JobStore, *, heartbeat_s: float = 15.0) -> FastAPI:
-    """Build the engine's FastAPI app bound to *store* and *data_dir*."""
+def create_app(
+    data_dir: Path,
+    store: JobStore,
+    *,
+    key_store: dict[str, str] | None = None,
+    heartbeat_s: float = 15.0,
+) -> FastAPI:
+    """Build the engine's FastAPI app bound to *store* and *data_dir*.
+
+    *key_store* is the process-memory chapter-API-key dict shared with the job
+    runner (created in ``serve_engine``); keys live only there — never in any
+    file or response.
+    """
     app = FastAPI(title="podcast-reader engine", version=engine_version())
     expected_token = load_engine_state(data_dir)["token"].encode()
+    keys: dict[str, str] = key_store if key_store is not None else {}
 
     @app.middleware("http")
     async def _require_bearer_token(
@@ -167,6 +187,14 @@ def create_app(data_dir: Path, store: JobStore, *, heartbeat_s: float = 15.0) ->
         if entry is None or not Path(entry["html_path"]).exists():
             raise HTTPException(status_code=404, detail="transcript not found")
         return FileResponse(entry["html_path"], media_type="text/html")
+
+    @app.put("/v1/keys", status_code=status.HTTP_204_NO_CONTENT)
+    def put_key(body: KeyBody) -> None:
+        if body.provider not in PROVIDERS:
+            raise HTTPException(
+                status_code=400, detail=f"unknown chapter provider: {body.provider!r}"
+            )
+        keys[body.provider] = body.api_key
 
     @app.get("/v1/settings")
     def get_settings() -> EngineSettings:
