@@ -2,7 +2,52 @@
 
 from __future__ import annotations
 
-from podcast_reader.pipeline import InputType, classify_input
+from typing import TYPE_CHECKING
+from unittest.mock import MagicMock, patch
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+import pytest
+
+from podcast_reader.cli import main_with_args
+from podcast_reader.pipeline import InputType, PipelineError, classify_input
+from podcast_reader.types import PipelineEvent, PipelineResult
+
+if TYPE_CHECKING:
+    from podcast_reader.types import PipelineRequest
+
+
+class TestCliAdapter:
+    @patch("podcast_reader.cli.run_pipeline")
+    def test_one_shot_invokes_pipeline_and_prints(
+        self, mock_run: MagicMock, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        def fake(req: PipelineRequest, on_event: Callable[[PipelineEvent], None]) -> PipelineResult:
+            on_event(
+                PipelineEvent(kind="step_started", step="resolve", message="Resolving...", data={})
+            )
+            return PipelineResult(
+                json_path="a.json", chapters_path=None, html_path="a.html", title="T"
+            )
+
+        mock_run.side_effect = fake
+        main_with_args(["https://example.com/x.mp3", "T"])
+        out = capsys.readouterr().out
+        assert "Resolving..." in out and "a.html" in out
+
+    @patch(
+        "podcast_reader.cli.run_pipeline",
+        side_effect=PipelineError("not_found", "File not found: /nope", ""),
+    )
+    def test_one_shot_error_exits_1(self, _m: MagicMock) -> None:
+        with pytest.raises(SystemExit, match="1"):
+            main_with_args(["/nope"])
+
+    @patch("podcast_reader.cli.serve_engine")
+    def test_serve_subcommand_dispatches(self, mock_serve: MagicMock) -> None:
+        main_with_args(["serve", "--discovery-file", "/tmp/d.json"])
+        mock_serve.assert_called_once()
 
 
 class TestClassifyInput:

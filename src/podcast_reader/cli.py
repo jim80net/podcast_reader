@@ -1,4 +1,8 @@
-"""Main CLI entry point for podcast-reader."""
+"""Main CLI entry point for podcast-reader.
+
+A thin adapter over :mod:`podcast_reader.pipeline`: one-shot mode prints
+pipeline events to stdout; the ``serve`` subcommand starts the engine.
+"""
 
 from __future__ import annotations
 
@@ -13,6 +17,46 @@ from podcast_reader.types import PipelineEvent, PipelineRequest
 
 def main() -> None:
     """CLI entry point."""
+    main_with_args(sys.argv[1:])
+
+
+def main_with_args(argv: list[str]) -> None:
+    """Dispatch *argv*: ``serve`` starts the engine, anything else is one-shot.
+
+    ``serve`` is detected as the first positional because argparse subparsers
+    would break the legacy ``podcast-reader <url> [title]`` shape.
+    """
+    if argv and argv[0] == "serve":
+        _run_serve(argv[1:])
+    else:
+        _run_one_shot(argv)
+
+
+def serve_engine(*, discovery_file: Path | None = None) -> None:
+    """Start the localhost engine (lazy import keeps one-shot startup light)."""
+    from podcast_reader.engine.process import serve_engine as _serve_engine
+
+    _serve_engine(discovery_file=discovery_file)
+
+
+def _run_serve(argv: list[str]) -> None:
+    """Parse ``serve`` arguments and start the engine."""
+    parser = argparse.ArgumentParser(
+        prog="podcast-reader serve",
+        description="Run the localhost transcription engine",
+    )
+    parser.add_argument(
+        "--discovery-file",
+        type=Path,
+        default=None,
+        help="Path for the engine discovery file (default: <data_dir>/engine.json)",
+    )
+    args = parser.parse_args(argv)
+    serve_engine(discovery_file=args.discovery_file)
+
+
+def _run_one_shot(argv: list[str]) -> None:
+    """Run the pipeline once, printing progress and result paths."""
     parser = argparse.ArgumentParser(
         prog="podcast-reader",
         description=("Transcribe podcast audio or YouTube/X videos to styled HTML transcripts"),
@@ -35,7 +79,7 @@ def main() -> None:
         default="claude-haiku-4-5-20251001",
         help=("Claude model for chapters (default: claude-haiku-4-5-20251001)"),
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     request = PipelineRequest(
         source=args.input,
