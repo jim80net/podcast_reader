@@ -59,7 +59,7 @@ The New view SHALL list all jobs in `awaiting-confirmation` with their source UR
 - **THEN** the New view still lists it
 
 ### Requirement: Settings view
-The Settings view SHALL expose: chapter provider dropdown (the engine's provider registry, including custom with base-URL field), per-provider API key entry (write-only — saved keys are shown masked and never read back) with a "test key" button calling the engine's key-test endpoint, whisper model/device/language, sentences per paragraph, and library/storage directory. Saving SHALL persist engine settings via `PUT /v1/settings` and key changes via the vault-and-push flow; validation errors from the engine SHALL be shown inline.
+The Settings view SHALL expose: chapter provider dropdown populated from the engine's `GET /v1/providers` (provider ids, default models, key-availability — per P4), including custom with base-URL field, per-provider API key entry (write-only — saved keys are shown masked and never read back) with a "test key" button calling the engine's key-test endpoint, whisper model/device/language, sentences per paragraph, and library/storage directory. Saving SHALL persist engine settings via `PUT /v1/settings` and key changes via the vault-and-push flow; validation errors from the engine SHALL be shown inline.
 
 #### Scenario: Key test reports outcome without exposing the key
 - **WHEN** the user enters a key and clicks test

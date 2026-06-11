@@ -3,18 +3,18 @@
 ## ADDED Requirements
 
 ### Requirement: Engine supervision via the discovery handshake
-The app main process SHALL locate the engine through the Phase 1 contract: resolve the engine data dir exactly as the engine does (`PODCAST_READER_DATA_DIR`, else `~/PodcastReader`), read the discovery file (`engine.json`) and the bearer token (`engine-state.json`), and adopt a running engine only when its PID is alive, `GET /v1/health` succeeds with that token, and the health `token_fingerprint` matches the discovery file. Any other condition SHALL be treated as a stale engine: the app stops the stale PID (graceful shutdown when it answers, force-kill otherwise) and spawns a fresh engine. At no point SHALL two engines run for one data dir.
+The app main process SHALL locate the engine through the Phase 1 contract: resolve the engine data dir exactly as the engine does (`PODCAST_READER_DATA_DIR`, else `~/PodcastReader`), read the discovery file (`engine.json`) and the bearer token (`engine-state.json`), and adopt a running engine only when its PID is alive, `GET /v1/health` succeeds with that token, the health `token_fingerprint` matches the discovery file, and the health-reported `version` is >= `MIN_ENGINE_VERSION` — the engine version that introduces this change's endpoints; an engine reporting a newer version SHALL be adopted (per P3/Q1). Any other condition — including a version older than `MIN_ENGINE_VERSION` (per P3/Q1) — SHALL be treated as a stale engine: the app stops the stale PID (graceful shutdown when it answers, force-kill otherwise) and spawns a fresh engine. At no point SHALL two engines run for one data dir.
 
 #### Scenario: Live engine is adopted
 - **WHEN** the app starts while a healthy engine is running and discovered
 - **THEN** the app adopts it without spawning a second engine
 
 #### Scenario: Stale discovery file triggers kill-and-respawn
-- **WHEN** the app starts and the discovery file names a PID that is dead, unresponsive, or fails the token-fingerprint check
+- **WHEN** the app starts and the discovery file names a PID that is dead, unresponsive, fails the token-fingerprint check, or reports a health `version` older than `MIN_ENGINE_VERSION` (per P3/Q1)
 - **THEN** the app terminates any such process, spawns a fresh engine, and proceeds against the new discovery file
 
 ### Requirement: Engine spawn readiness via sentinel then discovery file
-When spawning the engine, the app SHALL resolve the engine command in order: packaged engine executable under the app's resources (`engine/` dir), then the `PODCAST_READER_ENGINE_CMD` environment override, then the development fallback `uv run podcast-reader serve`. The app SHALL treat the engine as ready only after the `PODCAST_READER_READY` sentinel line appears on the child's stdout, then read the discovery file and verify health — it SHALL NOT poll candidate ports or parse any other stdout content.
+When spawning the engine, the app SHALL resolve the engine command in order: packaged engine executable under the app's resources (`engine/` dir), then the `PODCAST_READER_ENGINE_CMD` environment override — parsed by a documented whitespace split, so paths containing spaces are unsupported in the override; the packaged or dev postures cover those (per P6) — then the development fallback `uv run podcast-reader serve`. The app SHALL treat the engine as ready only after the `PODCAST_READER_READY` sentinel line appears on the child's stdout, then read the discovery file and verify health — it SHALL NOT poll candidate ports or parse any other stdout content.
 
 #### Scenario: Packaged engine preferred
 - **WHEN** the app runs from an installed build containing an engine resources dir
@@ -29,11 +29,11 @@ When spawning the engine, the app SHALL resolve the engine command in order: pac
 - **THEN** the app surfaces a structured startup error (including captured stderr) instead of hanging
 
 ### Requirement: Explicit quit sequence
-On quit — including the path immediately preceding `quitAndInstall` — the app SHALL request graceful engine shutdown via `POST /v1/shutdown`, wait for the engine process to exit within a bounded timeout, and force-kill it on timeout (relying on the engine's child-reaping for grandchildren). The app SHALL NOT install an update while the engine process is alive.
+On quit — including the path immediately preceding `quitAndInstall` — the app SHALL first abort its own `/v1/events` stream (an open SSE response would otherwise hold graceful shutdown open, per P1), then request graceful engine shutdown via `POST /v1/shutdown`, wait for the engine process to exit within a bounded timeout, and force-kill it on timeout (relying on the engine's child-reaping for grandchildren). Adopted engines are not child processes and emit no exit event, so the app SHALL await their exit by PID polling (per P7); app quit therefore shuts down even a manually started engine — the single-ownership model is intended (per P7). The app SHALL NOT install an update while the engine process is alive.
 
 #### Scenario: Normal quit stops the engine first
 - **WHEN** the user quits the app while the engine runs
-- **THEN** the engine receives the shutdown request and the app exits only after the engine process has terminated
+- **THEN** the app's `/v1/events` subscription is aborted before the shutdown request is sent (per P1), the engine receives the shutdown request, and the app exits only after the engine process has terminated
 
 #### Scenario: Update applies only after engine exit
 - **WHEN** a downloaded update is applied

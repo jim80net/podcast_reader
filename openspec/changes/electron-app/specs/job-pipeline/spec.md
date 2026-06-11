@@ -1,8 +1,14 @@
 # job-pipeline
 
+## RENAMED Requirements
+
+<!-- Renamed because the state is no longer "forward compatibility" — this change makes it reachable (per P5). -->
+- FROM: `### Requirement: Awaiting-confirmation state (forward compatibility)`
+- TO: `### Requirement: Awaiting-confirmation state`
+
 ## MODIFIED Requirements
 
-### Requirement: Awaiting-confirmation state (forward compatibility)
+### Requirement: Awaiting-confirmation state
 The `awaiting-confirmation` state SHALL be reachable through the API: `POST /v1/jobs` SHALL accept `requires_confirmation` (default false; existing clients unchanged), and a true value SHALL journal the job in `awaiting-confirmation` without enqueueing it for execution. `POST /v1/jobs/{id}/confirm` SHALL transition an awaiting-confirmation job to `queued` and enqueue it (409 from any other state). `DELETE /v1/jobs/{id}` SHALL discard a job only while it is in `awaiting-confirmation` (409 otherwise). Jobs in `awaiting-confirmation` SHALL survive engine restarts without being enqueued, and SHALL never run without an explicit confirm.
 
 #### Scenario: Default submission stays queued

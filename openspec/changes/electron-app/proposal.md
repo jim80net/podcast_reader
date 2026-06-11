@@ -11,8 +11,9 @@ Phases 1–2 produced a localhost engine (jobs, SSE, library, settings, in-memor
 - `podcast-reader://` protocol registration (installer + runtime): protocol-initiated jobs land in `awaiting-confirmation` and are confirmed by one click in the New view — never auto-executed.
 - Engine additions the app needs (small, additive):
   - `POST /v1/jobs` gains `requires_confirmation`; new `POST /v1/jobs/{id}/confirm` and `DELETE /v1/jobs/{id}` (awaiting-confirmation only) make the Phase 1 reserved state reachable.
-  - `POST /v1/shutdown` — portable graceful stop (Windows has no SIGTERM), so the app's quit sequence is: shutdown → engine reaps children → wait → exit/`quitAndInstall`.
+  - `POST /v1/shutdown` — portable graceful stop (Windows has no SIGTERM), so the app's quit sequence is: abort the app's `/v1/events` stream (per P1) → shutdown → engine reaps children → wait → exit/`quitAndInstall`.
   - `POST /v1/keys/test` — minimal provider round-trip behind the Settings "test key" button, reusing the one Phase 2 HTTP code path instead of duplicating the provider registry in TypeScript.
+  - `GET /v1/providers` — provider ids, default models, and a key-available boolean (never key material) feeding the Settings provider dropdown, so the registry has exactly one home (per P4).
 - electron-builder packaging: NSIS (Windows) + dmg/zip (macOS); the frozen engine dir ships as `extraResources` (executables cannot run from inside asar). Auto-update via electron-updater against GitHub Releases with **full-download updates** for this phase (rationale in design). Signing/notarization are explicit user-blocking prerequisite tasks — unsigned dev builds must work end-to-end first.
 - Testing: Playwright e2e against a mock engine that honors the real discovery handshake; a real-engine spawn smoke test (dev posture: `uv run podcast-reader serve`); CI gains a node job. Tag-pipeline installer builds are deferred until signing credentials exist.
 - Pre-Phase 4 dev posture, documented explicitly: no download manager yet, so first-run on dev machines assumes a Python env (`uv run podcast-reader serve`) or a locally built frozen engine dir; the packaged-engine payload contract is fixed here and filled by Phase 4.
@@ -31,11 +32,11 @@ No breaking changes: the engine API grows additively (existing clients' `POST /v
 
 - `job-pipeline`: the reserved `awaiting-confirmation` state becomes reachable — confirmation-required submission, confirm and dismiss endpoints, restart recovery.
 - `engine-service`: adds a graceful shutdown endpoint (`POST /v1/shutdown`) to the engine surface.
-- `key-management`: adds `POST /v1/keys/test` (stacked on the pending `multi-provider-chapters` change, which archives before this one; delta is ADDED-only so it merges cleanly).
+- `key-management`: adds `POST /v1/keys/test` and `GET /v1/providers` (per P4) (stacked on the pending `multi-provider-chapters` change, which archives before this one; delta is ADDED-only so it merges cleanly).
 
 ## Impact
 
-- **Code:** new `app/` (TypeScript, electron-vite, no renderer framework — see design); engine edits in `engine/app.py` (three routes, `JobSubmission` field), `engine/jobs.py` (confirmation transitions), `engine/process.py` (shutdown wiring), `chapters.py`/`providers.py` reuse for key test.
+- **Code:** new `app/` (TypeScript, electron-vite, no renderer framework — see design); engine edits in `engine/app.py` (new routes incl. `GET /v1/providers` per P4, `JobSubmission` field), `engine/jobs.py` (confirmation transitions), `engine/process.py` (shutdown wiring), `chapters.py`/`providers.py` reuse for key test.
 - **Tests:** pytest additions for the new engine routes/transitions; new `app/` test stack — vitest unit, Playwright e2e (mock engine), real-engine smoke (integration-marked).
 - **CI:** new node job (typecheck, unit, e2e under xvfb, real-engine smoke); installer builds deferred to tag pipelines once credentials exist.
 - **Docs:** README (app section, dev posture), CLAUDE.md (app/ rows, new endpoints).
