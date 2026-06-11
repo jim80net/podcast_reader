@@ -17,6 +17,7 @@ from podcast_reader.engine.jobs import (
     MAX_TERMINAL_JOBS,
     SUBSCRIBER_FULL_STREAK_LIMIT,
     SUBSCRIBER_QUEUE_SIZE,
+    JobStateError,
     JobStore,
 )
 from podcast_reader.pipeline import PipelineError
@@ -67,10 +68,10 @@ class TestSubmit:
         assert record["created_at"] > 0
         assert record["id"]
 
-    def test_awaiting_confirmation_not_reachable_via_submit(self, store: JobStore) -> None:
-        # the state exists in the machine (forward compatibility)...
+    def test_awaiting_confirmation_not_reachable_via_default_submit(self, store: JobStore) -> None:
+        # the state exists in the machine...
         assert "awaiting-confirmation" in JOB_STATES
-        # ...but no submission path produces it
+        # ...but a default submission never produces it
         for source in ("https://example.com/a", "https://example.com/b"):
             assert store.submit(source, None)["state"] == "queued"
 
@@ -233,6 +234,198 @@ class TestShutdown:
         assert _wait_for(lambda: recovered.get(third["id"])["state"] == "done")
         assert recovered.get(second["id"])["state"] == "done"
         recovered.shutdown()
+
+
+class TestAwaitingConfirmation:
+    """Spec: Awaiting-confirmation state — submit/confirm/discard transitions."""
+
+    def test_submit_requires_confirmation_journals_without_enqueue(self, tmp_path: Path) -> None:
+        """Spec scenario: Confirmation-required job does not execute."""
+        ran: list[str] = []
+
+        def recording(
+            record: JobRecord, on_event: Callable[[PipelineEvent], None]
+        ) -> PipelineResult:
+            ran.append(record["id"])
+            return _RESULT
+
+        store = JobStore(tmp_path, recording)
+        store.start_worker()
+        pending = store.submit("https://example.com/p", None, requires_confirmation=True)
+        baseline = store.submit("https://example.com/b", None)  # proves the worker is draining
+        assert pending["state"] == "awaiting-confirmation"
+        assert _wait_for(lambda: store.get(baseline["id"])["state"] == "done")
+        assert store.get(pending["id"])["state"] == "awaiting-confirmation"
+        assert store.get(pending["id"])["events"] == []
+        assert ran == [baseline["id"]]
+        # journaled as awaiting-confirmation, not just in memory
+        on_disk = {r["id"]: r["state"] for r in json.loads((tmp_path / "jobs.json").read_text())}
+        assert on_disk[pending["id"]] == "awaiting-confirmation"
+        store.shutdown()
+
+    def test_confirm_enqueues_and_executes(self, store: JobStore) -> None:
+        """Spec scenario: Confirm enqueues."""
+        store.start_worker()
+        pending = store.submit("https://example.com/p", None, requires_confirmation=True)
+        confirmed = store.confirm(pending["id"])
+        assert confirmed["state"] == "queued"
+        assert _wait_for(lambda: store.get(pending["id"])["state"] == "done")
+        store.shutdown()
+
+    def test_confirm_unknown_job_raises_keyerror(self, store: JobStore) -> None:
+        with pytest.raises(KeyError):
+            store.confirm("unknown")
+
+    @pytest.mark.parametrize("state", ["queued", "done", "failed", "interrupted"])
+    def test_confirm_rejected_in_other_states(self, tmp_path: Path, state: str) -> None:
+        """Spec scenario: Confirm rejected in other states (409-shaped)."""
+        (tmp_path / "jobs.json").write_text(json.dumps([_journal_record("j1", state, 1.0)]))
+        store = JobStore(tmp_path, _ok_runner)
+        with pytest.raises(JobStateError, match=state):
+            store.confirm("j1")
+        assert store.get("j1")["state"] == state  # unchanged
+
+    def test_confirm_and_discard_rejected_while_running(self, tmp_path: Path) -> None:
+        """A live running job (journal recovery would flip a seeded one) rejects both."""
+        release = threading.Event()
+        started = threading.Event()
+
+        def blocking(
+            record: JobRecord, on_event: Callable[[PipelineEvent], None]
+        ) -> PipelineResult:
+            started.set()
+            assert release.wait(timeout=10)
+            return _RESULT
+
+        store = JobStore(tmp_path, blocking)
+        store.start_worker()
+        record = store.submit("https://example.com/a", None)
+        assert started.wait(timeout=10)
+        with pytest.raises(JobStateError, match="running"):
+            store.confirm(record["id"])
+        with pytest.raises(JobStateError, match="running"):
+            store.discard(record["id"])
+        release.set()
+        assert _wait_for(lambda: store.get(record["id"])["state"] == "done")
+        store.shutdown()
+
+    def test_discard_removes_awaiting_confirmation_job(self, store: JobStore) -> None:
+        """Spec scenario: Dismiss discards only pending confirmations."""
+        pending = store.submit("https://example.com/p", None, requires_confirmation=True)
+        store.discard(pending["id"])
+        with pytest.raises(KeyError):
+            store.get(pending["id"])
+
+    def test_discard_persists_removal_to_journal(self, tmp_path: Path) -> None:
+        store = JobStore(tmp_path, _ok_runner)
+        pending = store.submit("https://example.com/p", None, requires_confirmation=True)
+        store.discard(pending["id"])
+        assert json.loads((tmp_path / "jobs.json").read_text()) == []
+
+    def test_discard_unknown_job_raises_keyerror(self, store: JobStore) -> None:
+        with pytest.raises(KeyError):
+            store.discard("unknown")
+
+    @pytest.mark.parametrize("state", ["queued", "done", "failed", "interrupted"])
+    def test_discard_rejected_in_other_states(self, tmp_path: Path, state: str) -> None:
+        (tmp_path / "jobs.json").write_text(json.dumps([_journal_record("j1", state, 1.0)]))
+        store = JobStore(tmp_path, _ok_runner)
+        with pytest.raises(JobStateError, match=state):
+            store.discard("j1")
+        assert store.get("j1")["state"] == state  # still present, unchanged
+
+    def test_recovery_preserves_awaiting_confirmation_unenqueued(self, tmp_path: Path) -> None:
+        """Spec scenario: Pending confirmation survives restart (un-enqueued)."""
+        ran: list[str] = []
+
+        def recording(
+            record: JobRecord, on_event: Callable[[PipelineEvent], None]
+        ) -> PipelineResult:
+            ran.append(record["id"])
+            return _RESULT
+
+        first = JobStore(tmp_path, recording)
+        pending = first.submit("https://example.com/p", None, requires_confirmation=True)
+        first.shutdown()
+
+        recovered = JobStore(tmp_path, recording)
+        recovered.start_worker()
+        baseline = recovered.submit("https://example.com/b", None)
+        assert _wait_for(lambda: recovered.get(baseline["id"])["state"] == "done")
+        assert recovered.get(pending["id"])["state"] == "awaiting-confirmation"
+        assert ran == [baseline["id"]]
+        # an explicit confirm still works after recovery
+        recovered.confirm(pending["id"])
+        assert _wait_for(lambda: recovered.get(pending["id"])["state"] == "done")
+        recovered.shutdown()
+
+
+class TestStoppingFlag:
+    """Per P2: a job that fails while the store is stopping is journaled
+    ``interrupted``, not ``failed``."""
+
+    def _blocked_failing_store(
+        self, tmp_path: Path, release: threading.Event, started: threading.Event
+    ) -> JobStore:
+        def runner(record: JobRecord, on_event: Callable[[PipelineEvent], None]) -> PipelineResult:
+            started.set()
+            assert release.wait(timeout=10)
+            raise RuntimeError("child terminated")
+
+        return JobStore(tmp_path, runner)
+
+    def test_failure_while_stopping_is_journaled_interrupted(self, tmp_path: Path) -> None:
+        """Spec scenario: Shutdown mid-job interrupts recoverably."""
+        release = threading.Event()
+        started = threading.Event()
+        store = self._blocked_failing_store(tmp_path, release, started)
+        store.start_worker()
+        record = store.submit("https://example.com/a", None)
+        assert started.wait(timeout=10)
+
+        shutdown_thread = threading.Thread(target=store.shutdown)
+        shutdown_thread.start()
+        assert _wait_for(store._stop.is_set)  # stopping flag is set before the job fails
+        release.set()
+        shutdown_thread.join(timeout=10)
+        assert not shutdown_thread.is_alive()
+
+        interrupted = store.get(record["id"])
+        assert interrupted["state"] == "interrupted"
+        # an interruption is the designed outcome, not a failure: no job_failed event
+        assert "job_failed" not in [e["kind"] for e in interrupted["events"]]
+        on_disk = {r["id"]: r["state"] for r in json.loads((tmp_path / "jobs.json").read_text())}
+        assert on_disk[record["id"]] == "interrupted"
+
+    def test_begin_shutdown_alone_sets_stopping(self, tmp_path: Path) -> None:
+        """begin_shutdown marks stopping without joining, so a supervisor can
+        kill children between flag-set and join (the serve_engine ordering)."""
+        release = threading.Event()
+        started = threading.Event()
+        store = self._blocked_failing_store(tmp_path, release, started)
+        store.start_worker()
+        record = store.submit("https://example.com/a", None)
+        assert started.wait(timeout=10)
+
+        store.begin_shutdown()  # does not block on the running job
+        release.set()  # the "children killed" moment
+        store.shutdown()
+        assert store.get(record["id"])["state"] == "interrupted"
+
+    def test_failure_after_worker_restart_is_failed_again(self, tmp_path: Path) -> None:
+        """A restarted worker clears the stopping flag: failures are real again."""
+
+        def failing(record: JobRecord, on_event: Callable[[PipelineEvent], None]) -> PipelineResult:
+            raise RuntimeError("boom")
+
+        store = JobStore(tmp_path, failing)
+        store.start_worker()
+        store.shutdown()  # sets the stopping flag
+
+        store.start_worker()  # new generation: no longer stopping
+        record = store.submit("https://example.com/a", None)
+        assert _wait_for(lambda: store.get(record["id"])["state"] == "failed")
+        store.shutdown()
 
 
 class TestPersistence:

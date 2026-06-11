@@ -2,9 +2,11 @@
 
 The :class:`JobStore` owns the job state machine
 (``queued`` → ``running`` → ``done`` | ``failed`` | ``interrupted``, plus
-``awaiting-confirmation`` reserved for later phases). Every state transition
-and every pipeline event is journaled atomically to ``<data_dir>/jobs.json``,
-which is what makes startup interrupted-marking and restart recovery work.
+``awaiting-confirmation`` for jobs submitted with ``requires_confirmation`` —
+they are journaled but never enqueued until :meth:`JobStore.confirm`). Every
+state transition and every pipeline event is journaled atomically to
+``<data_dir>/jobs.json``, which is what makes startup interrupted-marking and
+restart recovery work.
 
 Exactly one daemon worker thread executes jobs, so at most one job runs at a
 time and submissions are processed FIFO. SSE clients subscribe via bounded
@@ -46,6 +48,14 @@ SUBSCRIBER_FULL_STREAK_LIMIT = 100
 MAX_TERMINAL_JOBS = 200
 
 _TERMINAL_STATES = frozenset({"done", "failed", "interrupted"})
+
+
+class JobStateError(Exception):
+    """A transition was requested from a state that does not allow it.
+
+    The message names the job's current state and is self-authored, so the
+    API layer may surface it verbatim (as a 409 detail).
+    """
 
 
 class _WakeQueue:
@@ -97,23 +107,67 @@ class JobStore:
         self._queue = _WakeQueue()
         self._worker: threading.Thread | None = None
         self._stop = threading.Event()
+        # Per P2: while stopping, a failing job is journaled "interrupted",
+        # not "failed" — its failure is a consequence of the shutdown itself
+        # (children killed under it), not of the job.
+        self._stopping = False
         # subscriber queue → count of consecutive publishes it has been full for
         self._subscribers: dict[queue.Queue[PipelineEvent], int] = {}
         self._recover_journal()
 
     # -- public API ------------------------------------------------------
 
-    def submit(self, source: str, title: str | None) -> JobRecord:
-        """Create a queued job and enqueue it for the worker. Always ``queued``."""
+    def submit(
+        self, source: str, title: str | None, *, requires_confirmation: bool = False
+    ) -> JobRecord:
+        """Create a job and enqueue it for the worker (default: ``queued``).
+
+        With *requires_confirmation* the job is journaled in
+        ``awaiting-confirmation`` and NOT enqueued: it never runs until an
+        explicit :meth:`confirm` (protocol-initiated jobs use this so nothing
+        attacker-supplied auto-executes).
+        """
         record = new_job_record(job_id=uuid.uuid4().hex, source=source, title=title)
+        if requires_confirmation:
+            record["state"] = "awaiting-confirmation"
         now = time.time()
         record["created_at"] = now
         record["updated_at"] = now
         with self._lock:
             self._jobs[record["id"]] = record
             self._write_journal()
-        self._queue.put(record["id"])
+        if not requires_confirmation:
+            self._queue.put(record["id"])
         return copy.deepcopy(record)
+
+    def confirm(self, job_id: str) -> JobRecord:
+        """Transition an awaiting-confirmation job to ``queued`` and enqueue it.
+
+        Raises ``KeyError`` for an unknown job and :class:`JobStateError` from
+        any state other than ``awaiting-confirmation``.
+        """
+        with self._lock:
+            record = self._jobs[job_id]
+            self._require_awaiting_confirmation(record, "confirm")
+            record["state"] = "queued"
+            record["updated_at"] = time.time()
+            self._write_journal()
+            snapshot = copy.deepcopy(record)
+        self._queue.put(job_id)
+        return snapshot
+
+    def discard(self, job_id: str) -> None:
+        """Remove an awaiting-confirmation job from the journal.
+
+        Raises ``KeyError`` for an unknown job and :class:`JobStateError` from
+        any state other than ``awaiting-confirmation`` (terminal-job deletion
+        is deliberately not supported here).
+        """
+        with self._lock:
+            record = self._jobs[job_id]
+            self._require_awaiting_confirmation(record, "discard")
+            del self._jobs[job_id]
+            self._write_journal()
 
     def get(self, job_id: str) -> JobRecord:
         """Snapshot of one job record (raises ``KeyError`` when unknown)."""
@@ -138,27 +192,41 @@ class JobStore:
                 return
             stop = threading.Event()
             self._stop = stop
+            self._stopping = False  # a new generation is not stopping
             self._worker = threading.Thread(
                 target=self._work_loop, args=(stop,), name="job-worker", daemon=True
             )
             self._worker.start()
 
+    def begin_shutdown(self) -> None:
+        """Mark the store stopping without waiting for the worker.
+
+        Sets the stopping flag (per P2: a job failing from here on is
+        journaled ``interrupted``) and signals the worker to exit at its next
+        dequeue. ``serve_engine`` calls this *before* killing children, so the
+        in-flight job's resulting failure is already attributable to shutdown.
+        """
+        with self._lock:
+            self._stopping = True
+            stop = self._stop
+        stop.set()
+        self._queue.wake_all()
+
     def shutdown(self) -> None:
         """Stop the worker after the current job finishes, skipping the backlog.
 
-        The worker's stop event takes priority over queued items, so it exits
-        on its next dequeue without touching the backlog; those jobs stay
-        ``queued`` in the journal (startup recovery re-enqueues them) and in
-        the live queue, in order, for any restarted worker.
+        Sets the stopping flag (via :meth:`begin_shutdown`), then joins the
+        worker. The worker's stop event takes priority over queued items, so
+        it exits on its next dequeue without touching the backlog; those jobs
+        stay ``queued`` in the journal (startup recovery re-enqueues them) and
+        in the live queue, in order, for any restarted worker.
         """
+        self.begin_shutdown()
         with self._lock:
             worker = self._worker
-            stop = self._stop
             self._worker = None
         if worker is None:
             return
-        stop.set()
-        self._queue.wake_all()
         worker.join(timeout=30)
 
     def subscribe(self) -> queue.Queue[PipelineEvent]:
@@ -197,7 +265,7 @@ class JobStore:
                 with contextlib.suppress(Exception):
                     self._transition(
                         job_id,
-                        "failed",
+                        self._failure_state(),
                         error=JobError(code="internal", message=str(exc), hint=""),
                     )
 
@@ -237,7 +305,12 @@ class JobStore:
         error: JobError,
         on_event: Callable[[PipelineEvent], None],
     ) -> None:
-        self._transition(job_id, "failed", error=error)
+        state = self._failure_state()
+        self._transition(job_id, state, error=error)
+        if state == "interrupted":
+            # Per P2: a failure during shutdown is the shutdown's doing — the
+            # job is recoverable (retry affordance), so no job_failed event.
+            return
         on_event(
             PipelineEvent(
                 kind="job_failed",
@@ -246,6 +319,20 @@ class JobStore:
                 data={"code": error["code"], "hint": error["hint"]},
             )
         )
+
+    def _failure_state(self) -> JobState:
+        """``interrupted`` while the store is stopping, ``failed`` otherwise (per P2)."""
+        with self._lock:
+            return "interrupted" if self._stopping else "failed"
+
+    @staticmethod
+    def _require_awaiting_confirmation(record: JobRecord, action: str) -> None:
+        """Raise :class:`JobStateError` unless *record* awaits confirmation."""
+        if record["state"] != "awaiting-confirmation":
+            raise JobStateError(
+                f"cannot {action} job {record['id']}: "
+                f"state is {record['state']!r}, not 'awaiting-confirmation'"
+            )
 
     # -- journal ---------------------------------------------------------
 
