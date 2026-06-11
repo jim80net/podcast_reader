@@ -140,7 +140,13 @@ class TestUserSettings:
 
     def test_stale_phase1_settings_file_loads_with_defaults_merged(self, tmp_path: Path) -> None:
         """Spec scenario: Phase 1 settings file loads — new fields get defaults,
-        existing fields are preserved; no KeyError can reach the job runner."""
+        existing fields are preserved; no KeyError can reach the job runner.
+
+        M3: Phase 1 persisted chapter_model="claude-haiku-4-5-20251001"
+        explicitly (it was the only provider). A file lacking chapter_provider
+        with exactly that model is the Phase 1 fingerprint: the model is
+        normalized to "" (provider default) so a later provider switch never
+        sends an Anthropic model id to another provider."""
         phase1 = {
             "whisper_model": "medium",
             "whisper_lang": "en",
@@ -157,7 +163,39 @@ class TestUserSettings:
         assert settings["custom_provider_url"] == ""
         assert settings["whisper_model"] == "medium"  # file values win over defaults
         assert settings["sentences"] == 3
-        assert settings["chapter_model"] == "claude-haiku-4-5-20251001"
+        assert settings["chapter_model"] == ""  # normalized to "provider default"
+
+    def test_post_upgrade_file_keeps_explicit_haiku_model(self, tmp_path: Path) -> None:
+        """M3: a file WITH chapter_provider chose that model deliberately —
+        it is preserved verbatim, not normalized."""
+        upgraded = {
+            "whisper_model": "medium",
+            "whisper_lang": "en",
+            "whisper_device": "cpu",
+            "sentences": 3,
+            "library_dir": str(tmp_path / "library"),
+            "chapter_model": "claude-haiku-4-5-20251001",
+            "chapter_provider": "anthropic",
+            "custom_provider_url": "",
+        }
+        (tmp_path / "settings.json").write_text(json.dumps(upgraded))
+
+        assert load_settings(tmp_path)["chapter_model"] == "claude-haiku-4-5-20251001"
+
+    def test_phase1_file_with_custom_model_preserved(self, tmp_path: Path) -> None:
+        """M3: a Phase 1 file whose model differs from the installed default
+        was a deliberate user choice — preserved verbatim."""
+        phase1 = {
+            "whisper_model": "medium",
+            "whisper_lang": "en",
+            "whisper_device": "cpu",
+            "sentences": 3,
+            "library_dir": str(tmp_path / "library"),
+            "chapter_model": "claude-opus-x",
+        }
+        (tmp_path / "settings.json").write_text(json.dumps(phase1))
+
+        assert load_settings(tmp_path)["chapter_model"] == "claude-opus-x"
 
 
 class TestCorruptSettings:
