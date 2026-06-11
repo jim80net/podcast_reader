@@ -75,12 +75,14 @@ The HTML supports both dark and light themes automatically via `prefers-color-sc
 ## Setup
 
 ```bash
-# Install as a standalone tool
-uv tool install .
+# Install as a standalone tool with audio transcription and chapter support
+uv tool install '.[whisper,chapters]'
 
 # Or run from the repo without installing
 uv run podcast-reader <url-or-file> [title]
 ```
+
+A bare `uv tool install .` works for YouTube URLs (captions only); transcribing local files or non-YouTube URLs requires the `whisper` extra.
 
 Optional features are packaged as extras:
 
