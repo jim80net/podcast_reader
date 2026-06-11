@@ -18,6 +18,17 @@ if TYPE_CHECKING:
 REQUEST_TIMEOUT_S = 300.0
 
 
+class ChapterError(Exception):
+    """Chapter-generation failure whose message is safe to surface verbatim.
+
+    Messages are constructed only from our own constants — never from the
+    provider's response body — so the pipeline may emit them into events and
+    the job journal without violating the key-redaction spec. Anything that
+    might carry response content (HTTP errors) stays a plain ``RuntimeError``
+    and is wrapped generically by the pipeline.
+    """
+
+
 def _nearest_segment_time(target: float, seg_starts: list[float]) -> float:
     """Return the segment start time closest to *target*."""
     if not seg_starts:
@@ -167,7 +178,8 @@ def generate_chapters(
     body: dict[str, Any] = response.json()
     choice = body["choices"][0]
     if choice.get("finish_reason") == "length":
-        raise RuntimeError(
+        # Self-authored message (no body content) — safe to surface verbatim.
+        raise ChapterError(
             "Chapter response was truncated (hit the provider's max_tokens cap). "
             "The transcript may be too long for a single request."
         )

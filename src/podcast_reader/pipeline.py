@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from podcast_reader.chapters import (
+    ChapterError,
     format_transcript,
     generate_chapters,
     snap_chapters_to_segments,
@@ -234,7 +235,12 @@ def run_pipeline(
             {},
         )
         try:
-            spec = resolve_provider(provider, custom_base_url=request["custom_provider_url"])
+            try:
+                spec = resolve_provider(provider, custom_base_url=request["custom_provider_url"])
+            except ValueError as exc:
+                # providers.py messages are self-authored (no response-body
+                # content) — promote them so the warning carries the diagnosis.
+                raise ChapterError(str(exc)) from exc
             data = json.loads(json_path.read_text())
             segments = [s for s in data["segments"] if s.get("text", "").strip()]
             transcript_text = format_transcript(segments)
@@ -248,14 +254,17 @@ def run_pipeline(
             chapters_path.write_text(json.dumps(chapters, indent=2))
         except Exception as exc:  # provider/parse/network — never fatal
             chapters = None
-            # Generic wrap (key redaction): the exception text may carry
+            # ChapterError messages contain no response-body content by
+            # construction, so they surface verbatim. Everything else gets the
+            # generic wrap (key redaction): the exception text may carry
             # provider response fragments (auth-error bodies echo the key),
             # so only the exception class name reaches events and the journal.
+            detail = f": {exc}" if isinstance(exc, ChapterError) else f" ({type(exc).__name__})"
             _emit(
                 on_event,
                 "warning",
                 "chapters",
-                f"Chapter generation failed via {provider} ({type(exc).__name__}); "
+                f"Chapter generation failed via {provider}{detail}; "
                 "rendering a chapterless transcript",
                 {"code": "chapters_failed"},
             )

@@ -789,6 +789,103 @@ class TestChaptersKeysAndRedaction:
                 assert key[:12] not in content, f"key fragment leaked into {path}"
 
 
+class TestChapterErrorDiagnostics:
+    """M2: self-authored ChapterError messages reach the warning verbatim;
+    everything else keeps the generic class-name wrap (key redaction)."""
+
+    @patch("podcast_reader.pipeline._wsl_path", return_value=None)
+    @patch("podcast_reader.pipeline.build_html", return_value="<html></html>")
+    @patch("podcast_reader.pipeline.format_transcript", return_value="[0.0] Hi.")
+    @patch("podcast_reader.pipeline.fetch_transcript")
+    @patch("podcast_reader.pipeline.snippets_to_whisper_segments", return_value=_SAMPLE_SEGMENTS)
+    def test_truncation_message_reaches_warning_verbatim(
+        self,
+        _s: MagicMock,
+        _f: MagicMock,
+        _fmt: MagicMock,
+        _b: MagicMock,
+        _w: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        """A truncated response surfaces the chapters.py diagnostic verbatim,
+        not an opaque '(ChapterError)' wrap."""
+        import httpx
+
+        from podcast_reader.chapters import generate_chapters as real_generate_chapters
+
+        def truncated_200(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                json={
+                    "choices": [
+                        {"finish_reason": "length", "message": {"content": '[{"title": "cut'}}
+                    ]
+                },
+            )
+
+        def via_mock_transport(transcript_text: str, **kwargs: object) -> object:
+            kwargs.pop("transport", None)
+            return real_generate_chapters(
+                transcript_text,
+                transport=httpx.MockTransport(truncated_200),
+                **kwargs,  # type: ignore[arg-type]
+            )
+
+        events: list[PipelineEvent] = []
+        with patch("podcast_reader.pipeline.generate_chapters", side_effect=via_mock_transport):
+            run_pipeline(
+                _request(input_arg=_YT_URL, output_dir=tmp_path, chapter_api_key="sk-test"),
+                on_event=events.append,
+            )
+        failures = [
+            e
+            for e in events
+            if e["kind"] == "warning" and e["data"].get("code") == "chapters_failed"
+        ]
+        assert len(failures) == 1
+        assert "Chapter response was truncated" in failures[0]["message"]
+        assert "max_tokens cap" in failures[0]["message"]
+        assert "ChapterError" not in failures[0]["message"]  # message, not class name
+
+    @patch("podcast_reader.pipeline._wsl_path", return_value=None)
+    @patch("podcast_reader.pipeline.build_html", return_value="<html></html>")
+    @patch("podcast_reader.pipeline.generate_chapters")
+    @patch("podcast_reader.pipeline.fetch_transcript")
+    @patch("podcast_reader.pipeline.snippets_to_whisper_segments", return_value=_SAMPLE_SEGMENTS)
+    def test_custom_misconfig_message_reaches_warning_verbatim(
+        self,
+        _s: MagicMock,
+        _f: MagicMock,
+        mock_generate: MagicMock,
+        _b: MagicMock,
+        _w: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        """A missing custom base URL surfaces providers.py's self-authored
+        diagnostic, never an opaque '(ValueError)'."""
+        events: list[PipelineEvent] = []
+        run_pipeline(
+            _request(
+                input_arg=_YT_URL,
+                output_dir=tmp_path,
+                chapter_provider="custom",
+                chapter_api_key="sk-test",
+            ),
+            on_event=events.append,
+        )
+        mock_generate.assert_not_called()
+        failures = [
+            e
+            for e in events
+            if e["kind"] == "warning" and e["data"].get("code") == "chapters_failed"
+        ]
+        assert len(failures) == 1
+        assert "custom provider requires a base URL" in failures[0]["message"]
+        assert "(ValueError)" not in failures[0]["message"]
+        # html still rendered (fault isolation unchanged)
+        assert (tmp_path / "abc123XYZqq.html").exists()
+
+
 class TestEvents:
     @patch("podcast_reader.pipeline._wsl_path", return_value=None)
     @patch("podcast_reader.pipeline.build_html", return_value="<html></html>")

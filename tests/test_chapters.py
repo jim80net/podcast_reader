@@ -9,7 +9,12 @@ from typing import Any
 import httpx
 import pytest
 
-from podcast_reader.chapters import SYSTEM_PROMPT, generate_chapters, snap_chapters_to_segments
+from podcast_reader.chapters import (
+    SYSTEM_PROMPT,
+    ChapterError,
+    generate_chapters,
+    snap_chapters_to_segments,
+)
 from podcast_reader.providers import PROVIDERS, ProviderSpec
 
 
@@ -221,12 +226,13 @@ class TestGenerateChapters:
         )
         assert chapters == _CHAPTERS_JSON
 
-    def test_truncation_raises(self) -> None:
-        """Spec: Truncation raises — finish_reason 'length' is an error."""
+    def test_truncation_raises_chapter_error(self) -> None:
+        """Spec: Truncation raises — finish_reason 'length' is a ChapterError
+        whose self-authored message may be surfaced verbatim (M2)."""
         recorder = _Recorder(
             httpx.Response(200, json=_completion('[{"title": "cut', finish_reason="length"))
         )
-        with pytest.raises(RuntimeError, match="truncated"):
+        with pytest.raises(ChapterError, match="truncated"):
             generate_chapters(
                 "[0.0] Hello.",
                 spec=self.SPEC,
