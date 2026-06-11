@@ -85,6 +85,18 @@ class KeyTestResult(BaseModel):
     detail: str | None = None
 
 
+class ProviderInfo(BaseModel):
+    """One ``GET /v1/providers`` entry (per P4).
+
+    ``key_available`` is a boolean only — never key material in any form (no
+    values, prefixes, lengths, or fingerprints).
+    """
+
+    id: str
+    default_model: str
+    key_available: bool
+
+
 class SettingsBody(BaseModel):
     """Body of ``PUT /v1/settings`` — mirrors :class:`EngineSettings`.
 
@@ -315,6 +327,22 @@ def create_app(
                 ok=False, detail=f"connection to provider failed ({type(exc).__name__})"
             )
         return KeyTestResult(ok=True)
+
+    @app.get("/v1/providers")
+    def list_providers() -> list[ProviderInfo]:
+        """The chapter-provider registry, so it has exactly one home (per P4).
+
+        ``key_available`` mirrors job-time key resolution: a pushed key counts
+        (empty = cleared), else the provider's env variable.
+        """
+        return [
+            ProviderInfo(
+                id=name,
+                default_model=spec["default_model"],
+                key_available=bool(keys.get(name) or os.environ.get(spec["key_env"])),
+            )
+            for name, spec in PROVIDERS.items()
+        ]
 
     @app.get("/v1/settings")
     def get_settings() -> EngineSettings:

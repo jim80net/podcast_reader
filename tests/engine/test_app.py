@@ -55,6 +55,7 @@ _ROUTES = [
     ("PUT", "/v1/settings"),
     ("PUT", "/v1/keys"),
     ("POST", "/v1/keys/test"),
+    ("GET", "/v1/providers"),
     ("POST", "/v1/shutdown"),
 ]
 
@@ -881,3 +882,82 @@ class TestKeys:
         for path in tmp_path.rglob("*"):
             if path.is_file():
                 assert key not in path.read_text(errors="replace"), f"key leaked into {path}"
+
+
+class TestProviders:
+    """Spec: Provider listing endpoint (per P4) — ids, default models, and a
+    key-availability boolean; never key material."""
+
+    _ALL_IDS = ["anthropic", "openai", "xai", "openrouter", "deepseek", "custom"]
+
+    def _clear_provider_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        for spec in PROVIDERS.values():
+            monkeypatch.delenv(spec["key_env"], raising=False)
+
+    def test_lists_exactly_the_six_registry_ids(
+        self, engine: _Engine, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Spec scenario: Registry listed."""
+        self._clear_provider_env(monkeypatch)
+        response = engine.client.get("/v1/providers", headers=engine.headers)
+        assert response.status_code == 200
+        listing = response.json()
+        assert [p["id"] for p in listing] == self._ALL_IDS
+        by_id = {p["id"]: p for p in listing}
+        for name, spec in PROVIDERS.items():
+            assert by_id[name]["default_model"] == spec["default_model"]
+            assert by_id[name]["key_available"] is False
+
+    def test_key_available_reflects_pushed_or_env(
+        self, engine: _Engine, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._clear_provider_env(monkeypatch)
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-env-openai")
+        engine.client.put(
+            "/v1/keys",
+            json={"provider": "anthropic", "api_key": "sk-pushed-ant"},
+            headers=engine.headers,
+        )
+        # a cleared pushed key ("") falls back to env — here: none, so False
+        engine.client.put(
+            "/v1/keys", json={"provider": "xai", "api_key": ""}, headers=engine.headers
+        )
+
+        by_id = {
+            p["id"]: p["key_available"]
+            for p in engine.client.get("/v1/providers", headers=engine.headers).json()
+        }
+        assert by_id == {
+            "anthropic": True,  # pushed
+            "openai": True,  # env
+            "xai": False,  # cleared push, no env
+            "openrouter": False,
+            "deepseek": False,
+            "custom": False,
+        }
+
+    def test_no_key_material_in_listing(
+        self, engine: _Engine, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Spec scenario: No key material in the listing — with keys pushed
+        and env vars set, the response carries booleans only."""
+        secrets = {}
+        for name, spec in PROVIDERS.items():
+            pushed = f"sk-pushed-{name}-0123456789abcdef"
+            env_value = f"sk-env-{name}-fedcba9876543210"
+            secrets[name] = (pushed, env_value)
+            monkeypatch.setenv(spec["key_env"], env_value)
+            put = engine.client.put(
+                "/v1/keys", json={"provider": name, "api_key": pushed}, headers=engine.headers
+            )
+            assert put.status_code == 204
+
+        response = engine.client.get("/v1/providers", headers=engine.headers)
+        assert response.status_code == 200
+        for pushed, env_value in secrets.values():
+            assert pushed not in response.text
+            assert env_value not in response.text
+            # no prefixes/fragments either (anything key-derived is banned)
+            assert pushed[:12] not in response.text
+            assert env_value[:12] not in response.text
+        assert all(p["key_available"] is True for p in response.json())
