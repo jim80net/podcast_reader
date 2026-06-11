@@ -15,6 +15,7 @@ publishes is pruned as abandoned (cleanup never depends on GC).
 
 from __future__ import annotations
 
+import contextlib
 import copy
 import json
 import logging
@@ -56,6 +57,7 @@ class JobStore:
         self._jobs: dict[str, JobRecord] = {}
         self._queue: queue.Queue[str | None] = queue.Queue()
         self._worker: threading.Thread | None = None
+        self._stop = threading.Event()
         # subscriber queue → count of consecutive publishes it has been full for
         self._subscribers: dict[queue.Queue[PipelineEvent], int] = {}
         self._recover_journal()
@@ -93,12 +95,19 @@ class JobStore:
             self._worker.start()
 
     def shutdown(self) -> None:
-        """Stop the worker after the current job finishes."""
+        """Stop the worker after the current job finishes, skipping the backlog.
+
+        The stop event makes the worker exit on its next dequeue instead of
+        draining queued jobs first; those jobs stay ``queued`` in the journal
+        and startup recovery re-enqueues them on the next run. The sentinel
+        only wakes a worker blocked on an empty queue.
+        """
         with self._lock:
             worker = self._worker
             self._worker = None
         if worker is None:
             return
+        self._stop.set()
         self._queue.put(None)
         worker.join(timeout=30)
 
@@ -125,9 +134,22 @@ class JobStore:
     def _work_loop(self) -> None:
         while True:
             job_id = self._queue.get()
-            if job_id is None:
+            if self._stop.is_set() or job_id is None:
+                # On stop, a dequeued job is left untouched: it is still
+                # ``queued`` in the journal, so recovery re-enqueues it.
                 return
-            self._run_job(job_id)
+            try:
+                self._run_job(job_id)
+            except Exception as exc:  # the only worker must survive anything
+                logger.exception("Job %s escaped _run_job; marking failed", job_id)
+                # Best effort: the journal write inside _transition may be the
+                # very thing that failed, so guard it too.
+                with contextlib.suppress(Exception):
+                    self._transition(
+                        job_id,
+                        "failed",
+                        error=JobError(code="internal", message=str(exc), hint=""),
+                    )
 
     def _run_job(self, job_id: str) -> None:
         self._transition(job_id, "running")
@@ -221,9 +243,17 @@ class JobStore:
                     queued.append(record)
                 jobs[record["id"]] = record
             queued.sort(key=lambda r: r["created_at"])
-        except (ValueError, TypeError, KeyError) as exc:
+        except (OSError, ValueError, TypeError, KeyError) as exc:
             corrupt = path.with_name(path.name + ".corrupt")
-            path.replace(corrupt)
+            try:
+                path.replace(corrupt)
+            except OSError as rename_exc:
+                logger.warning(
+                    "Job journal unreadable (%s); quarantine rename failed (%s); starting empty",
+                    exc,
+                    rename_exc,
+                )
+                return
             logger.warning(
                 "Job journal unreadable; quarantined to %s and starting empty: %s", corrupt, exc
             )

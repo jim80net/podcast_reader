@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import pathlib
+import sys
 import threading
 import time
 from typing import TYPE_CHECKING
@@ -124,6 +127,37 @@ class TestExecution:
         assert "boom" in error["message"]
         store.shutdown()
 
+    def test_worker_survives_exception_escaping_run_job(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """An exception escaping _run_job must not kill the worker loop (C3).
+
+        The first job is marked failed{code: internal} best-effort and the
+        second job still executes.
+        """
+        store = JobStore(tmp_path, _ok_runner)
+        original_run_job = store._run_job
+        crashed: list[str] = []
+
+        def flaky_run_job(job_id: str) -> None:
+            if not crashed:
+                crashed.append(job_id)
+                raise OSError("journal write exploded")
+            original_run_job(job_id)
+
+        store._run_job = flaky_run_job  # type: ignore[method-assign]
+        first = store.submit("https://example.com/first", None)
+        second = store.submit("https://example.com/second", None)
+        with caplog.at_level(logging.ERROR, logger="podcast_reader.engine.jobs"):
+            store.start_worker()
+            assert _wait_for(lambda: store.get(second["id"])["state"] == "done")
+        failed = store.get(first["id"])
+        assert failed["state"] == "failed"
+        assert failed["error"] is not None
+        assert failed["error"]["code"] == "internal"
+        assert "journal write exploded" in caplog.text
+        store.shutdown()
+
     def test_fifo_single_worker(self, tmp_path: Path) -> None:
         release = threading.Event()
         first_started = threading.Event()
@@ -149,6 +183,53 @@ class TestExecution:
         assert store.get(first["id"])["state"] == "done"
         assert run_order == ["https://example.com/first", "https://example.com/second"]
         store.shutdown()
+
+
+class TestShutdown:
+    def test_shutdown_skips_backlog_and_recovery_reenqueues_it(self, tmp_path: Path) -> None:
+        """shutdown() must not drain queued jobs first (C7).
+
+        The worker finishes the running job, then exits without running the
+        backlog; those jobs stay ``queued`` in the journal and a fresh
+        JobStore on the same data_dir re-enqueues them.
+        """
+        release = threading.Event()
+        first_started = threading.Event()
+        run_order: list[str] = []
+
+        def blocking(
+            record: JobRecord, on_event: Callable[[PipelineEvent], None]
+        ) -> PipelineResult:
+            run_order.append(record["source"])
+            first_started.set()
+            assert release.wait(timeout=10)
+            return _RESULT
+
+        store = JobStore(tmp_path, blocking)
+        store.start_worker()
+        first = store.submit("https://example.com/first", None)
+        second = store.submit("https://example.com/second", None)
+        third = store.submit("https://example.com/third", None)
+        assert first_started.wait(timeout=10)
+
+        shutdown_thread = threading.Thread(target=store.shutdown)
+        shutdown_thread.start()  # blocks joining the worker mid-job
+        release.set()
+        shutdown_thread.join(timeout=10)
+        assert not shutdown_thread.is_alive()
+
+        assert run_order == ["https://example.com/first"]
+        assert store.get(first["id"])["state"] == "done"
+        on_disk = {r["id"]: r["state"] for r in json.loads((tmp_path / "jobs.json").read_text())}
+        assert on_disk[second["id"]] == "queued"
+        assert on_disk[third["id"]] == "queued"
+
+        # H2 recovery: a fresh store on the same data_dir re-enqueues the backlog
+        recovered = JobStore(tmp_path, _ok_runner)
+        recovered.start_worker()
+        assert _wait_for(lambda: recovered.get(third["id"])["state"] == "done")
+        assert recovered.get(second["id"])["state"] == "done"
+        recovered.shutdown()
 
 
 class TestPersistence:
@@ -388,3 +469,41 @@ class TestCorruptJournal:
         store = JobStore(tmp_path, _ok_runner)
         assert store.list_jobs() == []
         assert (tmp_path / "jobs.json.corrupt").exists()
+
+    @pytest.mark.skipif(
+        sys.platform == "win32" or os.geteuid() == 0,
+        reason="chmod 0o000 does not block reads on Windows or for root",
+    )
+    def test_unreadable_journal_quarantined_and_store_starts_empty(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """An OSError reading jobs.json must not crash startup (C8)."""
+        journal = tmp_path / "jobs.json"
+        journal.write_text("[]")
+        journal.chmod(0o000)
+        try:
+            with caplog.at_level(logging.WARNING, logger="podcast_reader.engine.jobs"):
+                store = JobStore(tmp_path, _ok_runner)
+        finally:
+            for leftover in (journal, tmp_path / "jobs.json.corrupt"):
+                if leftover.exists():
+                    leftover.chmod(0o644)
+        assert store.list_jobs() == []
+        assert (tmp_path / "jobs.json.corrupt").exists()
+        assert "jobs.json.corrupt" in caplog.text
+
+    def test_quarantine_rename_failure_logged_and_store_starts_empty(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """A failing quarantine rename is logged, not raised (C8)."""
+        (tmp_path / "jobs.json").write_text("{ not json at all")
+
+        def deny_replace(self: pathlib.Path, target: object) -> pathlib.Path:
+            raise OSError("read-only data dir")
+
+        monkeypatch.setattr(pathlib.Path, "replace", deny_replace)
+        with caplog.at_level(logging.WARNING, logger="podcast_reader.engine.jobs"):
+            store = JobStore(tmp_path, _ok_runner)
+        assert store.list_jobs() == []
+        assert "quarantine" in caplog.text.lower()
+        assert "read-only data dir" in caplog.text
