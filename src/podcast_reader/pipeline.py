@@ -26,6 +26,7 @@ from podcast_reader.tools import run_child
 from podcast_reader.transcribe import transcribe
 from podcast_reader.types import PipelineEvent, PipelineResult
 from podcast_reader.youtube import (
+    NoTranscriptError,
     extract_video_id,
     fetch_transcript,
     fetch_video_title,
@@ -121,7 +122,14 @@ def run_pipeline(
                 f"Fetching transcript for {video_id}...",
                 {},
             )
-            snippets = fetch_transcript(video_id)
+            try:
+                snippets = fetch_transcript(video_id)
+            except NoTranscriptError as exc:
+                raise PipelineError(
+                    "no_transcript",
+                    str(exc),
+                    "Only videos with English captions are supported on the captions path.",
+                ) from exc
             data = snippets_to_whisper_segments(snippets)
             json_path.write_text(json.dumps(data, indent=2))
             _emit(
