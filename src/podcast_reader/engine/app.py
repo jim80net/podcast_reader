@@ -27,7 +27,7 @@ from podcast_reader.engine.settings import (
     save_settings,
     token_fingerprint,
 )
-from podcast_reader.providers import PROVIDERS
+from podcast_reader.providers import PROVIDERS, validate_custom_url
 
 # JobRecord/LibraryEntry back FastAPI response models, so they must be
 # importable at runtime (a TYPE_CHECKING import leaves unresolvable ForwardRefs).
@@ -190,6 +190,13 @@ def create_app(
 
     @app.put("/v1/keys", status_code=status.HTTP_204_NO_CONTENT)
     def put_key(body: KeyBody) -> None:
+        """Store a chapter API key in process memory (write-only).
+
+        An empty ``api_key`` clears the pushed key for that provider, restoring
+        the env-variable fallback: key resolution at job dequeue treats a falsy
+        stored value as "no pushed key" (intentional truthiness in
+        ``_resolve_chapter_key``) and reads the provider's ``key_env`` instead.
+        """
         if body.provider not in PROVIDERS:
             raise HTTPException(
                 status_code=400, detail=f"unknown chapter provider: {body.provider!r}"
@@ -202,6 +209,18 @@ def create_app(
 
     @app.put("/v1/settings")
     def put_settings(body: SettingsBody) -> EngineSettings:
+        # Validate at write time (symmetric with PUT /v1/keys) so a bad value
+        # fails the request, not a later job with an opaque warning. The
+        # validator messages are self-authored, so safe to echo as detail.
+        if body.chapter_provider is not None and body.chapter_provider not in PROVIDERS:
+            raise HTTPException(
+                status_code=400, detail=f"unknown chapter provider: {body.chapter_provider!r}"
+            )
+        if body.custom_provider_url:
+            try:
+                validate_custom_url(body.custom_provider_url)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
         settings = body.to_settings(load_settings(data_dir))
         save_settings(data_dir, settings)
         return settings

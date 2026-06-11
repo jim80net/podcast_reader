@@ -365,6 +365,28 @@ class TestSettings:
         assert fetched["custom_provider_url"] == "https://llm.example.com/v1"
         assert load_settings(tmp_path)["chapter_provider"] == "custom"
 
+    def test_put_settings_unknown_provider_400(self, engine: _Engine, tmp_path: Path) -> None:
+        """M1: an unknown chapter_provider is rejected at PUT time (mirrors
+        PUT /v1/keys) instead of surfacing later as an opaque job warning."""
+        current = engine.client.get("/v1/settings", headers=engine.headers).json()
+        current["chapter_provider"] = "nonsense"
+        put = engine.client.put("/v1/settings", json=current, headers=engine.headers)
+        assert put.status_code == 400
+        assert "nonsense" in put.json()["detail"]
+        # nothing was persisted
+        assert load_settings(tmp_path)["chapter_provider"] == "anthropic"
+
+    def test_put_settings_invalid_custom_url_400(self, engine: _Engine, tmp_path: Path) -> None:
+        """M1: a plain-http remote custom URL is rejected at PUT time with the
+        validator's own (self-authored) message."""
+        current = engine.client.get("/v1/settings", headers=engine.headers).json()
+        current["chapter_provider"] = "custom"
+        current["custom_provider_url"] = "http://evil.example.com"
+        put = engine.client.put("/v1/settings", json=current, headers=engine.headers)
+        assert put.status_code == 400
+        assert "must be https" in put.json()["detail"]
+        assert load_settings(tmp_path)["custom_provider_url"] == ""
+
     def test_old_shape_put_succeeds_and_keeps_new_field_values(self, engine: _Engine) -> None:
         """Spec scenario: Old-shape PUT succeeds — pre-change clients omit the
         new fields; the request succeeds and the new fields keep current values."""
@@ -416,6 +438,30 @@ class TestKeys:
         )
         assert response.status_code == 400
         assert engine.key_store == {}
+
+    def test_empty_api_key_clears_pushed_key_restoring_env_fallback(
+        self, engine: _Engine, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """M4: PUT with api_key "" clears the pushed key; key resolution then
+        falls back to the provider's env variable (truthiness is intentional)."""
+        from podcast_reader.engine.process import _resolve_chapter_key
+
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-env-fallback")
+        engine.client.put(
+            "/v1/keys",
+            json={"provider": "anthropic", "api_key": "sk-pushed"},
+            headers=engine.headers,
+        )
+        assert _resolve_chapter_key("anthropic", engine.key_store) == "sk-pushed"
+
+        put = engine.client.put(
+            "/v1/keys",
+            json={"provider": "anthropic", "api_key": ""},
+            headers=engine.headers,
+        )
+        assert put.status_code == 204
+        assert engine.key_store == {"anthropic": ""}
+        assert _resolve_chapter_key("anthropic", engine.key_store) == "sk-env-fallback"
 
     def test_keys_cannot_be_read_back(self, engine: _Engine) -> None:
         engine.client.put(
