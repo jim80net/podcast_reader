@@ -65,7 +65,7 @@ class SettingsBody(BaseModel):
             whisper_lang=self.whisper_lang,
             whisper_device=self.whisper_device,
             sentences=self.sentences,
-            library_dir=self.library_dir,
+            library_dir=str(Path(self.library_dir).expanduser()),
             chapter_model=self.chapter_model,
         )
 

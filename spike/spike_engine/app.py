@@ -34,8 +34,10 @@ def main() -> None:
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.bind(("127.0.0.1", 0))
+    sock.listen(128)  # connections queue in the backlog until uvicorn accepts
     port = sock.getsockname()[1]
-    # Ready sentinel on stdout, mirroring the real engine's handshake design.
+    # Ready sentinel on stdout, printed only once the port is listening,
+    # mirroring the real engine's handshake design.
     print(f"ENGINE_READY port={port}", flush=True)
     config = uvicorn.Config(app, log_level="warning")
     server = uvicorn.Server(config)

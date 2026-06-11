@@ -53,7 +53,10 @@ API: `POST /v1/jobs`, `GET /v1/jobs/{id}`, SSE progress at `GET /v1/events`, a
 managed transcript library (`~/PodcastReader/` by default), and `GET /v1/health`.
 All endpoints require the bearer token the engine generates on first start
 (`engine-state.json` in the data directory); the port is fixed per install and
-advertised in a discovery file. This is the foundation for the desktop app — see
+advertised in a discovery file. Token and discovery files are written with
+owner-only permissions (0600) on POSIX; on Windows, where POSIX mode bits are
+a no-op, they are protected by the user-profile directory ACLs instead. This
+is the foundation for the desktop app — see
 `docs/superpowers/specs/2026-06-11-desktop-packaging-design.md`.
 
 ### Output

@@ -37,6 +37,14 @@ class TestDataDir:
         monkeypatch.setenv("HOME", str(tmp_path))
         assert data_dir() == tmp_path / "PodcastReader"
 
+    def test_data_dir_env_tilde_expanded(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("PODCAST_READER_DATA_DIR", "~/custom-data")
+        assert data_dir() == tmp_path / "custom-data"
+        assert (tmp_path / "custom-data").is_dir()
+
 
 class TestEngineState:
     def test_engine_state_created_0600(self, tmp_path: Path) -> None:

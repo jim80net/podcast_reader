@@ -9,6 +9,10 @@ override via ``PODCAST_READER_DATA_DIR``):
   ``GET/PUT /v1/settings``.
 
 All writes are atomic (temp file + ``os.replace``) under a module-level lock.
+
+Note on Windows: POSIX mode bits like 0600 are effectively a no-op there
+(``os.chmod``/``os.open`` modes only toggle the read-only flag); secrets such
+as the engine token are instead protected by the user-profile directory ACLs.
 """
 
 from __future__ import annotations
@@ -43,7 +47,7 @@ def data_dir() -> Path:
     Default is ``~/PodcastReader``; ``PODCAST_READER_DATA_DIR`` overrides.
     """
     env = os.environ.get("PODCAST_READER_DATA_DIR")
-    base = Path(env) if env else Path.home() / "PodcastReader"
+    base = Path(env).expanduser() if env else Path.home() / "PodcastReader"
     base.mkdir(parents=True, exist_ok=True)
     return base
 

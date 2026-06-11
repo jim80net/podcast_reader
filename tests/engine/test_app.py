@@ -313,3 +313,14 @@ class TestSettings:
         assert fetched["sentences"] == 3
         # persisted on disk too
         assert load_settings(tmp_path)["whisper_device"] == "cpu"
+
+    def test_put_settings_expands_tilde_in_library_dir(
+        self, engine: _Engine, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("HOME", str(tmp_path))
+        current = engine.client.get("/v1/settings", headers=engine.headers).json()
+        current["library_dir"] = "~/lib"
+        put = engine.client.put("/v1/settings", json=current, headers=engine.headers)
+        assert put.status_code == 200
+        assert put.json()["library_dir"] == str(tmp_path / "lib")
+        assert load_settings(tmp_path)["library_dir"] == str(tmp_path / "lib")

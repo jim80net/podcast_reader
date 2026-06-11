@@ -48,5 +48,10 @@ jobs:
           done
           PORT=$(sed -n 's/^ENGINE_READY port=//p' engine.out | head -1)
           test -n "${PORT:-}" || { echo "ready sentinel never appeared"; cat engine.out; kill $ENGINE_PID; exit 1; }
-          curl -fsS "http://127.0.0.1:${PORT}/health" | grep -q '"frozen":true'
+          HEALTH=""
+          for i in $(seq 1 10); do
+            HEALTH=$(curl -fsS "http://127.0.0.1:${PORT}/health") && break
+            sleep 1
+          done
+          echo "$HEALTH" | grep -q '"frozen":true' || { echo "health probe failed: $HEALTH"; cat engine.out; kill $ENGINE_PID; exit 1; }
           kill $ENGINE_PID
