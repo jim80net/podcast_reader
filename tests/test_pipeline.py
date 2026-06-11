@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import sys
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
 
@@ -16,6 +18,7 @@ import pytest
 from podcast_reader.pipeline import (
     PipelineError,
     _find_ytdlp_marker,
+    _valid_artifact,
     run_pipeline,
 )
 from podcast_reader.types import PipelineRequest
@@ -450,6 +453,37 @@ class TestFindYtdlpMarker:
     def test_returns_none_when_no_markers(self, tmp_path: Path) -> None:
         result = _find_ytdlp_marker(tmp_path, "https://x.com/user/status/111")
         assert result is None
+
+    @pytest.mark.skipif(
+        sys.platform == "win32" or os.geteuid() == 0,
+        reason="chmod 0o000 does not block reads on Windows or for root",
+    )
+    def test_skips_unreadable_marker(self, tmp_path: Path) -> None:
+        """An unreadable marker is skipped (cache miss), not fatal (C4)."""
+        unreadable = tmp_path / "broken.ytdlp"
+        unreadable.write_text("https://x.com/target")
+        (tmp_path / "broken.mp3").write_text("audio")
+        unreadable.chmod(0o000)
+        try:
+            result = _find_ytdlp_marker(tmp_path, "https://x.com/target")
+        finally:
+            unreadable.chmod(0o644)
+        assert result is None
+
+
+class TestValidArtifact:
+    """Tests for the _valid_artifact cache check."""
+
+    def test_unremovable_invalid_artifact_returns_false(self, tmp_path: Path) -> None:
+        """A failing cleanup unlink must not crash the cache check (C5).
+
+        A directory named like the artifact raises OSError on both read and
+        unlink; the check must still report a cache miss.
+        """
+        path = tmp_path / "a.json"
+        path.mkdir()
+        assert _valid_artifact(path) is False
+        assert path.exists()  # cleanup failed, but the check stayed graceful
 
 
 class TestRunPipelineLocalFile:

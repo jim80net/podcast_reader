@@ -27,7 +27,7 @@ def _entry(source_id: str, *, source: str = "https://example.com/a") -> LibraryE
         source_id=source_id,
         source=source,
         title="Title",
-        html_path=f"/lib/{source_id[:12]}/a.html",
+        html_path=f"/lib/{source_id}/a.html",
         created_at=time.time(),
     )
 
@@ -64,9 +64,10 @@ class TestSourceIdentity:
 
 
 class TestEntryDir:
-    def test_entry_dir_uses_id_prefix(self, tmp_path: Path) -> None:
+    def test_entry_dir_uses_full_id(self, tmp_path: Path) -> None:
+        """The full 64-hex source_id avoids prefix collisions (C6)."""
         source_id = "abcdef0123456789" * 4
-        assert entry_dir(tmp_path, source_id) == tmp_path / source_id[:12]
+        assert entry_dir(tmp_path, source_id) == tmp_path / source_id
 
 
 class TestIndex:

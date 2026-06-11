@@ -48,8 +48,13 @@ def source_identity(source: str) -> str:
 
 
 def entry_dir(library_dir: Path, source_id: str) -> Path:
-    """Directory holding all committed artifacts for one source."""
-    return library_dir / source_id[:12]
+    """Directory holding all committed artifacts for one source.
+
+    Named by the full 64-hex source identity: a truncated prefix (48 bits)
+    carries an avoidable collision risk, and the full hash keeps the path
+    well within OS limits for ``~/PodcastReader/<id>/``.
+    """
+    return library_dir / source_id
 
 
 def staging_dir(library_dir: Path, source_id: str) -> Path:

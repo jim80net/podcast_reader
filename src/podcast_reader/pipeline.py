@@ -7,6 +7,7 @@ vs job-store persistence).
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
@@ -306,7 +307,10 @@ def _valid_artifact(path: Path) -> bool:
         elif path.stat().st_size == 0:
             raise ValueError("empty artifact")
     except (ValueError, OSError):
-        path.unlink(missing_ok=True)
+        # Cleanup is best-effort: a permission error here must still report
+        # a cache miss instead of crashing the pipeline.
+        with contextlib.suppress(OSError):
+            path.unlink(missing_ok=True)
         return False
     return True
 
@@ -328,13 +332,17 @@ def _find_ytdlp_marker(output_dir: Path, url: str) -> Path | None:
     """Find a .ytdlp marker whose content matches *url* and whose mp3 still exists.
 
     Returns the marker path, or None if no valid cached download exists.
-    Removes orphaned markers (mp3 deleted but marker remains).
+    Removes orphaned markers (mp3 deleted but marker remains). An unreadable
+    marker is skipped (cache miss) rather than aborting processing.
     """
     for marker in output_dir.glob("*.ytdlp"):
-        if marker.read_text().strip() == url and marker.with_suffix(".mp3").exists():
-            return marker
-        if not marker.with_suffix(".mp3").exists():
-            marker.unlink()
+        try:
+            if marker.read_text().strip() == url and marker.with_suffix(".mp3").exists():
+                return marker
+            if not marker.with_suffix(".mp3").exists():
+                marker.unlink()
+        except OSError:
+            continue
     return None
 
 
