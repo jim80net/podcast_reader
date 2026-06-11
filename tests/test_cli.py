@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from pathlib import Path
 
 import pytest
 
@@ -48,6 +49,55 @@ class TestCliAdapter:
     def test_serve_subcommand_dispatches(self, mock_serve: MagicMock) -> None:
         main_with_args(["serve", "--discovery-file", "/tmp/d.json"])
         mock_serve.assert_called_once()
+
+
+_SAMPLE_SEGMENTS = {
+    "segments": [
+        {"start": 0.0, "end": 5.0, "text": "Hello world."},
+        {"start": 5.0, "end": 10.0, "text": "Goodbye world."},
+    ]
+}
+
+
+class TestCliChaptersFaultIsolation:
+    """Spec: a chapters failure must not fail the CLI run (exit 0, warning printed)."""
+
+    @patch("podcast_reader.cli._wsl_path", return_value=None)
+    @patch("podcast_reader.pipeline._wsl_path", return_value=None)
+    @patch("podcast_reader.pipeline.build_html", return_value="<html></html>")
+    @patch(
+        "podcast_reader.pipeline.generate_chapters",
+        side_effect=RuntimeError("provider down"),
+    )
+    @patch("podcast_reader.pipeline.format_transcript", return_value="[0.0] Hi.")
+    @patch("podcast_reader.pipeline.fetch_transcript")
+    @patch("podcast_reader.pipeline.snippets_to_whisper_segments", return_value=_SAMPLE_SEGMENTS)
+    @patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"})
+    def test_chapter_failure_prints_warning_writes_html_exits_zero(
+        self,
+        _s: MagicMock,
+        _f: MagicMock,
+        _fmt: MagicMock,
+        _gen: MagicMock,
+        _b: MagicMock,
+        _pw: MagicMock,
+        _cw: MagicMock,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        # No SystemExit raised — the CLI run completes (exit 0)
+        main_with_args(
+            [
+                "https://www.youtube.com/watch?v=abc123XYZqq",
+                "T",
+                "--output-dir",
+                str(tmp_path),
+            ]
+        )
+        out = capsys.readouterr().out
+        assert "Chapter generation failed" in out
+        assert (tmp_path / "abc123XYZqq.html").exists()
+        assert "Chapters:" not in out  # chapterless result
 
 
 class TestClassifyInput:
