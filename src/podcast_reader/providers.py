@@ -98,6 +98,8 @@ def validate_custom_url(url: str) -> str:
             "(set custom_provider_url / PODCAST_READER_CUSTOM_PROVIDER_URL)"
         )
     parsed = urlparse(url)
+    if not parsed.hostname:
+        raise ValueError("custom provider base URL must include a hostname")
     if parsed.scheme == "https":
         return url
     if parsed.scheme == "http" and parsed.hostname in _LOCALHOST_HOSTS:

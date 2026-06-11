@@ -387,6 +387,39 @@ class TestSettings:
         assert "must be https" in put.json()["detail"]
         assert load_settings(tmp_path)["custom_provider_url"] == ""
 
+    def test_put_settings_custom_provider_empty_url_400(
+        self, engine: _Engine, tmp_path: Path
+    ) -> None:
+        """Selecting the custom provider without a base URL is rejected at PUT
+        time: an empty URL would only fail later, at job dequeue."""
+        current = engine.client.get("/v1/settings", headers=engine.headers).json()
+        current["chapter_provider"] = "custom"
+        current["custom_provider_url"] = ""
+        put = engine.client.put("/v1/settings", json=current, headers=engine.headers)
+        assert put.status_code == 400
+        assert "base URL" in put.json()["detail"]
+        # nothing was persisted
+        assert load_settings(tmp_path)["chapter_provider"] == "anthropic"
+
+    def test_put_settings_switch_to_custom_with_persisted_url_200(
+        self, engine: _Engine, tmp_path: Path
+    ) -> None:
+        """A PUT omitting custom_provider_url may still switch to the custom
+        provider when a valid URL is already persisted (effective value wins)."""
+        current = engine.client.get("/v1/settings", headers=engine.headers).json()
+        current["custom_provider_url"] = "https://llm.example.com/v1"
+        assert (
+            engine.client.put("/v1/settings", json=current, headers=engine.headers).status_code
+            == 200
+        )
+
+        switch = {k: v for k, v in current.items() if k != "custom_provider_url"}
+        switch["chapter_provider"] = "custom"
+        put = engine.client.put("/v1/settings", json=switch, headers=engine.headers)
+        assert put.status_code == 200
+        assert load_settings(tmp_path)["chapter_provider"] == "custom"
+        assert load_settings(tmp_path)["custom_provider_url"] == "https://llm.example.com/v1"
+
     def test_old_shape_put_succeeds_and_keeps_new_field_values(self, engine: _Engine) -> None:
         """Spec scenario: Old-shape PUT succeeds — pre-change clients omit the
         new fields; the request succeeds and the new fields keep current values."""
