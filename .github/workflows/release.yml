@@ -1,0 +1,71 @@
+# Release installer pipeline — STUB (task 6.6, blocked on 6.4/6.5).
+#
+# Signing/notarization are user-blocking prerequisites (design decision 10):
+#   - Windows (task 6.4): a code-signing identity (Azure Trusted Signing or an
+#     OV certificate) provisioned as CI secrets.
+#   - macOS (task 6.5): Apple Developer Program enrollment, a Developer ID
+#     Application certificate, and notarytool API-key credentials in CI secrets.
+#
+# Until credentials exist, NO tag pipeline builds installers: unsigned
+# artifacts must never be published as release installers (app-packaging spec,
+# "Tag pipeline blocked without credentials"). This workflow is therefore
+# manual-only (workflow_dispatch — it never fires on tag pushes) and its only
+# live job fails fast with the reason.
+#
+# When credentials land (task 6.6):
+#   1. Wire `win.signtoolOptions` / `mac.notarize` into
+#      app/electron-builder.config.cjs and flip BUILD_SIGNED in
+#      app/src/main/updater.ts.
+#   2. Replace the signing-gate job with the commented skeleton below.
+#   3. Add the tag trigger:  on: { push: { tags: ['v*'] } }
+name: Release installers (stubbed)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  signing-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Block until signing credentials exist
+        run: |
+          echo "::error::Release installer builds are blocked: no signing credentials are provisioned (tasks 6.4/6.5 in openspec/changes/electron-app/tasks.md). Unsigned artifacts are never published as release installers."
+          exit 1
+
+# ---- skeleton for task 6.6 (uncomment + finish once credentials exist) ------
+#
+#  windows-installer:
+#    runs-on: windows-latest
+#    steps:
+#      - uses: actions/checkout@v4
+#      - uses: actions/setup-node@v4
+#        with:
+#          node-version: 24
+#          cache: npm
+#          cache-dependency-path: app/package-lock.json
+#      - run: npm ci
+#        working-directory: app
+#      # Phase 4 produces the release-grade frozen engine onedir; pass it via
+#      # --engine-dir so it ships under <resources>/engine/ (decision 9).
+#      - run: npm run dist -- --engine-dir <frozen-engine-dir> --win --publish always
+#        working-directory: app
+#        env:
+#          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+#          # task 6.4 signing secrets (signtoolOptions inputs) go here
+#
+#  macos-installer:
+#    runs-on: macos-latest
+#    steps:
+#      - uses: actions/checkout@v4
+#      - uses: actions/setup-node@v4
+#        with:
+#          node-version: 24
+#          cache: npm
+#          cache-dependency-path: app/package-lock.json
+#      - run: npm ci
+#        working-directory: app
+#      - run: npm run dist -- --engine-dir <frozen-engine-dir> --mac --publish always
+#        working-directory: app
+#        env:
+#          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+#          # task 6.5 Developer ID + notarytool secrets (mac.notarize) go here

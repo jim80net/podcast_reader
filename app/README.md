@@ -15,10 +15,87 @@ cd app
 npm install
 npm run dev        # boots the app; spawns the engine via the dev fallback
 npm run test       # vitest unit tests
-npm run typecheck  # tsc --noEmit (node + web projects)
+npm run typecheck  # tsc --noEmit (node + web + e2e projects)
 npm run lint       # eslint
 npm run build      # electron-vite production build into out/
+npm run e2e        # Playwright e2e against the mock engine (build first)
+npm run dist       # build + electron-builder installers (see Packaging)
 ```
+
+## End-to-end tests
+
+The Playwright suite launches the BUILT app (`npm run build` first; on
+headless hosts wrap in `xvfb-run -a`):
+
+```bash
+npm run build
+xvfb-run -a npx playwright test                 # both projects
+npm run e2e                                     # mock-engine project only
+npm run e2e:integration                         # real-engine smoke only
+```
+
+- **`e2e` project** — runs against the mock engine
+  (`tests/mock-engine/server.ts`, a separate child process): the fixture
+  writes `engine-state.json` + `engine.json` into a temp
+  `PODCAST_READER_DATA_DIR`, so the app ADOPTS the mock through its
+  production discovery path. The mock honors the handshake to the point of
+  exiting on `POST /v1/shutdown`, which is how the quit-sequence ordering
+  (events stream closed → shutdown POST → engine exit, per P1) is asserted
+  from its persisted log.
+- **`integration` project** — the real-engine smoke: spawns
+  `uv run podcast-reader serve` via the dev fallback (requires
+  `uv sync --extra dev` at the repo root) and asserts exact key-set equality
+  of live `JobRecord`/`LibraryEntry`/`EngineSettings` payloads against the
+  `src/shared/types.ts` mirrors, so mirror drift fails CI.
+
+Tests isolate state per run via `PODCAST_READER_DATA_DIR` and
+`PODCAST_READER_USER_DATA_DIR` (the latter overrides Electron's userData —
+vault location and single-instance lock scope).
+
+## Packaging (design decisions 9, 10)
+
+`electron-builder.config.cjs` defines NSIS per-user (Windows), dmg + zip
+(macOS — the zip is what electron-updater consumes), and a `--linux dir`
+target that exists purely to prove the packaging pipeline on Linux hosts/CI.
+Installer-level `podcast-reader://` protocol registration rides in the same
+config.
+
+```bash
+npm run dist -- --win                            # unsigned NSIS installer
+npm run dist -- --mac                            # unsigned dmg + zip
+npm run dist -- --linux dir                      # pipeline proof, not a ship target
+npm run dist -- --engine-dir /path/to/onedir --win   # with a frozen engine payload
+```
+
+`--engine-dir` (handled by `scripts/dist.mjs`) maps a frozen engine onedir
+(spike layout: `podcast-reader-engine[.exe]`, sibling `whisper-worker`,
+shared `_internal/`) UNCOMPRESSED into `<resources>/engine/` as
+extraResources — executables cannot run from inside the asar archive.
+Builds without it are valid: the app falls back to the spawn chain above.
+Producing the release-grade engine payload is Phase 4.
+
+**Unsigned-build caveats** (signing is user-blocking, tasks 6.4/6.5):
+
+- Windows: SmartScreen shows "unrecognized app" — More info → Run anyway.
+- macOS: Gatekeeper refuses double-click open; right-click → Open, or
+  `xattr -d com.apple.quarantine "/Applications/Podcast Reader.app"`.
+  macOS auto-update CANNOT be exercised unsigned (Squirrel.Mac refuses
+  unsigned apps); the NSIS update path is testable unsigned.
+
+## Auto-update
+
+electron-updater against GitHub Releases with the FULL-DOWNLOAD strategy:
+app and engine version in lockstep while the product is young, so
+differential (blockmap) transfers would degrade to ~full size; the
+extraResources layout keeps the differential path open as a config change
+once shell and engine release cadences decouple (revisit trigger).
+
+Flow: background download → consent prompt → the app-shell quit sequence
+(engine fully terminated) → `quitAndInstall`. An update never replaces
+files under a running engine. Updates are DISABLED in dev runs and on
+unsigned builds (`updaterGate` in `src/main/updater.ts`; `BUILD_SIGNED`
+flips in task 6.6). `PODCAST_READER_FORCE_UPDATES=1` re-enables them on a
+packaged build for manually verifying the unsigned NSIS update path.
 
 ## Engine spawn resolution (pre-Phase 4 dev posture)
 
@@ -46,10 +123,14 @@ newer one is adopted (per P3/Q1).
 
 | Path | Purpose |
 |------|---------|
-| `src/main/` | Main process: engine supervision, engine client/SSE, key vault, IPC, protocol handler |
+| `src/main/` | Main process: engine supervision, engine client/SSE, key vault, IPC, protocol handler, auto-update |
 | `src/preload/` | contextBridge API (`window.api`) — the renderer's only door |
-| `src/renderer/` | Renderer (vanilla TS; minimal shell until the group-4 views land) |
+| `src/renderer/` | Renderer (vanilla TS): Library / Reader / New / Settings views, hash router |
 | `src/shared/` | Types mirrored from `podcast_reader/types.py` + the IPC contract |
+| `tests/mock-engine/` | Scriptable `/v1` mock server (separate process; honors the real handshake) |
+| `tests/e2e/` | Playwright specs: mock-engine e2e + the real-engine integration smoke |
+| `scripts/dist.mjs` | Installer build wrapper (`--engine-dir` input → extraResources) |
+| `electron-builder.config.cjs` | Packaging config: NSIS/dmg+zip targets, protocol registration, publish |
 
 Linux note: this app ships for Windows + macOS; on headless/dev Linux,
 `safeStorage` may be unavailable, in which case API keys are held in memory
