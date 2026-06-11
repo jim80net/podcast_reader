@@ -15,6 +15,7 @@ engine joins a Job Object with kill-on-job-close at startup so children
 
 from __future__ import annotations
 
+import logging
 import os
 import socket
 import sys
@@ -61,6 +62,8 @@ __all__ = [
     "serve_engine",
     "write_discovery",
 ]
+
+logger = logging.getLogger(__name__)
 
 DISCOVERY_FILE = "engine.json"
 READY_SENTINEL = "PODCAST_READER_READY"
@@ -265,6 +268,8 @@ if sys.platform == "win32":  # pragma: no cover — exercised on Windows only
     _kernel32.AssignProcessToJobObject.argtypes = (wintypes.HANDLE, wintypes.HANDLE)
     _kernel32.GetCurrentProcess.restype = wintypes.HANDLE
     _kernel32.GetCurrentProcess.argtypes = ()
+    _kernel32.CloseHandle.restype = wintypes.BOOL
+    _kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
 
     class _IoCounters(ctypes.Structure):
         _fields_ = [
@@ -319,11 +324,32 @@ if sys.platform == "win32":  # pragma: no cover — exercised on Windows only
     _job_handle: int | None = None
 
     def _join_windows_job() -> None:
-        """Assign this engine process to a kill-on-close job; children inherit it."""
+        """Assign this engine process to a kill-on-close job; children inherit it.
+
+        Failure is non-fatal by design (availability over strictness): when
+        the engine already runs inside a Job Object without nested-job
+        support — common under CI runners and some terminals — assignment
+        fails, and refusing to start would make the engine unusable exactly
+        where it is most often launched. The engine serves anyway; child
+        reaping on Windows degrades to best-effort for that run.
+        """
         global _job_handle
         if _job_handle is not None:
             return
-        job = _windows_job()
+        try:
+            job = _windows_job()
+        except OSError as exc:
+            logger.warning(
+                "Job Object setup failed; children will not be force-reaped on exit: %s", exc
+            )
+            return
         if not _kernel32.AssignProcessToJobObject(job, _kernel32.GetCurrentProcess()):
-            raise ctypes.WinError(ctypes.get_last_error())
+            exc = ctypes.WinError(ctypes.get_last_error())
+            _kernel32.CloseHandle(job)
+            logger.warning(
+                "AssignProcessToJobObject failed (already inside a Job Object?); "
+                "children will not be force-reaped on exit: %s",
+                exc,
+            )
+            return
         _job_handle = job  # keep the handle alive for the engine's lifetime
