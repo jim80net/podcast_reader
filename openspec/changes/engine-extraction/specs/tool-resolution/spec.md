@@ -3,7 +3,7 @@
 ## ADDED Requirements
 
 ### Requirement: Freeze-aware tool resolution
-`resolve_tool` SHALL resolve **external** tool names (yt-dlp, ffmpeg, whisper-ctranslate2) in this precedence order: (1) the user-data tools directory — supplied as an explicit `tools_dir` parameter, defaulting to the `PODCAST_READER_TOOLS_DIR` environment variable when set, (2) under `sys.frozen`, the frozen bundle's `tools/` directory; otherwise the directory containing `sys.executable` (current behavior), (3) bare name for PATH lookup. Under `sys.frozen`, `Path(sys.executable).parent` SHALL NOT be searched for **external** console scripts (none exist at bundle root in a frozen app).
+`resolve_tool` SHALL resolve **external** tool names (yt-dlp, ffmpeg, whisper-ctranslate2) in this precedence order: (1) the user-data tools directory — supplied as an explicit `tools_dir` parameter, defaulting to the `PODCAST_READER_TOOLS_DIR` environment variable when set, (2) under `sys.frozen`, the frozen bundle's `tools/` directory; otherwise the directory containing `sys.executable` (current behavior), (3) bare name for PATH lookup. Under `sys.frozen`, `Path(sys.executable).parent` SHALL NOT be searched for **external** console scripts (none exist at bundle root in a frozen app). This precedence is a *lookup-time* rule; the parent design's "newer of bundled seed vs user copy wins after an app update" is enforced at *seeding time* (the download manager reconciles versions when copying seeds into the user-data tools directory, Phase 4), which maintains the invariant that the user-data copy is the current one.
 
 #### Scenario: User-data copy wins
 - **WHEN** a tool exists in both the user-data tools directory and the bundle/interpreter directory
