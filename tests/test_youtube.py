@@ -1,6 +1,16 @@
 """Tests for podcast_reader.youtube module."""
 
-from podcast_reader.youtube import extract_video_id, snippets_to_whisper_segments
+from unittest.mock import MagicMock, patch
+
+import pytest
+from youtube_transcript_api import NoTranscriptFound
+
+from podcast_reader.youtube import (
+    NoTranscriptError,
+    extract_video_id,
+    fetch_transcript,
+    snippets_to_whisper_segments,
+)
 
 
 class TestExtractVideoId:
@@ -57,3 +67,27 @@ class TestSnippetsToWhisperSegments:
         ]
         result = snippets_to_whisper_segments(snippets)
         assert len(result["segments"]) == 2
+
+
+class TestFetchTranscript:
+    @patch("podcast_reader.youtube.YouTubeTranscriptApi")
+    def test_no_english_transcript_raises_domain_error_not_systemexit(
+        self, mock_api: MagicMock
+    ) -> None:
+        """A missing transcript must raise NoTranscriptError, never SystemExit (D1).
+
+        SystemExit would escape the engine worker's ``except Exception`` and
+        kill the only job thread.
+        """
+        transcript_list = MagicMock()
+        transcript_list.find_transcript.side_effect = NoTranscriptFound(
+            "abc123XYZqq", ["en"], MagicMock()
+        )
+        mock_api.return_value.list.return_value = transcript_list
+
+        with pytest.raises(NoTranscriptError, match="abc123XYZqq"):
+            fetch_transcript("abc123XYZqq")
+
+    def test_no_transcript_error_is_a_plain_exception(self) -> None:
+        assert issubclass(NoTranscriptError, Exception)
+        assert not issubclass(NoTranscriptError, SystemExit)

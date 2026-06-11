@@ -1,263 +1,62 @@
-"""Main CLI entry point for podcast-reader."""
+"""Main CLI entry point for podcast-reader.
+
+A thin adapter over :mod:`podcast_reader.pipeline`: one-shot mode prints
+pipeline events to stdout; the ``serve`` subcommand starts the engine.
+"""
 
 from __future__ import annotations
 
 import argparse
-import json
 import os
-import re
-import shutil
-import subprocess
 import sys
-from enum import Enum
 from pathlib import Path
-from typing import Any
 
-from podcast_reader.chapters import (
-    format_transcript,
-    generate_chapters,
-    snap_chapters_to_segments,
-)
-from podcast_reader.html import build_html
-from podcast_reader.transcribe import transcribe
-from podcast_reader.youtube import (
-    extract_video_id,
-    fetch_transcript,
-    fetch_video_title,
-    snippets_to_whisper_segments,
-)
-from podcast_reader.ytdlp import download_audio, fetch_title
-
-
-class InputType(Enum):
-    """Classification of the input argument."""
-
-    YOUTUBE = "youtube"
-    URL = "url"
-    LOCAL_FILE = "local_file"
-
-
-_YT_URL_RE = re.compile(r"youtube\.com/|youtu\.be/")
-
-
-def classify_input(input_arg: str) -> InputType:
-    """Classify the input as YouTube, generic URL, or local file."""
-    if _YT_URL_RE.search(input_arg):
-        return InputType.YOUTUBE
-    if input_arg.startswith(("http://", "https://")):
-        return InputType.URL
-    return InputType.LOCAL_FILE
-
-
-def _wsl_path(path: Path) -> str | None:
-    """Convert a Linux path to a Windows path if running in WSL."""
-    if shutil.which("wslpath") is None:
-        return None
-    try:
-        result = subprocess.run(
-            ["wslpath", "-w", str(path)],
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode == 0:
-            return result.stdout.strip()
-    except Exception:
-        pass
-    return None
-
-
-def _find_ytdlp_marker(output_dir: Path, url: str) -> Path | None:
-    """Find a .ytdlp marker whose content matches *url* and whose mp3 still exists.
-
-    Returns the marker path, or None if no valid cached download exists.
-    Removes orphaned markers (mp3 deleted but marker remains).
-    """
-    for marker in output_dir.glob("*.ytdlp"):
-        if marker.read_text().strip() == url and marker.with_suffix(".mp3").exists():
-            return marker
-        if not marker.with_suffix(".mp3").exists():
-            marker.unlink()
-    return None
-
-
-def _transcribe_if_needed(
-    *,
-    audio_path: Path,
-    json_path: Path,
-    output_dir: Path,
-    whisper_model: str,
-    whisper_lang: str,
-    whisper_device: str,
-    hf_token: str | None,
-) -> None:
-    """Run whisper transcription if JSON output doesn't already exist."""
-    if json_path.exists():
-        print(f"Transcript JSON already exists: {json_path} (delete to re-transcribe)")
-        return
-    print(
-        f"Transcribing with whisper-ctranslate2 "
-        f"(model={whisper_model}, lang={whisper_lang}, device={whisper_device})..."
-    )
-    transcribe(
-        audio_path=audio_path,
-        output_dir=output_dir,
-        model=whisper_model,
-        lang=whisper_lang,
-        device=whisper_device,
-        hf_token=hf_token,
-    )
-
-
-def _run_pipeline(
-    *,
-    input_arg: str,
-    title: str | None,
-    output_dir: Path,
-    model: str,
-    whisper_model: str,
-    whisper_lang: str,
-    whisper_device: str,
-    hf_token: str | None,
-    sentences: int,
-    cookies: Path | None,
-) -> None:
-    """Run the full transcription pipeline."""
-    input_type = classify_input(input_arg)
-    stem: str
-    json_path: Path
-    transcript_source: str
-
-    if input_type == InputType.YOUTUBE:
-        video_id = extract_video_id(input_arg)
-        if not video_id:
-            print(
-                f"Error: Could not extract video ID from: {input_arg}",
-                file=sys.stderr,
-            )
-            sys.exit(1)
-
-        stem = video_id
-        json_path = output_dir / f"{stem}.json"
-        transcript_source = "youtube-captions"
-
-        if title is None:
-            title = fetch_video_title(video_id)
-            print(f"Video: {title}")
-
-        if json_path.exists():
-            print(f"Transcript JSON already exists: {json_path} (delete to re-fetch)")
-        else:
-            print(f"Fetching transcript for {video_id}...")
-            snippets = fetch_transcript(video_id)
-            data = snippets_to_whisper_segments(snippets)
-            json_path.write_text(json.dumps(data, indent=2))
-            print(f"Written {len(data['segments'])} segments to {json_path}")
-
-    elif input_type == InputType.URL:
-        if title is None:
-            try:
-                title = fetch_title(input_arg)
-                print(f"Video: {title}")
-            except RuntimeError:
-                title = None  # will derive from stem later
-
-        # Check for a .ytdlp marker left by a previous download (match by URL)
-        cached_marker = _find_ytdlp_marker(output_dir, input_arg)
-        audio_path: Path
-        if cached_marker is not None:
-            audio_path = cached_marker.with_suffix(".mp3")
-            print(f"Audio already exists: {audio_path} (delete to re-download)")
-        else:
-            print("Downloading with yt-dlp...")
-            audio_path = download_audio(input_arg, output_dir, cookies=cookies)
-        stem = audio_path.stem
-        json_path = output_dir / f"{stem}.json"
-        transcript_source = "whisper-ctranslate2"
-
-        _transcribe_if_needed(
-            audio_path=audio_path,
-            json_path=json_path,
-            output_dir=output_dir,
-            whisper_model=whisper_model,
-            whisper_lang=whisper_lang,
-            whisper_device=whisper_device,
-            hf_token=hf_token,
-        )
-
-    else:
-        audio_path = Path(input_arg).resolve()
-        if not audio_path.exists():
-            print(
-                f"Error: File not found: {audio_path}",
-                file=sys.stderr,
-            )
-            sys.exit(1)
-
-        stem = audio_path.stem
-        json_path = output_dir / f"{stem}.json"
-        transcript_source = "whisper-ctranslate2"
-
-        _transcribe_if_needed(
-            audio_path=audio_path,
-            json_path=json_path,
-            output_dir=output_dir,
-            whisper_model=whisper_model,
-            whisper_lang=whisper_lang,
-            whisper_device=whisper_device,
-            hf_token=hf_token,
-        )
-
-    # --- Generate chapters (optional) ---
-    chapters_path = output_dir / f"{stem}_chapters.json"
-    chapters: list[dict[str, Any]] | None = None
-
-    if chapters_path.exists():
-        print(f"Chapters JSON already exists: {chapters_path} (delete to regenerate)")
-        chapters = json.loads(chapters_path.read_text())
-    elif os.environ.get("ANTHROPIC_API_KEY"):
-        print("Generating chapter markers with Claude...")
-        data = json.loads(json_path.read_text())
-        segments = [s for s in data["segments"] if s.get("text", "").strip()]
-        transcript_text = format_transcript(segments)
-        chapters = generate_chapters(transcript_text, model=model)
-        chapters = snap_chapters_to_segments(chapters, segments)
-        chapters_path.write_text(json.dumps(chapters, indent=2))
-        print(f"Written {len(chapters)} chapters to {chapters_path}")
-    else:
-        print("Skipping chapter generation (set ANTHROPIC_API_KEY to enable)")
-
-    # --- Convert to HTML ---
-    if title is None:
-        title = stem.replace("_", " ").replace("-", " ").title()
-
-    html_path = output_dir / f"{stem}.html"
-    data = json.loads(json_path.read_text())
-    segments = [s for s in data["segments"] if s.get("text", "").strip()]
-
-    print("Generating HTML transcript...")
-    html_content = build_html(
-        segments,
-        title,
-        chapters=chapters,
-        sentences_per_para=sentences,
-        source=transcript_source,
-    )
-    html_path.write_text(html_content)
-
-    print()
-    print("Done! Output files:")
-    print(f"  JSON: {json_path}")
-    if chapters is not None:
-        print(f"  Chapters: {chapters_path}")
-    print(f"  HTML: {html_path}")
-
-    win_path = _wsl_path(html_path)
-    if win_path:
-        print(f"  Windows: {win_path}")
+from podcast_reader.pipeline import PipelineError, _wsl_path, run_pipeline
+from podcast_reader.types import PipelineEvent, PipelineRequest
 
 
 def main() -> None:
     """CLI entry point."""
+    main_with_args(sys.argv[1:])
+
+
+def main_with_args(argv: list[str]) -> None:
+    """Dispatch *argv*: ``serve`` starts the engine, anything else is one-shot.
+
+    ``serve`` is detected as the first positional because argparse subparsers
+    would break the legacy ``podcast-reader <url> [title]`` shape.
+    """
+    if argv and argv[0] == "serve":
+        _run_serve(argv[1:])
+    else:
+        _run_one_shot(argv)
+
+
+def serve_engine(*, discovery_file: Path | None = None) -> None:
+    """Start the localhost engine (lazy import keeps one-shot startup light)."""
+    from podcast_reader.engine.process import serve_engine as _serve_engine
+
+    _serve_engine(discovery_file=discovery_file)
+
+
+def _run_serve(argv: list[str]) -> None:
+    """Parse ``serve`` arguments and start the engine."""
+    parser = argparse.ArgumentParser(
+        prog="podcast-reader serve",
+        description="Run the localhost transcription engine",
+    )
+    parser.add_argument(
+        "--discovery-file",
+        type=Path,
+        default=None,
+        help="Path for the engine discovery file (default: <data_dir>/engine.json)",
+    )
+    args = parser.parse_args(argv)
+    serve_engine(discovery_file=args.discovery_file)
+
+
+def _run_one_shot(argv: list[str]) -> None:
+    """Run the pipeline once, printing progress and result paths."""
     parser = argparse.ArgumentParser(
         prog="podcast-reader",
         description=("Transcribe podcast audio or YouTube/X videos to styled HTML transcripts"),
@@ -280,20 +79,42 @@ def main() -> None:
         default="claude-haiku-4-5-20251001",
         help=("Claude model for chapters (default: claude-haiku-4-5-20251001)"),
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
-    cookies_env = os.environ.get("YT_DLP_COOKIES")
-    cookies = Path(cookies_env) if cookies_env else None
-
-    _run_pipeline(
-        input_arg=args.input,
+    request = PipelineRequest(
+        source=args.input,
         title=args.title,
-        output_dir=args.output_dir,
+        output_dir=str(args.output_dir),
         model=args.model,
         whisper_model=os.environ.get("WHISPER_MODEL", "large-v3"),
         whisper_lang=os.environ.get("WHISPER_LANG", "en"),
         whisper_device=os.environ.get("WHISPER_DEVICE", "cuda"),
         hf_token=os.environ.get("HF_TOKEN"),
         sentences=int(os.environ.get("SENTENCES", "5")),
-        cookies=cookies,
+        cookies=os.environ.get("YT_DLP_COOKIES"),
     )
+
+    try:
+        result = run_pipeline(request, on_event=_print_event)
+    except PipelineError as exc:
+        print(f"Error: {exc.message}", file=sys.stderr)
+        if exc.hint:
+            print(exc.hint, file=sys.stderr)
+        sys.exit(1)
+
+    print()
+    print("Done! Output files:")
+    print(f"  JSON: {result['json_path']}")
+    if result["chapters_path"] is not None:
+        print(f"  Chapters: {result['chapters_path']}")
+    print(f"  HTML: {result['html_path']}")
+
+    win_path = _wsl_path(Path(result["html_path"]))
+    if win_path:
+        print(f"  Windows: {win_path}")
+
+
+def _print_event(event: PipelineEvent) -> None:
+    """Print a pipeline event's message to stdout (the CLI's progress face)."""
+    if event["message"] and event["kind"] != "job_done":
+        print(event["message"])

@@ -65,7 +65,7 @@ class TestBuildTitleArgs:
 
 class TestFetchTitle:
     def test_returns_stripped_title(self) -> None:
-        with patch("podcast_reader.ytdlp.subprocess.run") as mock_run:
+        with patch("podcast_reader.ytdlp.run_child") as mock_run:
             mock_run.return_value = subprocess.CompletedProcess(
                 args=[], returncode=0, stdout="My Video Title\n", stderr=""
             )
@@ -73,7 +73,7 @@ class TestFetchTitle:
         assert result == "My Video Title"
 
     def test_raises_on_failure(self) -> None:
-        with patch("podcast_reader.ytdlp.subprocess.run") as mock_run:
+        with patch("podcast_reader.ytdlp.run_child") as mock_run:
             mock_run.return_value = subprocess.CompletedProcess(
                 args=[], returncode=1, stdout="", stderr="ERROR: not found"
             )
@@ -87,7 +87,7 @@ class TestDownloadAudio:
         expected_file = tmp_path / "123.mp3"
         expected_file.touch()
 
-        with patch("podcast_reader.ytdlp.subprocess.run") as mock_run:
+        with patch("podcast_reader.ytdlp.run_child") as mock_run:
             mock_run.return_value = subprocess.CompletedProcess(
                 args=[], returncode=0, stdout="", stderr=""
             )
@@ -99,7 +99,7 @@ class TestDownloadAudio:
         assert marker.read_text() == "https://x.com/user/status/123"
 
     def test_raises_on_failure(self, tmp_path: Path) -> None:
-        with patch("podcast_reader.ytdlp.subprocess.run") as mock_run:
+        with patch("podcast_reader.ytdlp.run_child") as mock_run:
             mock_run.return_value = subprocess.CompletedProcess(
                 args=[], returncode=1, stdout="", stderr="ERROR: login required"
             )
@@ -107,7 +107,7 @@ class TestDownloadAudio:
                 download_audio("https://x.com/user/status/123", tmp_path)
 
     def test_auth_error_suggests_cookies(self, tmp_path: Path) -> None:
-        with patch("podcast_reader.ytdlp.subprocess.run") as mock_run:
+        with patch("podcast_reader.ytdlp.run_child") as mock_run:
             mock_run.return_value = subprocess.CompletedProcess(
                 args=[], returncode=1, stdout="", stderr="ERROR: login required"
             )

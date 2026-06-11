@@ -1,0 +1,8 @@
+.venv/
+build/
+dist/
+jfk.flac
+engine.pid
+__pycache__/
+.venv-wc2/
+.venv-dia/

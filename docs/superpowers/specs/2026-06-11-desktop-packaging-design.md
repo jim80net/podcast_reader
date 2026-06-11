@@ -215,8 +215,18 @@ Settings):**
 compatibility (e.g., ctranslate2 vs cuDNN) and the wizard re-downloads deltas when an
 app update moves the compat range.
 
-**Installer size**: ~150–200 MB realistic (Electron + frozen engine + seeds), not the
-v1 doc's ~100 MB.
+**Installer size**: ~200–250 MB realistic per spike measurement (frozen CPU engine
+alone is 134 MB compressed; PyAV contributes 105 MB raw but removes the worker's
+external-ffmpeg dependency for decoding). Supersedes earlier 100/150–200 MB estimates.
+
+**Spike-validated facts (2026-06-11, `spike/SPIKE_REPORT.md`)**: dual-entry-point
+onedir works (shared `_internal/`); custom PyInstaller hooks required for
+ctranslate2/faster-whisper; model-weights-as-pack validated via local snapshot +
+`HF_HUB_OFFLINE=1`; whisper output bit-compatible with whisper-ctranslate2 for all
+fields `html.py` consumes; CUDA pack = complete cuDNN 9 set + `os.add_dll_directory`,
+EULA-permitted; diarization worker GO at 326 MB compressed. Bundled workers resolve
+at `Path(sys.executable).parent` (a distinct class from external tools — see the
+tool-resolution spec).
 
 ### Chrome extension (MV3) *(per F3, F4, F10)*
 
