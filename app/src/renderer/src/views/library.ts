@@ -1,6 +1,7 @@
 import { el } from '../dom'
 import { extractEngineDetail } from '../engine-error'
 import { formatDate, sourceLabel } from '../job-view'
+import { LatestGate } from '../latest-gate'
 import { hrefFor } from '../router'
 import type { ViewCleanup } from '../store'
 import type { LibraryEntry } from '../../../shared/types'
@@ -16,14 +17,19 @@ export function mountLibrary(container: HTMLElement): ViewCleanup {
   container.append(el('h2', { text: 'Library' }), status, list)
 
   let disposed = false
+  // load() fires from several triggers (mount, job_done, hydration, engine
+  // ready); the gate makes sure an out-of-order earlier response can never
+  // overwrite the latest one.
+  const gate = new LatestGate()
 
   async function load(): Promise<void> {
+    const isLatest = gate.next()
     try {
       const entries = await window.api.listLibrary()
-      if (disposed) return
+      if (disposed || !isLatest()) return
       render(entries)
     } catch (err) {
-      if (disposed) return
+      if (disposed || !isLatest()) return
       status.textContent = `Library unavailable: ${extractEngineDetail(err)}`
       status.classList.add('error-text')
     }
