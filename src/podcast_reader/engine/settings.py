@@ -157,14 +157,19 @@ def engine_version() -> str:
 
 
 def atomic_write_json(path: Path, payload: object, *, mode: int | None = None) -> None:
-    """Write *payload* as JSON via temp file + ``os.replace`` under the module lock.
+    """Write *payload* as JSON via :func:`atomic_write_text`."""
+    atomic_write_text(path, json.dumps(payload, indent=2), mode=mode)
+
+
+def atomic_write_text(path: Path, data: str, *, mode: int | None = None) -> None:
+    """Write *data* via temp file + ``os.replace`` under the module lock.
 
     With *mode*, the temp file is created with that mode applied at ``os.open``
     time (``O_CREAT | O_EXCL``), so the payload is never readable by other
-    users, even transiently.
+    users, even transiently. Public so secret-bearing writers outside this
+    module (the cookie-jar store) share one secure-write implementation.
     """
     tmp = path.with_suffix(path.suffix + ".tmp")
-    data = json.dumps(payload, indent=2)
     with _WRITE_LOCK:
         if mode is None:
             tmp.write_text(data)
