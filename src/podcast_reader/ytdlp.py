@@ -36,6 +36,17 @@ from podcast_reader.types import PipelineError, PipelineEvent
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+#: yt-dlp's actual auth-failure phrasings (per V6), matched case-insensitively.
+#: Anchored phrases, not bare substrings: "login"/"auth" alone misrouted
+#: extractor noise like "author info" or "OAuth" to download_auth_required,
+#: which also suppressed the managed-copy self-heal retry below.
+_AUTH_STDERR_MARKERS = (
+    "login required",
+    "sign in to confirm",
+    "--cookies",
+    "authentication",
+)
+
 
 def build_download_args(url: str, output_dir: Path, cookies: Path | None = None) -> list[str]:
     """Build the yt-dlp command-line arguments for audio extraction."""
@@ -117,8 +128,10 @@ def _download_once(url: str, output_dir: Path, cookies: Path | None) -> Path:
     if result.returncode != 0:
         stderr = result.stderr.strip()
         # Auth-detected failures get the distinct code with a neutral message
-        # and NO hint (per U2) — the face authors its own affordances.
-        auth_required = "login" in stderr.lower() or "auth" in stderr.lower()
+        # and NO hint (per U2) — the face authors its own affordances. The
+        # detection anchors on yt-dlp's actual phrasings (per V6).
+        stderr_lower = stderr.lower()
+        auth_required = any(marker in stderr_lower for marker in _AUTH_STDERR_MARKERS)
         code = "download_auth_required" if auth_required else "download_failed"
         raise PipelineError(code, f"yt-dlp failed: {stderr}", "")
 

@@ -117,7 +117,17 @@ class TestDownloadAudio:
 
     @pytest.mark.parametrize(
         "stderr",
-        ["ERROR: login required", "ERROR: authentication needed to access this content"],
+        [
+            "ERROR: login required",
+            "ERROR: authentication needed to access this content",
+            # Real yt-dlp phrasings (per V6): the detection anchors on these.
+            "ERROR: [youtube] dQw4w9WgXcQ: Sign in to confirm you're not a bot. "
+            "Use --cookies-from-browser or --cookies for the authentication.",
+            "ERROR: [youtube] dQw4w9WgXcQ: Sign in to confirm your age. "
+            "This video may be inappropriate for some users.",
+            "ERROR: This video is available to channel members. "
+            "Use --cookies-from-browser or --cookies to pass your credentials.",
+        ],
     )
     def test_auth_failure_raises_download_auth_required(self, tmp_path: Path, stderr: str) -> None:
         """Per U2: auth-detected failures carry the distinct code
@@ -131,6 +141,38 @@ class TestDownloadAudio:
                 download_audio("https://x.com/user/status/123", tmp_path)
         assert excinfo.value.code == "download_auth_required"
         assert excinfo.value.hint == ""
+
+    @pytest.mark.parametrize(
+        "stderr",
+        [
+            # Bare-substring matching ("login"/"auth") misrouted extractor
+            # noise like these to download_auth_required, which also
+            # suppressed the managed-copy self-heal retry (per V6).
+            "ERROR: [generic] clip: unable to extract author info",
+            "ERROR: OAuth token refresh failed unexpectedly",
+            "ERROR: no login form found on the embed page",
+        ],
+    )
+    def test_extractor_noise_stays_download_failed(self, tmp_path: Path, stderr: str) -> None:
+        """Per V6: 'author'/'OAuth'/bare 'login' noise is NOT an auth failure
+        — it must keep the download_failed code so the self-heal retry path
+        stays reachable."""
+        with patch("podcast_reader.ytdlp.run_child") as mock_run:
+            mock_run.return_value = subprocess.CompletedProcess(
+                args=[], returncode=1, stdout="", stderr=stderr
+            )
+            with pytest.raises(PipelineError, match="yt-dlp failed") as excinfo:
+                download_audio("https://x.com/user/status/123", tmp_path)
+        assert excinfo.value.code == "download_failed"
+
+    def test_auth_marker_matching_is_case_insensitive(self, tmp_path: Path) -> None:
+        with patch("podcast_reader.ytdlp.run_child") as mock_run:
+            mock_run.return_value = subprocess.CompletedProcess(
+                args=[], returncode=1, stdout="", stderr="ERROR: LOGIN REQUIRED"
+            )
+            with pytest.raises(PipelineError) as excinfo:
+                download_audio("https://x.com/user/status/123", tmp_path)
+        assert excinfo.value.code == "download_auth_required"
 
 
 class TestDownloadSelfUpdateRetry:
