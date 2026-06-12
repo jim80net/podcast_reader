@@ -15,32 +15,32 @@
 
 ## 3. App: Settings sections + IPC
 
-- [ ] 3.1 Main + preload: IPC for `pairStart` (mints via `EngineClient`), `cookiesList`, `cookiesDelete`; typed bridge additions; new shapes (`PairStartResponse`, `CookieJarInfo`) appended to `app/src/shared/types.ts` with comment pins (the one mirror both TS consumers import — Q4 decision)
-- [ ] 3.2 Settings view: "Connect browser extension" section (combined `<port>-<code>` string as the primary affordance, separate port/code fields as fallback (per review adjudication), expiry countdown, re-mint button) and "Cookies" section (domain list with capture date, per-domain delete); vitest unit for the section logic
-- [ ] 3.3 Mock engine (`app/tests/mock-engine/server.ts`): `/v1/pair`, `/v1/pair/claim` (scriptable code, exemption from the mock's auth check), `/v1/cookies` routes + `__mock` controls; existing app e2e suite still green
+- [x] 3.1 Main + preload: IPC for `pairStart` (mints via `EngineClient`), `cookiesList`, `cookiesDelete`; typed bridge additions; new shapes (`PairStartResponse`, `CookieJarInfo`) appended to `app/src/shared/types.ts` with comment pins (the one mirror both TS consumers import — Q4 decision)
+- [x] 3.2 Settings view: "Connect browser extension" section (combined `<port>-<code>` string as the primary affordance, separate port/code fields as fallback (per review adjudication), expiry countdown, re-mint button) and "Cookies" section (domain list with capture date, per-domain delete); vitest unit for the section logic
+- [x] 3.3 Mock engine (`app/tests/mock-engine/server.ts`): `/v1/pair`, `/v1/pair/claim` (scriptable code, exemption from the mock's auth check), `/v1/cookies` routes + `__mock` controls; existing app e2e suite still green
 
 ## 4. Extension scaffold
 
-- [ ] 4.1 `extension/` workspace: `package.json` (exact-pinned vite, typescript, vitest; eslint config consistent with `app/`), strict tsconfig including `../app/src/shared/types.ts`, vite MV3 build (service worker + popup entries), `npm run build` produces a loadable unpacked dir and a deterministic zip
-- [ ] 4.2 `manifest.json`: MV3; `permissions` exactly `storage, alarms, notifications, contextMenus, activeTab`; `host_permissions` exactly `http://127.0.0.1/*`; `optional_permissions: cookies` + `optional_host_permissions` exactly `https://*/*` — `http://*/*` deliberately omitted, Secure login cookies make http jars pointless (per U6); no content scripts; `minimum_chrome_version` 120 (alarms 30 s floor); action `default_popup` + icons — note `action.onClicked` never fires with `default_popup` set, the popup is the submission surface (per U1)
-- [ ] 4.3 Typed engine client for the extension (claim, health, jobs, events fetch-stream, cookies PUT) + `chrome.storage.local` wrapper (pairing `{port, token}`, bounded tracked-job list); vitest units (mocked fetch/chrome)
+- [x] 4.1 `extension/` workspace: `package.json` (exact-pinned vite, typescript, vitest; eslint config consistent with `app/`), strict tsconfig including `../app/src/shared/types.ts`, vite MV3 build (service worker + popup entries), `npm run build` produces a loadable unpacked dir and a deterministic zip
+- [x] 4.2 `manifest.json`: MV3; `permissions` exactly `storage, alarms, notifications, contextMenus, activeTab`; `host_permissions` exactly `http://127.0.0.1/*`; `optional_permissions: cookies` + `optional_host_permissions` exactly `https://*/*` — `http://*/*` deliberately omitted, Secure login cookies make http jars pointless (per U6); no content scripts; `minimum_chrome_version` 120 (alarms 30 s floor); action `default_popup` + icons — note `action.onClicked` never fires with `default_popup` set, the popup is the submission surface (per U1)
+- [x] 4.3 Typed engine client for the extension (claim, health, jobs, events fetch-stream, cookies PUT) + `chrome.storage.local` wrapper (pairing `{port, token}`, bounded tracked-job list); vitest units (mocked fetch/chrome)
 
 ## 5. Extension pairing
 
-- [ ] 5.1 Popup pairing flow: port+code form (accepts the combined paste string), claim → authed health verify → store; failure leaves prior pairing untouched with retry; vitest units
-- [ ] 5.2 Connection states: health probe on popup open — connected / app-not-running (launch affordance) / 401 → re-pair flow replacing stored pairing; vitest units
+- [x] 5.1 Popup pairing flow: port+code form (accepts the combined paste string), claim → authed health verify → store; failure leaves prior pairing untouched with retry; vitest units
+- [x] 5.2 Connection states: health probe on popup open — connected / app-not-running (launch affordance) / 401 → re-pair flow replacing stored pairing; vitest units
 
 ## 6. Extension jobs
 
-- [ ] 6.1 Popup submit affordance (active tab URL via `chrome.tabs.query` under the click-granted `activeTab` — the toolbar click opens the popup, `action.onClicked` never fires with `default_popup` set, per U1) + context-menu item (`info.pageUrl` in the service worker) → `POST /v1/jobs {requires_confirmation: false}`; track id in storage; vitest units for URL selection and submission paths
-- [ ] 6.2 Popup progress: hydrate tracked jobs from records on every open, then attach fetch+ReadableStream `/v1/events` (header auth) for live steps; stream scoped to popup lifetime; failed jobs render `{code, message, hint}`; engine-supplied and page-derived strings reach the DOM via `textContent` only — the popup is the token-holding context (per U7); vitest units for the hydrate-then-stream merge and the textContent-only rendering discipline
-- [ ] 6.3 Service worker: stateless alarm loop (30 s) while tracked jobs are non-terminal → poll records → `chrome.notifications` on terminal → clear alarm when idle; storage-driven across SW restarts; vitest units for the scheduling decisions
-- [ ] 6.4 Engine-unreachable fallback: offer `podcast-reader://transcribe?url=<page>` (lands confirm-gated in the app per the existing protocol path); no silent extension-side queuing
+- [x] 6.1 Popup submit affordance (active tab URL via `chrome.tabs.query` under the click-granted `activeTab` — the toolbar click opens the popup, `action.onClicked` never fires with `default_popup` set, per U1) + context-menu item (`info.pageUrl` in the service worker) → `POST /v1/jobs {requires_confirmation: false}`; track id in storage; vitest units for URL selection and submission paths
+- [x] 6.2 Popup progress: hydrate tracked jobs from records on every open, then attach fetch+ReadableStream `/v1/events` (header auth) for live steps; stream scoped to popup lifetime; failed jobs render `{code, message, hint}`; engine-supplied and page-derived strings reach the DOM via `textContent` only — the popup is the token-holding context (per U7); vitest units for the hydrate-then-stream merge and the textContent-only rendering discipline
+- [x] 6.3 Service worker: stateless alarm loop (30 s) while tracked jobs are non-terminal → poll records → `chrome.notifications` on terminal → clear alarm when idle; storage-driven across SW restarts; vitest units for the scheduling decisions
+- [x] 6.4 Engine-unreachable fallback: offer `podcast-reader://transcribe?url=<page>` (lands confirm-gated in the app per the existing protocol path); no silent extension-side queuing
 
 ## 7. Extension cookie capture
 
-- [ ] 7.1 Netscape serializer from `chrome.cookies.Cookie[]` (7-field lines, `#HttpOnly_` prefix, expiry handling); vitest units against fixture cookies
-- [ ] 7.2 Capture flow in the popup: visible only for `download_auth_required` failures; target domain derived as the registrable domain (eTLD+1) of the failed source URL (per U4); `chrome.permissions.request` scoped to that registrable domain (+ `cookies`); decline = clean no-op; grant → `chrome.cookies.getAll({url})` (parent-domain cookies included, per U4) → serialize → `PUT /v1/cookies` declaring the registrable domain → one-click resubmission; no cookie content in storage or logs; vitest units with mocked chrome APIs incl. subdomain-source derivation (per U4)
+- [x] 7.1 Netscape serializer from `chrome.cookies.Cookie[]` (7-field lines, `#HttpOnly_` prefix, expiry handling); vitest units against fixture cookies
+- [x] 7.2 Capture flow in the popup: visible only for `download_auth_required` failures; target domain derived as the registrable domain (eTLD+1) of the failed source URL (per U4); `chrome.permissions.request` scoped to that registrable domain (+ `cookies`); decline = clean no-op; grant → `chrome.cookies.getAll({url})` (parent-domain cookies included, per U4) → serialize → `PUT /v1/cookies` declaring the registrable domain → one-click resubmission; no cookie content in storage or logs; vitest units with mocked chrome APIs incl. subdomain-source derivation (per U4)
 
 ## 8. E2e & CI
 
