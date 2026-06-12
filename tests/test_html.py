@@ -142,6 +142,44 @@ class TestSpeakerParagraphs:
         assert paras[0]["speaker"] == "SPEAKER_00"
         assert "speaker" not in paras[1]
 
+    def test_carry_after_split_stays_with_its_speaker(self) -> None:
+        """A sentence-boundary split's leftover fragment must never leak into
+        the next speaker's paragraph (OCR review on PR #11)."""
+        segments = [
+            {"start": 0.0, "end": 2.0, "text": "First sentence.", "speaker": "SPEAKER_00"},
+            {
+                "start": 2.0,
+                "end": 4.0,
+                "text": "Second sentence. And a trailing fragment",
+                "speaker": "SPEAKER_00",
+            },
+            {"start": 4.0, "end": 6.0, "text": "Hello from the guest.", "speaker": "SPEAKER_01"},
+        ]
+        paras = segments_to_paragraphs(segments, sentences_per_para=2)
+        assert len(paras) == 2
+        assert paras[0]["speaker"] == "SPEAKER_00"
+        assert paras[0]["text"] == "First sentence. Second sentence. And a trailing fragment"
+        assert paras[1]["speaker"] == "SPEAKER_01"
+        assert paras[1]["text"] == "Hello from the guest."
+
+    def test_carry_after_split_still_prepends_for_same_speaker(self) -> None:
+        """Same-speaker continuation keeps the original carry behavior."""
+        segments = [
+            {"start": 0.0, "end": 2.0, "text": "First sentence.", "speaker": "SPEAKER_00"},
+            {
+                "start": 2.0,
+                "end": 4.0,
+                "text": "Second sentence. And a trailing fragment",
+                "speaker": "SPEAKER_00",
+            },
+            {"start": 4.0, "end": 6.0, "text": "that continues here.", "speaker": "SPEAKER_00"},
+        ]
+        paras = segments_to_paragraphs(segments, sentences_per_para=2)
+        assert len(paras) == 2
+        assert paras[0]["text"] == "First sentence. Second sentence."
+        assert paras[1]["text"] == "And a trailing fragment that continues here."
+        assert paras[1]["speaker"] == "SPEAKER_00"
+
 
 class TestSpeakerRendering:
     _SEGMENTS = [

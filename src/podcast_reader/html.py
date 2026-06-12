@@ -64,6 +64,14 @@ def segments_to_paragraphs(
             current = None
 
         if current is None:
+            # A non-empty carry is leftover text from the paragraph appended
+            # by the last sentence-boundary split (always paragraphs[-1]). It
+            # belongs to that paragraph's speaker: prepend it here only when
+            # the speaker matches, otherwise reattach it to its own paragraph
+            # so a speaker change never misattributes the fragment.
+            if carry and paragraphs and seg.get("speaker") != paragraphs[-1].get("speaker"):
+                paragraphs[-1]["text"] += " " + carry
+                carry = ""
             combined = (carry + " " + text).strip() if carry else text
             current = {"start": seg["start"], "end": seg["end"], "text": combined}
             if seg.get("speaker") is not None:
