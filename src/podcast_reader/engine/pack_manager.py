@@ -580,9 +580,19 @@ class PackManager:
 
     @staticmethod
     def _remove_files(pack_dir_path: Path, manifest: PackManifest) -> None:
-        """Delete manifest-listed files (called strictly AFTER the manifest)."""
+        """Delete manifest-listed files (called strictly AFTER the manifest).
+
+        Per-file failures (e.g. a Windows PermissionError on an in-use DLL)
+        log and continue: the pack is already uninstalled once the manifest
+        is gone, and the leftover bytes are reclaimed on reinstall or a
+        later uninstall sweep — a 500 here would misreport a done uninstall.
+        """
         for recorded in manifest["files"]:
-            (pack_dir_path / recorded["path"]).unlink(missing_ok=True)
+            path = pack_dir_path / recorded["path"]
+            try:
+                path.unlink(missing_ok=True)
+            except OSError as exc:
+                logger.warning("Could not remove uninstalled pack file %s: %s", path, exc)
 
     # -- events ------------------------------------------------------------
 

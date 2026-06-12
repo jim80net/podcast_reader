@@ -8,6 +8,7 @@ from __future__ import annotations
 import hashlib
 import io
 import os
+import pathlib
 import threading
 import time
 import zipfile
@@ -616,6 +617,35 @@ class TestUninstall:
         assert read_manifest(target) is None  # manifest already gone
         assert (target / "model.bin").exists()  # files orphaned, pack not installed
         assert harness.state_of("model-test") == "not-installed"
+
+    def test_locked_file_does_not_fail_uninstall(
+        self,
+        harness: _Harness,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """T3: a Windows-style PermissionError on one in-use file logs and
+        continues — the manifest is already gone, so the pack IS
+        uninstalled; the leftover bytes are reclaimed on reinstall or a
+        later uninstall sweep."""
+        self._install(harness)
+        real_unlink = pathlib.Path.unlink
+
+        def locked(path: pathlib.Path, missing_ok: bool = False) -> None:
+            if path.name == "model.bin":
+                raise PermissionError(13, "file in use", str(path))
+            real_unlink(path, missing_ok=missing_ok)
+
+        monkeypatch.setattr(pathlib.Path, "unlink", locked)
+        with caplog.at_level("WARNING", logger="podcast_reader.engine.pack_manager"):
+            harness.manager.uninstall("model-test")  # must not raise
+        target = tmp_path / "models" / "model-test"
+        assert read_manifest(target) is None
+        assert (target / "model.bin").exists()  # orphaned, reclaimed later
+        assert not (target / "config.json").exists()  # the rest still removed
+        assert harness.state_of("model-test") == "not-installed"
+        assert any("model.bin" in record.getMessage() for record in caplog.records)
 
     def test_uninstall_while_installing_is_409(self, harness: _Harness) -> None:
         """Spec scenario: Uninstall refused while installing."""
