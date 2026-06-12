@@ -67,7 +67,7 @@ For speaker diarization, set `HF_TOKEN` and accept model terms at:
 |--------|---------|
 | `src/podcast_reader/cli.py` | Main CLI entry point — URL routing, pipeline orchestration |
 | `src/podcast_reader/youtube.py` | Fetch YouTube captions as whisper-compatible JSON |
-| `src/podcast_reader/ytdlp.py` | Download audio via yt-dlp; structured `download_failed` + residence-gated `-U` single-retry heal |
+| `src/podcast_reader/ytdlp.py` | Download audio via yt-dlp; structured `download_failed` (residence-gated `-U` single-retry heal) and `download_auth_required` (neutral message, no retry — each face authors its own cookie hint) |
 | `src/podcast_reader/transcribe.py` | Freeze-aware transcribe switch: bundled `whisper-worker` (model-pack validation, cuda→cpu fallback, streamed progress) or whisper-ctranslate2 |
 | `src/podcast_reader/workers/whisper_worker.py` | Frozen whisper worker: argv in, ctranslate2-shaped JSON out, `progress` lines on stderr (lazy faster-whisper via the `worker` extra) |
 | `src/podcast_reader/workers/diarization_worker.py` | Frozen diarization worker: stdlib WAV in (in-memory waveform, no torchcodec/FFmpeg), `turns.json` out, offline HF cache next to the executable (lazy torch/pyannote via the `diarization` extra) |
@@ -83,7 +83,9 @@ For speaker diarization, set `HF_TOKEN` and accept model terms at:
 | `src/podcast_reader/engine/pack_manager.py` | Pack downloads (Range resume, sha256-named staging, fail-closed verify) + `PackManager` installer thread (atomic install, manifest-first uninstall) |
 | `src/podcast_reader/engine/hardware.py` | `nvidia-smi` GPU probe (cached) + hardware-derived pack recommendations |
 | `src/podcast_reader/engine/managed_tools.py` | Bundle tool-seed reconciliation into `<data_dir>/tools` (newer wins), `PODCAST_READER_TOOLS_DIR` export, scheduled yt-dlp self-update |
-| `src/podcast_reader/engine/app.py` | FastAPI app: bearer auth, jobs (incl. confirm/dismiss of awaiting-confirmation), events, library, settings, keys (push + test), providers, packs (list/install/uninstall), health, shutdown routes |
+| `src/podcast_reader/engine/pairing.py` | In-memory pairing-code state: mint (6-char unambiguous alphabet, 300 s TTL, replaces prior), claim (constant-time, single-use, 5-failed-attempt budget, uniform rejection); never persisted or logged |
+| `src/podcast_reader/engine/cookies.py` | Netscape cookie-jar validation (domain suffix-match, 1 MB cap) + storage at `<data_dir>/cookies/<domain>.txt` (atomic 0600, dir 0700); metadata-only listing, delete |
+| `src/podcast_reader/engine/app.py` | FastAPI app: bearer auth (single exemption: `POST /v1/pair/claim`), jobs (incl. confirm/dismiss of awaiting-confirmation), events, library, settings, keys (push + test), providers, packs (list/install/uninstall), pair (mint/claim), cookies (put/list/delete), health, shutdown routes |
 | `src/podcast_reader/engine/process.py` | Pre-bound socket handshake, discovery file, child reaping, `serve` |
 | `spike/` | Packaging spike evidence (PyInstaller onedir prototype, SPIKE_REPORT.md) |
 | `packaging/engine.spec` + `build_engine.py` | Production frozen engine onedir: engine + whisper-worker entry points, MERGE/COLLECT, `copy_metadata("podcast-reader")`, ctranslate2/faster_whisper hooks (`hooks/`), tool seeds + flat `tools-manifest.json` into `_internal/tools/` |
@@ -115,7 +117,27 @@ Engine `/v1` surface the app consumes: `health`, `shutdown`, `jobs` (+
 `{id}`, `{id}/confirm`, `DELETE {id}`), `events` (SSE; job events carry
 `data.job_id`, pack events carry `data.pack_id` and never `job_id`),
 `library`, `transcripts/{id}.html`, `settings`, `keys`, `keys/test`,
-`providers`, `packs` (+ `POST {id}/install`, `DELETE {id}`).
+`providers`, `packs` (+ `POST {id}/install`, `DELETE {id}`), `POST pair`
+(mint a pairing code), `cookies` (metadata list + `DELETE {domain}`).
+
+### Chrome extension (`extension/` — independent npm package, see `extension/README.md`)
+
+| Module | Purpose |
+|--------|---------|
+| `extension/public/manifest.json` | MV3 manifest: least-privilege permissions (`storage, alarms, notifications, contextMenus, activeTab`; `host_permissions` only `http://127.0.0.1/*`), `optional_permissions: cookies` + https-only optional hosts, no content scripts, Chrome 120+ |
+| `extension/src/popup.ts` | The popup (submission surface — `action.onClicked` never fires with `default_popup`): pairing form, submit-active-tab, hydrate-then-stream progress, cookie capture, protocol fallback; textContent-only DOM (eslint-fenced) |
+| `extension/src/sw.ts` | Stateless service worker: context-menu submit + 30 s alarm poll → notifications/badge; never holds an events stream |
+| `extension/src/client.ts` + `pairing.ts` + `connection.ts` | Typed engine client (claim/health/jobs/events/cookies), pairing parse + claim→verify→store flow, popup-open connection probe |
+| `extension/src/etld.ts` + `capture.ts` + `netscape.ts` | Registrable-domain (eTLD+1) derivation, per-domain capture targeting, Netscape jar serialization (`#HttpOnly_`) |
+| `extension/src/storage.ts` + `tracking.ts` + `jobs-view.ts` | `chrome.storage.local` wrapper (`{port, token}` pairing, bounded tracked jobs), submit side-effects, pure view/poll/badge logic |
+| `extension/tests/e2e/` | Playwright: real built `dist/` via `--load-extension` + the app's mock engine (pairing, jobs, cookies, engine-down) |
+| `extension/scripts/zip.mjs` | Deterministic store-uploadable zip from `dist/` |
+
+Engine `/v1` surface the extension consumes: `POST pair/claim` (the single
+unauthenticated route — code → token), `health`, `POST jobs`
+(`requires_confirmation: false`), `jobs/{id}`, `events` (fetch-stream),
+`PUT cookies`. Shared payload types import from `app/src/shared/types.ts`
+(one mirror for both TS consumers — design decision 2).
 
 ## Pipeline
 
@@ -157,6 +179,15 @@ npm run build       # electron-vite production build into out/
 npm run e2e         # Playwright vs the mock engine (build first; xvfb-run -a on headless)
 npm run e2e:integration  # real-engine smoke (needs `uv sync --extra dev` at the root)
 npm run dist        # electron-builder installers (--engine-dir maps a frozen engine payload)
+```
+
+```bash
+# Chrome extension (run from extension/; Node >= 24)
+npm run typecheck   # tsc --noEmit (src + tests + configs)
+npm run lint        # eslint (incl. the textContent-only DOM fence)
+npm run test        # vitest unit tests
+npm run build       # vite MV3 build → dist/ + deterministic zip
+npm run e2e         # Playwright vs the mock engine (build first; xvfb-run -a on headless)
 ```
 
 ```bash

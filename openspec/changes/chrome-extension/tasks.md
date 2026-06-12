@@ -44,14 +44,14 @@
 
 ## 8. E2e & CI
 
-- [ ] 8.1 Playwright extension harness: `chromium.launchPersistentContext` with `--load-extension` against the mock engine (reusing the app's fixture pattern for `PODCAST_READER_DATA_DIR`-less direct port/token scripting); specs: pairing happy path + wrong-code rejection; submit-from-popup → progress; popup close/reopen hydration; cookie push with pre-granted permission (the optional-permission prompt itself is not automatable — documented as a manual check)
-- [ ] 8.2 Real-engine pairing round-trip: extend the app's integration smoke (or a pytest integration test) with mint → claim → authed health using the real engine, bracketing the mock's pairing fidelity
-- [ ] 8.3 CI: `extension` job in `ci.yml` — npm ci, `tsc --noEmit`, eslint, vitest, vite build, Playwright e2e under xvfb; cache npm + browsers
-- [ ] 8.4 Full gates: pytest, mypy strict, ruff, app `tsc`/vitest/e2e, extension `tsc`/vitest/e2e; `openspec validate chrome-extension`
+- [x] 8.1 Playwright extension harness: `chromium.launchPersistentContext` with `--load-extension` against the mock engine (reusing the app's fixture pattern for `PODCAST_READER_DATA_DIR`-less direct port/token scripting); specs: pairing happy path + wrong-code rejection; submit-from-popup → progress; popup close/reopen hydration; cookie push with pre-granted permission (the optional-permission prompt itself is not automatable — documented as a manual check)
+- [x] 8.2 Real-engine pairing round-trip: extend the app's integration smoke (or a pytest integration test) with mint → claim → authed health using the real engine, bracketing the mock's pairing fidelity
+- [x] 8.3 CI: `extension` job in `ci.yml` — npm ci, `tsc --noEmit`, eslint, vitest, vite build, Playwright e2e under xvfb; cache npm + browsers
+- [x] 8.4 Full gates: pytest, mypy strict, ruff, app `tsc`/vitest/e2e, extension `tsc`/vitest/e2e; `openspec validate chrome-extension`
 
 ## 9. Docs, packaging & wrap-up
 
-- [ ] 9.1 README: extension section (load-unpacked install, pairing walkthrough, cookie-sharing explanation incl. the honest retention note); CLAUDE.md: `extension/` rows, new engine endpoints (`pair`, `pair/claim`, `cookies`), extension commands; parent-design hint copy now extension-aware (N2)
-- [ ] 9.2 Store packaging: `npm run dist` zip suitable for Chrome Web Store upload; listing assets checklist documented
+- [x] 9.1 README: extension section (load-unpacked install, pairing walkthrough, cookie-sharing explanation incl. the honest retention note); CLAUDE.md: `extension/` rows, new engine endpoints (`pair`, `pair/claim`, `cookies`), extension commands; parent-design hint copy now extension-aware (N2)
+- [x] 9.2 Store packaging: `npm run dist` zip suitable for Chrome Web Store upload; listing assets checklist documented
 - [ ] 9.3 [USER-BLOCKING] Chrome Web Store developer account: registration ($5 fee, Google account) and publication (listing, privacy disclosures for the `cookies` optional permission, review cycle) — cannot proceed without the user; until then, install is load-unpacked from a release zip
 - [ ] 9.4 Systems-review of the implementation diff; PR referencing this change
