@@ -29,6 +29,12 @@ whisper = [
 worker = [
     "faster-whisper>=1.2.1",
 ]
+# The diarization worker's in-process stack (spike pin: pyannote.audio 4.0.4
+# + CPU torch). Only the frozen pack build and worker development need it;
+# the main package never imports it (lazy import inside
+# podcast_reader.workers.diarization_worker). Install torch from the CPU
+# index first (see packaging/DIARIZATION_SMOKE.md) — PyPI torch is the CUDA
+# build and quadruples the freeze.
 diarization = [
     "pyannote.audio>=4.0",
 ]
@@ -43,6 +49,9 @@ podcast-reader = "podcast_reader.cli:main"
 # Dev/CLI analog of the frozen `whisper-worker` executable (needs the
 # `worker` extra at runtime; the script itself imports without it).
 podcast-reader-whisper-worker = "podcast_reader.workers.whisper_worker:main"
+# Dev/CLI analog of the frozen `diarization-worker` executable (needs the
+# `diarization` extra at runtime; the script itself imports without it).
+podcast-reader-diarization-worker = "podcast_reader.workers.diarization_worker:main"
 
 [tool.mypy]
 strict = true
@@ -52,6 +61,13 @@ strict = true
 # module without it.
 [[tool.mypy.overrides]]
 module = "faster_whisper"
+ignore_missing_imports = true
+
+# torch and pyannote.audio are only installed in the diarization pack's build
+# venv (the worker imports them lazily); the dev environment checks the
+# worker module without them.
+[[tool.mypy.overrides]]
+module = ["torch", "pyannote.audio"]
 ignore_missing_imports = true
 
 [tool.ruff]
