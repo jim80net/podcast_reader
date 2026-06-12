@@ -5,18 +5,29 @@
  * suffix-match validation).
  *
  * Documented heuristic, not the full Public Suffix List (no heavy
- * dependency; the engine only suffix-validates, so a too-shallow guess
- * degrades to a broader-but-valid jar, never a rejected one):
+ * dependency):
  *
  *   eTLD+1 = the last two labels, EXCEPT when the TLD is a two-letter
  *   country code and the second-level label is a generic category label
  *   (co/com/net/org/gov/edu/ac/…), in which case it is the last three
  *   labels (bbc.co.uk, abc.net.au, nico.co.jp, …).
  *
- * Known limitation: multi-tenant private suffixes (github.io, …) resolve to
- * the suffix itself — the permission prompt is then broader than ideal but
- * the capture still works. IP literals and single-label hosts (localhost)
- * return null: there is no registrable domain to scope a jar to.
+ * Known limitations (per V1 — both directions of error are reachable, so
+ * the heuristic is only a permission-scoping GUESS; the jar's declared
+ * domain is derived from the captured cookies in capture.ts
+ * `declaredDomain`):
+ *
+ * - Too DEEP: real registrable domains whose second level collides with
+ *   the generic list over-deepen (mail.web.de → mail.web.de instead of
+ *   web.de, api.id.me → api.id.me instead of id.me). Declared as-is, the
+ *   parent-domain login cookie would fail the engine's suffix validation
+ *   and the whole PUT would 400.
+ * - Too SHALLOW: multi-tenant private suffixes (github.io, …) resolve to
+ *   the suffix itself — the permission prompt is then broader than ideal
+ *   but the capture still works (the engine only suffix-validates).
+ *
+ * IP literals and single-label hosts (localhost) return null: there is no
+ * registrable domain to scope a jar to.
  */
 
 /** Generic second-level category labels seen under two-letter ccTLDs. */

@@ -1,4 +1,4 @@
-import { captureTarget } from './capture'
+import { captureTarget, declaredDomain } from './capture'
 import { claimToken, EngineClient, EngineRequestError } from './client'
 import { probeConnection } from './connection'
 import { el } from './dom'
@@ -346,9 +346,14 @@ function captureAffordance(record: JobRecord, client: EngineClient): HTMLElement
           button.disabled = false
           return
         }
+        // The jar is declared under the broadest captured cookie domain
+        // (per V1): the heuristic guess can over-deepen (web.de, id.me),
+        // and a too-deep declaration would 400 the very parent-domain
+        // login cookie the capture exists for.
+        const domain = declaredDomain(target, cookies)
         // Cookie values live only in this transaction: serialized, pushed,
         // and dropped — never stored, never logged.
-        await client.putCookies(target.domain, serializeNetscape(cookies))
+        await client.putCookies(domain, serializeNetscape(cookies))
         status.textContent = 'Login shared.'
         const retry = el('button', {
           text: 'Retry the transcription',

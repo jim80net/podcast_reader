@@ -149,3 +149,93 @@ test('capture pushes a domain-scoped Netscape jar and offers resubmission', asyn
     })
     .toBe(1)
 })
+
+test('declares the jar under the broadest captured cookie domain (web.de collision, V1)', async ({
+  harness
+}) => {
+  // mail.web.de is a real registrable domain whose second level collides
+  // with the eTLD heuristic's ccTLD generic list, so the guess over-deepens
+  // to mail.web.de. The parent .web.de login cookie must still validate —
+  // the declared domain comes from the captured data, not the guess.
+  const now = Date.now() / 1000
+  await harness.mock.control('/seed', {
+    jobs: [
+      {
+        id: 'job-webde',
+        source: 'https://mail.web.de/clip',
+        title: null,
+        state: 'failed',
+        error: {
+          code: 'download_auth_required',
+          message: 'This source requires authentication to download.',
+          hint: ''
+        },
+        events: [],
+        result: null,
+        created_at: now,
+        updated_at: now
+      }
+    ]
+  })
+
+  const popup = await harness.context.newPage()
+  await popup.addInitScript(() => {
+    Object.defineProperty(chrome.permissions, 'request', { value: async () => true })
+    Object.defineProperty(chrome, 'cookies', {
+      value: {
+        getAll: async () => [
+          {
+            domain: '.web.de',
+            path: '/',
+            secure: true,
+            httpOnly: true,
+            session: false,
+            expirationDate: 1_900_000_000,
+            name: 'login',
+            value: 'tok-webde'
+          },
+          {
+            domain: 'mail.web.de',
+            path: '/',
+            secure: true,
+            httpOnly: false,
+            session: true,
+            name: 'ui',
+            value: 'v2'
+          }
+        ]
+      }
+    })
+  })
+  await popup.goto(`chrome-extension://${harness.extensionId}/popup.html`)
+  await harness.seedStorage(
+    popup,
+    { port: harness.mock.port, token: harness.mock.token },
+    [
+      {
+        id: 'job-webde',
+        source: 'https://mail.web.de/clip',
+        title: null,
+        submitted_at: now,
+        notified: true
+      }
+    ]
+  )
+
+  const row = popup.locator('.job-row[data-job-id="job-webde"]')
+  await expect(row).toHaveAttribute('data-state', 'failed')
+  await popup.click('#capture-job-webde')
+  // 'Login shared.' proves the PUT passed the mock's REAL suffix validation
+  // — under the old heuristic declaration (mail.web.de) the .web.de cookie
+  // line would have 400ed the whole jar.
+  await expect(row.locator('[role="status"]')).toHaveText('Login shared.')
+
+  const jars = (await (await harness.mock.control('/cookies')).json()) as {
+    domain: string
+    jar: string
+  }[]
+  expect(jars).toHaveLength(1)
+  expect(jars[0]?.domain).toBe('web.de')
+  expect(jars[0]?.jar).toContain('#HttpOnly_.web.de\tTRUE\t/\tTRUE\t1900000000\tlogin\ttok-webde')
+  expect(jars[0]?.jar).toContain('mail.web.de\tFALSE\t/\tTRUE\t0\tui\tv2')
+})

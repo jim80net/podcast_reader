@@ -21,6 +21,15 @@ describe('registrableDomain', () => {
     expect(registrableDomain('video.nico.co.jp')).toBe('nico.co.jp')
   })
 
+  it('over-deepens on generic-label collisions — documented limitation (per V1)', () => {
+    // web.de and id.me are real registrable domains whose second level
+    // collides with the ccTLD generic list, so the heuristic guesses one
+    // label too deep. The capture flow compensates by declaring the jar
+    // under the broadest captured cookie domain (capture.ts declaredDomain).
+    expect(registrableDomain('mail.web.de')).toBe('mail.web.de')
+    expect(registrableDomain('api.id.me')).toBe('api.id.me')
+  })
+
   it('is case-insensitive and tolerates a trailing dot', () => {
     expect(registrableDomain('Media.Example.COM')).toBe('example.com')
     expect(registrableDomain('example.com.')).toBe('example.com')
