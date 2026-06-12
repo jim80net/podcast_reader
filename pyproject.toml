@@ -23,6 +23,12 @@ chapters = []
 whisper = [
     "whisper-ctranslate2>=0.5.7",
 ]
+# The bundled whisper worker's in-process engine (spike pin: 1.2.1). Only the
+# frozen-engine build and worker development need it; the main package never
+# imports it (lazy import inside podcast_reader.workers.whisper_worker).
+worker = [
+    "faster-whisper>=1.2.1",
+]
 diarization = [
     "pyannote.audio>=4.0",
 ]
@@ -34,9 +40,19 @@ dev = [
 
 [project.scripts]
 podcast-reader = "podcast_reader.cli:main"
+# Dev/CLI analog of the frozen `whisper-worker` executable (needs the
+# `worker` extra at runtime; the script itself imports without it).
+podcast-reader-whisper-worker = "podcast_reader.workers.whisper_worker:main"
 
 [tool.mypy]
 strict = true
+
+# faster-whisper ships no type stubs and is only installed via the `worker`
+# extra (the worker imports it lazily); the dev environment checks the worker
+# module without it.
+[[tool.mypy.overrides]]
+module = "faster_whisper"
+ignore_missing_imports = true
 
 [tool.ruff]
 target-version = "py310"

@@ -2818,10 +2818,14 @@ diarization = [
 whisper = [
     { name = "whisper-ctranslate2" },
 ]
+worker = [
+    { name = "faster-whisper" },
+]
 
 [package.metadata]
 requires-dist = [
     { name = "fastapi", specifier = ">=0.111" },
+    { name = "faster-whisper", marker = "extra == 'worker'", specifier = ">=1.2.1" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.10" },
     { name = "pyannote-audio", marker = "extra == 'diarization'", specifier = ">=4.0" },
@@ -2833,7 +2837,7 @@ requires-dist = [
     { name = "youtube-transcript-api", specifier = ">=1.0" },
     { name = "yt-dlp", specifier = ">=2024.1.1" },
 ]
-provides-extras = ["chapters", "whisper", "diarization", "dev"]
+provides-extras = ["chapters", "whisper", "worker", "diarization", "dev"]
 
 [[package]]
 name = "primepy"
