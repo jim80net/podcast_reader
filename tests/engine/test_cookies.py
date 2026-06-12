@@ -64,6 +64,14 @@ class TestValidateJar:
         with pytest.raises(CookieJarError):
             validate_jar("example.com", _line("notexample.com"))
 
+    @pytest.mark.parametrize("domain", ["..example.com", "...example.com", ".", ".."])
+    def test_multi_dot_cookie_domains_rejected(self, domain: str) -> None:
+        """Per V2: a single leading-dot strip let `..example.com` slip through
+        the suffix check — every leading dot is stripped and the remainder
+        must still be a valid bare hostname."""
+        with pytest.raises(CookieJarError):
+            validate_jar("example.com", _line(domain))
+
     def test_httponly_foreign_domain_rejected(self) -> None:
         with pytest.raises(CookieJarError):
             validate_jar("example.com", "#HttpOnly_" + _line("other.org"))

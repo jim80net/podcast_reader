@@ -87,7 +87,13 @@ def validate_jar(domain: str, jar: str) -> None:
                 f"line {lineno}: not a Netscape cookie line "
                 f"(expected {_NETSCAPE_FIELDS} tab-separated fields)"
             )
-        cookie_domain = fields[0].lower().removeprefix(".")  # leading-dot strip (per U4)
+        # Strip the single Netscape subdomain-flag dot (per U4); what remains
+        # must itself be a valid bare hostname (per V2 — a bare endswith on a
+        # once-stripped value let `..example.com` slip through as
+        # `.example.com`, a non-hostname that still suffix-matched).
+        cookie_domain = fields[0].lower().removeprefix(".")
+        if not _is_valid_domain(cookie_domain):
+            raise CookieJarError(f"line {lineno}: cookie domain is not a valid hostname")
         if cookie_domain != domain and not cookie_domain.endswith("." + domain):
             raise CookieJarError(
                 f"line {lineno}: cookie domain does not match the declared domain {domain!r}"
