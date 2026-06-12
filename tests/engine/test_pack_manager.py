@@ -33,6 +33,7 @@ from podcast_reader.engine.packs import (
     LicenseNotice,
     PackEntry,
     PackFilePin,
+    manifest_path,
     pack_dir,
     read_manifest,
 )
@@ -693,6 +694,18 @@ class TestStartupValidation:
             assert _wait_for(lambda: fresh.state_of("model-test") == "installed")
         finally:
             fresh.manager.shutdown()
+
+    def test_garbage_parseable_manifest_survives_startup_validation(self, tmp_path: Path) -> None:
+        """T2: serve_engine calls validate_installed unguarded before boot —
+        a corrupt-but-parseable manifest must read as not installed, never
+        raise out of validation or status derivation."""
+        entry, bodies = _test_entry()
+        target = pack_dir(tmp_path, entry)
+        target.mkdir(parents=True)
+        manifest_path(target).write_text('{"pack_schema": 1, "files": "garbage"}')
+        fresh = _Harness(tmp_path, {entry["id"]: entry}, bodies)
+        assert fresh.manager.validate_installed() == {}
+        assert fresh.state_of("model-test") == "not-installed"
 
     def test_clean_install_passes_validation(self, tmp_path: Path) -> None:
         entry, bodies = _test_entry()

@@ -458,10 +458,47 @@ def read_manifest(pack_dir_path: Path) -> PackManifest | None:
         loaded = json.loads(path.read_text())
     except (OSError, ValueError):
         return None
-    if not isinstance(loaded, dict) or "pack_schema" not in loaded or "files" not in loaded:
+    if not _manifest_shape_ok(loaded):
         return None
-    manifest: PackManifest = loaded  # type: ignore[assignment]
+    manifest: PackManifest = loaded
     return manifest
+
+
+def _manifest_shape_ok(loaded: object) -> bool:
+    """Structural check covering every field the engine dereferences.
+
+    Compat checking reads ``pack_schema`` and splits each
+    ``component_versions`` string; status derivation reads ``version`` and
+    ``licenses``; integrity checking and uninstall iterate ``files`` reading
+    per-file ``path``/``sha256``/``size``. A manifest failing any of these
+    shapes is garbage, not installed — it must never crash startup
+    validation or status derivation.
+    """
+    if not isinstance(loaded, dict):
+        return False
+    if not isinstance(loaded.get("pack_schema"), int):
+        return False
+    if not isinstance(loaded.get("version"), str):
+        return False
+    components = loaded.get("component_versions")
+    if not isinstance(components, dict) or not all(
+        isinstance(version, str) for version in components.values()
+    ):
+        return False
+    if not isinstance(loaded.get("licenses", []), list):
+        return False
+    files = loaded.get("files")
+    return isinstance(files, list) and all(_manifest_file_shape_ok(item) for item in files)
+
+
+def _manifest_file_shape_ok(item: object) -> bool:
+    """True when *item* looks like a :class:`ManifestFile`."""
+    return (
+        isinstance(item, dict)
+        and isinstance(item.get("path"), str)
+        and isinstance(item.get("sha256"), str)
+        and isinstance(item.get("size"), int)
+    )
 
 
 def compat_error(entry: PackEntry, manifest: PackManifest) -> str | None:

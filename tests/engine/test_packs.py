@@ -7,8 +7,11 @@ offline against the shipped pins.
 
 from __future__ import annotations
 
+import json
 import re
 from typing import TYPE_CHECKING
+
+import pytest
 
 from podcast_reader.engine.packs import (
     MANIFEST_FILE,
@@ -268,3 +271,58 @@ class TestManifestIO:
     def test_wrong_shape_manifest_reads_as_not_installed(self, tmp_path: Path) -> None:
         manifest_path(tmp_path).write_text('["a", "list"]')
         assert read_manifest(tmp_path) is None
+
+
+class TestManifestShape:
+    """T2: corrupt-but-parseable manifests read as not installed.
+
+    The engine dereferences ``version`` (status), ``component_versions``
+    (compat, splitting each version string), ``files`` with per-file
+    path/sha256/size (integrity + uninstall), and ``licenses`` (status) —
+    so :func:`read_manifest` vouches for those shapes rather than letting a
+    garbage manifest crash startup validation or status derivation.
+    """
+
+    @staticmethod
+    def _write(tmp_path: Path, payload: object) -> None:
+        manifest_path(tmp_path).write_text(json.dumps(payload))
+
+    @pytest.mark.parametrize("missing", ["pack_schema", "version", "component_versions", "files"])
+    def test_missing_required_field_reads_as_not_installed(
+        self, tmp_path: Path, missing: str
+    ) -> None:
+        payload = dict(_manifest())
+        del payload[missing]
+        self._write(tmp_path, payload)
+        assert read_manifest(tmp_path) is None
+
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            ("pack_schema", "1"),
+            ("version", 2),
+            ("component_versions", "9.1"),
+            ("component_versions", {"cudnn": 9}),
+            ("files", "not-a-list"),
+            ("files", [["path", "sha", "size"]]),
+            ("files", [{"sha256": "0" * 64, "size": 7}]),
+            ("files", [{"path": "f", "size": 7}]),
+            ("files", [{"path": "f", "sha256": "0" * 64}]),
+            ("files", [{"path": 1, "sha256": "0" * 64, "size": 7}]),
+            ("files", [{"path": "f", "sha256": 0, "size": 7}]),
+            ("files", [{"path": "f", "sha256": "0" * 64, "size": "7"}]),
+            ("licenses", "MIT"),
+        ],
+    )
+    def test_wrong_typed_field_reads_as_not_installed(
+        self, tmp_path: Path, field: str, value: object
+    ) -> None:
+        payload = dict(_manifest())
+        payload[field] = value
+        self._write(tmp_path, payload)
+        assert read_manifest(tmp_path) is None
+
+    def test_well_shaped_manifest_with_files_reads_back(self, tmp_path: Path) -> None:
+        manifest = _manifest(files=[ManifestFile(path="model.bin", sha256="0" * 64, size=7)])
+        self._write(tmp_path, manifest)
+        assert read_manifest(tmp_path) == manifest
