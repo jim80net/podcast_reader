@@ -266,9 +266,16 @@ class PackManager:
             stop = self._stop
         stop.set()
         self._queue.wake_all()
-        if worker is None:
-            return
-        worker.join(timeout=30)
+        if worker is not None:
+            worker.join(timeout=30)
+        # Requests still queued die with the worker (pack installs are not
+        # journaled): drop their installing marks so a restarted manager
+        # reports disk-derived state instead of phantom "installing", and
+        # request_install accepts the pack again.
+        undequeued = self._queue.drain()
+        with self._lock:
+            for pack_id in undequeued:
+                self._installing.pop(pack_id, None)
 
     def request_install(self, pack_id: str) -> None:
         """Enqueue an install (idempotent while installing or installed).

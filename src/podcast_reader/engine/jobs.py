@@ -81,6 +81,18 @@ class WakeQueue:
         with self._cond:
             self._cond.notify_all()
 
+    def drain(self) -> list[str]:
+        """Remove and return the queued backlog, in FIFO order.
+
+        For owners whose backlog must NOT reach a successor worker (e.g.
+        pack installs, which are not journaled): drained items are the
+        caller's to clean up.
+        """
+        with self._cond:
+            items = list(self._items)
+            self._items.clear()
+            return items
+
     def get_or_stop(self, stop: threading.Event) -> str | None:
         """Block until an item arrives (returned) or *stop* is set (``None``).
 

@@ -669,6 +669,34 @@ class TestUninstall:
         assert harness.state_of("model-test") == "not-installed"
 
 
+class TestShutdownRestart:
+    def test_shutdown_clears_undequeued_installs(self, tmp_path: Path) -> None:
+        """T4: requests still queued at shutdown die with the worker (pack
+        installs are not journaled) — a restarted manager reports the
+        second pack's disk-derived state, and request_install works again
+        instead of no-opping against a phantom installing mark."""
+        entry_a, bodies_a = _test_entry("pack-a")
+        entry_b, bodies_b = _test_entry("pack-b", contents={"weights.bin": b"pack-b-bytes"})
+        registry = {"pack-a": entry_a, "pack-b": entry_b}
+        h = _Harness(tmp_path, registry, {**bodies_a, **bodies_b})
+        h.gate = threading.Event()
+        h.manager.start_worker()
+        h.manager.request_install("pack-a")  # dequeued, blocked in transport
+        assert h.entered.wait(timeout=10)
+        h.manager.request_install("pack-b")  # still queued at shutdown
+        assert h.state_of("pack-b") == "installing"
+        threading.Timer(0.2, h.gate.set).start()  # unblock pack-a so it aborts
+        h.manager.shutdown()
+        # No phantom installing state: pack-b derives from disk again.
+        assert h.state_of("pack-b") == "not-installed"
+        h.manager.start_worker()
+        try:
+            h.manager.request_install("pack-b")
+            assert _wait_for(lambda: h.state_of("pack-b") == "installed")
+        finally:
+            h.manager.shutdown()
+
+
 class TestStartupValidation:
     def _installed(self, tmp_path: Path, entry: PackEntry, bodies: dict[str, bytes]) -> None:
         h = _Harness(tmp_path, {entry["id"]: entry}, bodies)
