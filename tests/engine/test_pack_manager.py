@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import os
 import threading
 import time
 import zipfile
@@ -526,6 +527,60 @@ class TestResumeAndStaging:
             h.manager.shutdown()
         assert not stale.exists()
         assert all(r.headers.get("range") is None for r in h.requests)
+
+
+class TestReinstall:
+    def test_old_manifest_removed_before_new_files_land(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """T1: reinstall mirrors uninstall's manifest-first discipline (per
+        S1) — a validator racing the reinstall sees not-installed, never the
+        OLD manifest describing mixed old/new files."""
+        entry, bodies = _test_entry()
+        target = pack_dir(tmp_path, entry)
+        h1 = _Harness(tmp_path, {entry["id"]: entry}, bodies)
+        h1.manager.start_worker()
+        try:
+            h1.manager.request_install("model-test")
+            assert _wait_for(lambda: h1.state_of("model-test") == "installed")
+        finally:
+            h1.manager.shutdown()
+
+        # The "updated" registry pins new content and moves the compat range,
+        # so the rev-1 install reads incompatible -> re-download affordance.
+        new_contents = {name: b"rev-2:" + body for name, body in _MODEL_CONTENT.items()}
+        updated_entry, new_bodies = _test_entry(contents=new_contents)
+        updated = dict(updated_entry)
+        updated["version"] = "rev-2"
+        updated["component_versions"] = {"model_revision": "rev-2"}
+        updated["compat"] = {"model_revision": "rev-2"}
+
+        manifests_at_replace: list[PackManifest | None] = []
+        real_replace = os.replace
+
+        def spying_replace(src: str | os.PathLike[str], dst: str | os.PathLike[str]) -> None:
+            manifests_at_replace.append(read_manifest(target))
+            real_replace(src, dst)
+
+        monkeypatch.setattr("podcast_reader.engine.pack_manager.os.replace", spying_replace)
+        h2 = _Harness(tmp_path, {entry["id"]: dict(updated)}, new_bodies)  # type: ignore[arg-type]
+        assert h2.state_of("model-test") == "incompatible"
+        h2.manager.start_worker()
+        try:
+            h2.manager.request_install("model-test")
+            assert _wait_for(lambda: h2.state_of("model-test") == "installed")
+        finally:
+            h2.manager.shutdown()
+
+        assert manifests_at_replace, "os.replace never observed"
+        # Every file placement (and the manifest write itself) happened with
+        # NO manifest on disk: mid-install reads as not-installed.
+        assert manifests_at_replace == [None] * len(manifests_at_replace)
+        manifest = read_manifest(target)
+        assert manifest is not None
+        assert manifest["version"] == "rev-2"
+        for name, body in new_contents.items():
+            assert (target / name).read_bytes() == body
 
 
 class TestUninstall:

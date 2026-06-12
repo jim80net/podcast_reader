@@ -491,6 +491,11 @@ class PackManager:
 
         target = pack_dir(self._data_dir, entry)
         target.mkdir(parents=True, exist_ok=True)
+        # Reinstall over an existing pack: drop the OLD manifest before the
+        # first file lands (mirroring uninstall's manifest-first discipline,
+        # per S1) — a job validating at step start mid-reinstall reads
+        # not-installed, never the old manifest over mixed old/new files.
+        manifest_path(target).unlink(missing_ok=True)
         if entry["extract_wheels"]:
             manifest_files = self._extract_wheels(parts, target)
         else:
