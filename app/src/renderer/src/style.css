@@ -589,3 +589,59 @@ a.card:hover {
 .packs-header h3 {
   margin: 0;
 }
+
+/* ---- extension pairing + cookies (Settings sections) -------------------- */
+
+.section-note {
+  color: var(--muted);
+  font-size: 0.85rem;
+  margin: 0.25rem 0 0.6rem;
+}
+
+.pairing-combined {
+  display: inline-block;
+  font-size: 1.3rem;
+  letter-spacing: 0.08em;
+  padding: 0.3rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  user-select: all;
+}
+
+.pairing-combined.pairing-expired {
+  opacity: 0.45;
+  text-decoration: line-through;
+}
+
+.pairing-fallback {
+  color: var(--muted);
+  font-size: 0.82rem;
+  margin: 0.35rem 0 0;
+}
+
+.pairing-countdown {
+  font-size: 0.85rem;
+  margin: 0.3rem 0 0;
+}
+
+.cookie-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.cookie-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.cookie-domain {
+  font-weight: 600;
+}
+
+.cookie-date {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
