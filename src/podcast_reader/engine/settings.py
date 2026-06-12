@@ -178,6 +178,22 @@ def atomic_write_text(path: Path, data: str, *, mode: int | None = None) -> None
         os.replace(tmp, path)
 
 
+def ensure_owner_only_dir(path: Path) -> None:
+    """Re-harden an existing secret-bearing directory to 0700 (POSIX only).
+
+    ``mkdir(mode=0o700, exist_ok=True)`` applies the mode only on creation —
+    a directory that already existed with loose permissions keeps them. Public
+    for the same reason as :func:`atomic_write_text`: secret-bearing writers
+    outside this module (the cookie-jar store) share one hardening
+    implementation. No-op on Windows (see module docstring — ACLs carry the
+    protection there).
+    """
+    if os.name != "posix":  # pragma: no cover — exercised on Windows only
+        return
+    if stat.S_IMODE(path.stat().st_mode) != 0o700:
+        path.chmod(0o700)
+
+
 def _ensure_owner_only(path: Path) -> None:
     """Re-harden an existing secret file to 0600 (POSIX; no-op on Windows).
 

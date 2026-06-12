@@ -22,7 +22,7 @@ from urllib.parse import urlsplit
 # typing_extensions.TypedDict on Python < 3.12 (same note as types.py).
 from typing_extensions import TypedDict
 
-from podcast_reader.engine.settings import atomic_write_text
+from podcast_reader.engine.settings import atomic_write_text, ensure_owner_only_dir
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -104,9 +104,16 @@ def validate_jar(domain: str, jar: str) -> None:
 
 
 def cookies_dir(base: Path) -> Path:
-    """The jar directory ``<data_dir>/cookies``, created owner-only (0700)."""
+    """The jar directory ``<data_dir>/cookies``, created owner-only (0700).
+
+    A pre-existing directory with loose permissions is re-hardened —
+    ``mkdir`` applies the mode only on creation, and jar filenames are
+    metadata (which domains hold logins). Same discipline as the
+    engine-state re-hardening in :func:`settings.load_engine_state`.
+    """
     directory = base / COOKIES_DIR
     directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    ensure_owner_only_dir(directory)
     return directory
 
 

@@ -136,6 +136,17 @@ class TestStorage:
         assert stat.S_IMODE(path.stat().st_mode) == 0o600
         assert stat.S_IMODE(path.parent.stat().st_mode) == 0o700
 
+    def test_pre_existing_loose_cookies_dir_is_rehardened(self, tmp_path: Path) -> None:
+        """A cookies/ dir created earlier with loose permissions is re-hardened
+        to 0700 on use — ``mkdir(mode=...)`` alone ignores pre-existing dirs,
+        and jar filenames are metadata (which domains hold logins). Mirrors
+        the engine-state re-hardening in settings.load_engine_state (OCR
+        review on PR #12)."""
+        loose = tmp_path / "cookies"
+        loose.mkdir(mode=0o755)
+        store_jar(tmp_path, "example.com", _VALID_JAR)
+        assert stat.S_IMODE(loose.stat().st_mode) == 0o700
+
     def test_store_replaces_previous_jar(self, tmp_path: Path) -> None:
         store_jar(tmp_path, "example.com", _line("example.com", value="old"))
         replacement = _line("example.com", value="new")
