@@ -72,9 +72,11 @@ the real toolbar popup window, and the page is identical either way.
 ### Manual check: the optional-permission prompt
 
 Chrome renders the `chrome.permissions.request` prompt outside any
-automatable surface, so the cookie-capture e2e pre-grants by stubbing the
-API (the grant/decline branches are unit-tested in `src/capture.test.ts`).
-After changes touching capture, verify the real prompt once by hand:
+automatable surface, so the cookie-capture e2e stubs the API: the grant and
+decline branches are both exercised popup-level in
+`tests/e2e/cookies.spec.ts` (`permissions.request` stubbed to true/false).
+Only the real prompt itself is untestable. After changes touching capture,
+verify it once by hand:
 
 1. Pair with a running desktop app, then submit a members-only source so a
    job fails with `download_auth_required` (any logged-out paywalled video

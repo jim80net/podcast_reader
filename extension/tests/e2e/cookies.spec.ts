@@ -12,8 +12,9 @@ import { expect, test } from './fixtures'
  * `chrome.permissions.request` (recording its arguments — the scoping
  * assertion survives) and `chrome.cookies.getAll` (unavailable without a
  * real grant) with fixture cookies before the popup loads. The prompt
- * itself is a documented manual check (extension/README.md); the
- * grant/decline branching is unit-tested (src/capture.test.ts).
+ * itself is a documented manual check (extension/README.md); the grant and
+ * decline branches are both exercised popup-level in this suite (per V3 —
+ * the decline test below stubs `permissions.request` to false).
  */
 
 /** chrome.cookies.Cookie fixtures: a parent-domain httpOnly login cookie and a subdomain session cookie. */
@@ -148,6 +149,68 @@ test('capture pushes a domain-scoped Netscape jar and offers resubmission', asyn
       ).length
     })
     .toBe(1)
+})
+
+test('declining the permission prompt aborts capture: nothing read, nothing pushed (V3)', async ({
+  harness
+}) => {
+  const now = Date.now() / 1000
+  await harness.mock.control('/seed', {
+    jobs: [
+      {
+        id: 'job-decline',
+        source: 'https://media.example.com/clip',
+        title: null,
+        state: 'failed',
+        error: {
+          code: 'download_auth_required',
+          message: 'This source requires authentication to download.',
+          hint: ''
+        },
+        events: [],
+        result: null,
+        created_at: now,
+        updated_at: now
+      }
+    ]
+  })
+
+  const popup = await harness.context.newPage()
+  // Decline path: permissions.request resolves false. chrome.cookies is
+  // deliberately NOT stubbed — without a grant the API is unavailable, so
+  // any read attempt after a decline would throw and fail the test.
+  await popup.addInitScript(() => {
+    Object.defineProperty(chrome.permissions, 'request', { value: async () => false })
+  })
+  await popup.goto(`chrome-extension://${harness.extensionId}/popup.html`)
+  await harness.seedStorage(
+    popup,
+    { port: harness.mock.port, token: harness.mock.token },
+    [
+      {
+        id: 'job-decline',
+        source: 'https://media.example.com/clip',
+        title: null,
+        submitted_at: now,
+        notified: true
+      }
+    ]
+  )
+
+  const row = popup.locator('.job-row[data-job-id="job-decline"]')
+  await expect(row).toHaveAttribute('data-state', 'failed')
+  await popup.click('#capture-job-decline')
+  await expect(row.locator('[role="status"]')).toHaveText(
+    'Permission declined — nothing was read or shared.'
+  )
+  // The affordance remains usable for a second attempt.
+  await expect(popup.locator('#capture-job-decline')).toBeEnabled()
+
+  // Nothing reached the engine: no jar stored, no cookies PUT in the log.
+  const jars = (await (await harness.mock.control('/cookies')).json()) as unknown[]
+  expect(jars).toEqual([])
+  const log = await harness.mock.log()
+  expect(log.filter((entry) => entry.kind === 'cookies-put')).toEqual([])
 })
 
 test('declares the jar under the broadest captured cookie domain (web.de collision, V1)', async ({
