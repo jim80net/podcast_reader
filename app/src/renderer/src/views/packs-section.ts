@@ -15,9 +15,9 @@ import type { PackStatus } from '../../../shared/types'
  * a "Run setup again" entry to the wizard, and the cuda-without-pack
  * advisory (per S4/Q2) — uninstall never mutates `whisper_device`.
  *
- * License attributions from installed manifests are NOT rendered yet: the
- * engine's PackStatus payload does not carry them (see tasks.md 6.3 note);
- * wiring lands with task 8.1 once the engine exposes the notices.
+ * License attributions (task 8.1) render from the engine-sent
+ * `pack.licenses` notices — the installed manifest's when the pack is on
+ * disk, the registry's otherwise; the app stays a renderer of engine state.
  */
 
 export interface PacksSection {
@@ -108,6 +108,8 @@ export function mountPacksSection(container: HTMLElement, getDevice: () => strin
     if (structured !== null) body.append(structured)
     const actions = packActions(pack)
     if (actions !== null) body.append(actions)
+    const licenses = packLicenses(pack)
+    if (licenses !== null) body.append(licenses)
     const actionError = actionErrors.get(pack.id)
     if (actionError !== undefined) {
       body.append(
@@ -122,6 +124,23 @@ export function mountPacksSection(container: HTMLElement, getDevice: () => strin
       },
       body
     )
+  }
+
+  function packLicenses(pack: PackStatus): HTMLElement | null {
+    if (pack.licenses.length === 0) return null
+    const details = el('details', { class: 'pack-licenses' })
+    details.append(el('summary', { text: 'License attributions' }))
+    for (const notice of pack.licenses) {
+      details.append(
+        el(
+          'p',
+          { class: 'pack-license' },
+          el('strong', { text: notice.name }),
+          el('span', { text: ` — ${notice.text}` })
+        )
+      )
+    }
+    return details
   }
 
   function packActions(pack: PackStatus): HTMLElement | null {

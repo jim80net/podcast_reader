@@ -21,6 +21,7 @@ from podcast_reader.engine.pack_manager import PackManager
 from podcast_reader.engine.packs import (
     REGISTRY,
     HardwareInfo,
+    LicenseNotice,
     PackEntry,
     PackFilePin,
 )
@@ -94,7 +95,7 @@ def _pack_entry() -> tuple[PackEntry, dict[str, bytes]]:
         version="rev-api-1",
         component_versions={"model_revision": "rev-api-1"},
         compat={},
-        licenses=[],
+        licenses=[LicenseNotice(name="API Test License", text="API test attribution.")],
     )
     return entry, {pin["url"]: _PACK_CONTENT[pin["path"]] for pin in pins}
 
@@ -1161,6 +1162,11 @@ class TestPacks:
         status = self._packs_by_id(engine)[self.PACK_ID]
         assert status["installed_version"] == "rev-api-1"
         assert status["error"] is None
+
+    def test_packs_payload_carries_license_attributions(self, engine: _Engine) -> None:
+        """Task 8.1: Settings renders the engine-sent license notices."""
+        status = self._packs_by_id(engine)[self.PACK_ID]
+        assert status["licenses"] == [{"name": "API Test License", "text": "API test attribution."}]
 
     def test_install_unknown_pack_404(self, engine: _Engine) -> None:
         response = engine.client.post("/v1/packs/nonsense/install", headers=engine.headers)

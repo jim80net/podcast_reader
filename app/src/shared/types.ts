@@ -171,6 +171,12 @@ export interface PackInstallError {
   message: string
 }
 
+// -- src/podcast_reader/engine/packs.py:62 (LicenseNotice) --
+export interface LicenseNotice {
+  name: string
+  text: string
+}
+
 // -- src/podcast_reader/engine/packs.py:127 (PackStatus) --
 export interface PackStatus {
   id: string
@@ -182,6 +188,9 @@ export interface PackStatus {
   installed_version: string | null
   progress: PackProgress | null
   error: PackInstallError | null
+  // Attribution notices Settings renders (manifest-recorded when installed,
+  // registry otherwise — engine-authoritative either way, task 8.1).
+  licenses: LicenseNotice[]
 }
 
 // -- src/podcast_reader/engine/packs.py:148 (PacksResponse) --

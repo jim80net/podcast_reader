@@ -93,7 +93,8 @@ const PACK_STATUS_KEYS: Record<keyof PackStatus, true> = {
   recommended: true,
   installed_version: true,
   progress: true,
-  error: true
+  error: true,
+  licenses: true
 }
 
 function expectKeySetEquality(payload: object, mirror: Record<string, true>, label: string): void {

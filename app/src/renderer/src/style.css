@@ -523,6 +523,19 @@ a.card:hover {
   color: var(--warn);
 }
 
+.pack-licenses {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.pack-licenses summary {
+  cursor: pointer;
+}
+
+.pack-license {
+  margin: 0.35rem 0 0;
+}
+
 .pack-progress {
   display: flex;
   align-items: center;

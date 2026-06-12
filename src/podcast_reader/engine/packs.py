@@ -125,7 +125,13 @@ class HardwareInfo(TypedDict):
 
 
 class PackStatus(TypedDict):
-    """One pack in the ``GET /v1/packs`` listing."""
+    """One pack in the ``GET /v1/packs`` listing.
+
+    ``licenses`` carries the attribution notices Settings renders (task 8.1):
+    the installed manifest's notices when the pack is on disk (what was
+    actually installed), the registry's otherwise — engine-authoritative
+    either way.
+    """
 
     id: str
     kind: PackKind
@@ -136,6 +142,7 @@ class PackStatus(TypedDict):
     installed_version: str | None
     progress: PackProgress | None
     error: PackInstallError | None
+    licenses: list[LicenseNotice]
 
 
 class PackInstallError(TypedDict):

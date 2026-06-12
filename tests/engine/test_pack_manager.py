@@ -29,6 +29,7 @@ from podcast_reader.engine.pack_manager import (
 )
 from podcast_reader.engine.packs import (
     REGISTRY,
+    LicenseNotice,
     PackEntry,
     PackFilePin,
     pack_dir,
@@ -232,6 +233,7 @@ def _test_entry(
     platforms: list[str] | None = None,
     extract_wheels: bool = False,
     compat: dict[str, str] | None = None,
+    licenses: list[LicenseNotice] | None = None,
 ) -> tuple[PackEntry, dict[str, bytes]]:
     """A synthetic published pack plus its URL->bytes body map."""
     contents = contents if contents is not None else _MODEL_CONTENT
@@ -247,7 +249,7 @@ def _test_entry(
         version="rev-1",
         component_versions={"model_revision": "rev-1"},
         compat=compat if compat is not None else {},
-        licenses=[],
+        licenses=licenses if licenses is not None else [],
     )
     bodies = {pin["url"]: contents[pin["path"]] for pin in pins}
     return entry, bodies
@@ -643,6 +645,46 @@ class TestStartupValidation:
         fresh = _Harness(tmp_path, {entry["id"]: entry}, bodies)
         assert fresh.manager.validate_installed() == {}
         assert fresh.state_of("model-test") == "installed"
+
+
+class TestLicenses:
+    """License attributions ride PackStatus (task 8.1: Settings renders what
+    the engine sends — engine-authoritative)."""
+
+    _NOTICE = LicenseNotice(name="Test License", text="Test attribution text.")
+
+    def test_uninstalled_pack_carries_registry_licenses(self, tmp_path: Path) -> None:
+        entry, bodies = _test_entry(licenses=[self._NOTICE])
+        h = _Harness(tmp_path, {entry["id"]: entry}, bodies)
+        status = h.status_of("model-test")
+        assert status["state"] == "not-installed"
+        assert status["licenses"] == [self._NOTICE]
+
+    def test_installed_pack_carries_manifest_licenses(self, tmp_path: Path) -> None:
+        """Once installed, the manifest (what is actually on disk) is the
+        attribution source — a later registry edit must not rewrite history."""
+        entry, bodies = _test_entry(licenses=[self._NOTICE])
+        h = _Harness(tmp_path, {entry["id"]: entry}, bodies)
+        h.manager.start_worker()
+        try:
+            h.manager.request_install("model-test")
+            assert _wait_for(lambda: h.state_of("model-test") == "installed")
+        finally:
+            h.manager.shutdown()
+        updated_notice = LicenseNotice(name="Updated License", text="New registry text.")
+        updated = dict(entry)
+        updated["licenses"] = [updated_notice]
+        fresh = _Harness(tmp_path, {entry["id"]: dict(updated)}, bodies)  # type: ignore[arg-type]
+        status = fresh.status_of("model-test")
+        assert status["state"] == "installed"
+        assert status["licenses"] == [self._NOTICE]
+
+    def test_unavailable_pack_carries_registry_licenses(self, tmp_path: Path) -> None:
+        entry, bodies = _test_entry(platforms=["win32"], licenses=[self._NOTICE])
+        h = _Harness(tmp_path, {entry["id"]: entry}, bodies, platform="linux")
+        status = h.status_of("model-test")
+        assert status["state"] == "unavailable"
+        assert status["licenses"] == [self._NOTICE]
 
 
 def _wheel_bytes(members: dict[str, bytes]) -> bytes:

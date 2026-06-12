@@ -24,6 +24,7 @@ function pack(partial: Partial<PackStatus> & { id: string }): PackStatus {
     installed_version: null,
     progress: null,
     error: null,
+    licenses: [],
     ...partial
   }
 }

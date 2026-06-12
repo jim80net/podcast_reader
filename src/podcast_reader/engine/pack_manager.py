@@ -381,6 +381,7 @@ class PackManager:
             installed_version=None,
             progress=None,
             error=None,
+            licenses=list(entry["licenses"]),
         )
         if not is_published(entry) or not platform_supported(entry, self._platform):
             status["state"] = "unavailable"
@@ -395,6 +396,9 @@ class PackManager:
         target = pack_dir(self._data_dir, entry)
         manifest = read_manifest(target)
         if manifest is not None:
+            # On-disk packs attribute what was actually installed (task 8.1):
+            # the manifest's recorded notices, not the live registry's.
+            status["licenses"] = list(manifest.get("licenses", []))
             incompat = compat_error(entry, manifest)
             if incompat is not None:
                 status["state"] = "incompatible"

@@ -250,6 +250,15 @@ test.describe('Settings packs section', () => {
     // No advisory while the CUDA pack is installed and usable.
     await expect(harness.window.locator('.cuda-advisory')).toBeHidden()
 
+    // License attributions render from the engine-sent notices (task 8.1).
+    const cudaLicenses = packRow(harness, 'cuda-runtime').locator('.pack-licenses')
+    await expect(cudaLicenses.locator('summary')).toHaveText('License attributions')
+    await cudaLicenses.locator('summary').click()
+    await expect(cudaLicenses.locator('.pack-license')).toHaveCount(2)
+    await expect(cudaLicenses.locator('.pack-license').first()).toContainText('NVIDIA cuBLAS')
+    // Packs without engine-sent notices render no attribution block.
+    await expect(packRow(harness, 'model-tiny').locator('.pack-licenses')).toHaveCount(0)
+
     // Install a model pack; progress state arrives over the event stream.
     await packRow(harness, 'model-tiny').getByRole('button', { name: 'Install' }).click()
     await expect(packRow(harness, 'model-tiny').locator('.pack-state')).toHaveText('installing')

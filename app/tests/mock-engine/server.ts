@@ -90,6 +90,11 @@ interface HardwareInfo {
   gpu_names: string[]
 }
 
+interface LicenseNotice {
+  name: string
+  text: string
+}
+
 interface PackStatus {
   id: string
   kind: string
@@ -100,6 +105,7 @@ interface PackStatus {
   installed_version: string | null
   progress: PackProgress | null
   error: PackInstallError | null
+  licenses: LicenseNotice[]
 }
 
 // ---- state ------------------------------------------------------------------
@@ -149,6 +155,7 @@ function makePack(partial: Partial<PackStatus> & { id: string }): PackStatus {
     installed_version: null,
     progress: null,
     error: null,
+    licenses: [],
     ...partial
   }
 }
@@ -163,7 +170,11 @@ function defaultPacks(): Map<string, PackStatus> {
       size: 1_243_159_663,
       state: 'installed',
       recommended: true,
-      installed_version: '1'
+      installed_version: '1',
+      licenses: [
+        { name: 'NVIDIA cuBLAS', text: 'Mock cuBLAS attribution notice.' },
+        { name: 'NVIDIA cuDNN', text: 'Mock cuDNN attribution notice.' }
+      ]
     }),
     makePack({ id: 'model-tiny', display_name: 'Whisper tiny model', size: 78_203_619 }),
     makePack({ id: 'model-small', display_name: 'Whisper small model', size: 486_212_372 }),
@@ -174,7 +185,8 @@ function defaultPacks(): Map<string, PackStatus> {
       size: 3_090_835_702,
       state: 'installed',
       recommended: true,
-      installed_version: 'mock-rev'
+      installed_version: 'mock-rev',
+      licenses: [{ name: 'MIT (Systran faster-whisper)', text: 'Mock model attribution notice.' }]
     }),
     makePack({
       id: 'diarization',
