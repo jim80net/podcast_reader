@@ -204,6 +204,21 @@ const packs = defaultPacks()
 let jobCounter = 0
 const sseClients = new Set<ServerResponse>()
 
+// Pairing state mirrors engine/pairing.py: single pending code, 300 s TTL,
+// 5-failed-attempt budget, single-use, replaced on every mint. Tests seed a
+// known code via /__mock/seed; /__mock/pairing reads the pending one.
+const PAIR_CODE_ALPHABET = '23456789ABCDEFGHJKMNPQRSTVWXYZ'
+const PAIR_CODE_TTL_S = 300
+const PAIR_MAX_FAILED_ATTEMPTS = 5
+let pairingCode: string | null = null
+let pairingExpiresAt = 0
+let pairingFailedAttempts = 0
+
+// Cookie jars mirror engine/cookies.py storage semantics in memory: domain →
+// jar + created_at. /v1 listing is metadata-only like the real engine; the
+// /__mock/cookies seam exposes jar content to the test runner only.
+const cookieJars = new Map<string, { jar: string; created_at: number }>()
+
 interface LogEntry {
   seq: number
   kind: string
@@ -284,6 +299,83 @@ function validateSettingsPut(body: Record<string, unknown>): string | null {
   return null
 }
 
+function mintPairingCode(code?: string, ttlS = PAIR_CODE_TTL_S): { code: string; expires_at: number } {
+  pairingCode =
+    code ??
+    Array.from(
+      { length: 6 },
+      () => PAIR_CODE_ALPHABET[Math.floor(Math.random() * PAIR_CODE_ALPHABET.length)]
+    ).join('')
+  pairingExpiresAt = nowSeconds() + ttlS
+  pairingFailedAttempts = 0
+  return { code: pairingCode, expires_at: pairingExpiresAt }
+}
+
+function claimPairingCode(code: string): boolean {
+  if (pairingCode === null || nowSeconds() >= pairingExpiresAt) {
+    pairingCode = null
+    return false
+  }
+  if (code !== pairingCode) {
+    pairingFailedAttempts += 1
+    if (pairingFailedAttempts >= PAIR_MAX_FAILED_ATTEMPTS) pairingCode = null
+    return false
+  }
+  pairingCode = null // single-use
+  return true
+}
+
+/**
+ * The engine's single unauthenticated route, mirrored exactly (per U3/U5):
+ * POST only, JSON content type required, http/https Origin rejected
+ * (chrome-extension:// passes), gate rejections never burn the attempt
+ * budget, and every rejection is the same self-authored 403.
+ */
+async function handlePairClaim(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  record('pair-claim-attempt')
+  const reject = (): void => detail(res, 403, 'pairing claim rejected')
+  const mediaType = (req.headers['content-type'] ?? '').split(';')[0]?.trim().toLowerCase()
+  if (mediaType !== 'application/json') return reject()
+  const originScheme = (req.headers.origin ?? '').split(':')[0]?.trim().toLowerCase()
+  if (originScheme === 'http' || originScheme === 'https') return reject()
+  let body: Record<string, unknown>
+  try {
+    body = await readBody(req)
+  } catch {
+    return reject()
+  }
+  const code = body.code
+  if (typeof code !== 'string' || !claimPairingCode(code)) return reject()
+  sendJson(res, 200, { token })
+}
+
+/** Lightweight mirror of engine/cookies.py validate_jar (suffix-match, per U4). */
+function validateJar(domain: string, jar: string): string | null {
+  if (!/^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(domain)) {
+    return 'domain must be a bare lowercase hostname (e.g. example.com)'
+  }
+  if (Buffer.byteLength(jar) > 1024 * 1024) return 'cookie jar exceeds the 1 MB size cap'
+  let cookieLines = 0
+  const lines = jar.split('\n')
+  for (let i = 0; i < lines.length; i += 1) {
+    let line = lines[i] ?? ''
+    if (line.endsWith('\r')) line = line.slice(0, -1)
+    if (line.startsWith('#HttpOnly_')) line = line.slice('#HttpOnly_'.length)
+    else if (line.trim() === '' || line.startsWith('#')) continue
+    const fields = line.split('\t')
+    if (fields.length !== 7) {
+      return `line ${i + 1}: not a Netscape cookie line (expected 7 tab-separated fields)`
+    }
+    const cookieDomain = (fields[0] ?? '').toLowerCase().replace(/^\./, '')
+    if (cookieDomain !== domain && !cookieDomain.endsWith(`.${domain}`)) {
+      return `line ${i + 1}: cookie domain does not match the declared domain '${domain}'`
+    }
+    cookieLines += 1
+  }
+  if (cookieLines === 0) return 'cookie jar contains no cookie lines'
+  return null
+}
+
 // ---- /__mock control surface ---------------------------------------------------
 
 async function handleControl(
@@ -316,7 +408,34 @@ async function handleControl(
     for (const pack of (body.packs as PackStatus[] | undefined) ?? []) {
       packs.set(pack.id, { ...(packs.get(pack.id) ?? makePack({ id: pack.id })), ...pack })
     }
+    if (body.pairing !== undefined) {
+      // Script a known pairing code (e2e drives the popup with it).
+      const pairing = body.pairing as { code: string; ttlS?: number }
+      mintPairingCode(pairing.code, pairing.ttlS ?? PAIR_CODE_TTL_S)
+    }
+    for (const jar of (body.cookieJars as { domain: string; jar: string }[] | undefined) ?? []) {
+      cookieJars.set(jar.domain, { jar: jar.jar, created_at: nowSeconds() })
+    }
     res.writeHead(204).end()
+    return
+  }
+  if (req.method === 'GET' && path === '/__mock/pairing') {
+    // The pending code, readable by the test runner only (the real engine
+    // never exposes it; e2e needs it to drive the popup's claim form).
+    sendJson(res, 200, {
+      code: pairingCode,
+      expires_at: pairingExpiresAt,
+      failed_attempts: pairingFailedAttempts
+    })
+    return
+  }
+  if (req.method === 'GET' && path === '/__mock/cookies') {
+    // Jar content, test-runner-only: e2e asserts what the extension pushed.
+    sendJson(
+      res,
+      200,
+      [...cookieJars.entries()].map(([domain, entry]) => ({ domain, ...entry }))
+    )
     return
   }
   if (req.method === 'POST' && path === '/__mock/pack') {
@@ -363,6 +482,11 @@ async function handleControl(
 // ---- /v1 surface ----------------------------------------------------------------
 
 async function handleV1(req: IncomingMessage, res: ServerResponse, path: string): Promise<void> {
+  // (method, path) auth exemption exactly like the real middleware (per U5):
+  // only POST /v1/pair/claim bypasses the bearer check.
+  if (req.method === 'POST' && path === '/v1/pair/claim') {
+    return handlePairClaim(req, res)
+  }
   const auth = req.headers.authorization ?? ''
   if (auth !== `Bearer ${token}`) {
     record('unauthorized', `${req.method} ${path}`)
@@ -370,6 +494,43 @@ async function handleV1(req: IncomingMessage, res: ServerResponse, path: string)
     return
   }
   record('request', `${req.method} ${path}`)
+
+  if (req.method === 'POST' && path === '/v1/pair') {
+    // NEVER log the code — only that a mint happened (engine parity).
+    record('pair-mint')
+    sendJson(res, 200, mintPairingCode())
+    return
+  }
+  if (req.method === 'PUT' && path === '/v1/cookies') {
+    const body = await readBody(req)
+    const domain = body.domain as string
+    const jar = body.jar as string
+    const invalid = validateJar(domain, jar)
+    if (invalid !== null) return detail(res, 400, invalid)
+    record('cookies-put', domain)
+    cookieJars.set(domain, { jar, created_at: nowSeconds() })
+    res.writeHead(204).end()
+    return
+  }
+  if (req.method === 'GET' && path === '/v1/cookies') {
+    sendJson(
+      res,
+      200,
+      [...cookieJars.keys()]
+        .sort()
+        .map((domain) => ({ domain, created_at: cookieJars.get(domain)?.created_at ?? 0 }))
+    )
+    return
+  }
+  const cookieMatch = /^\/v1\/cookies\/([^/]+)$/.exec(path)
+  if (req.method === 'DELETE' && cookieMatch !== null) {
+    const domain = decodeURIComponent(cookieMatch[1] ?? '')
+    if (!cookieJars.has(domain)) return detail(res, 404, 'no cookie jar stored for that domain')
+    record('cookies-delete', domain)
+    cookieJars.delete(domain)
+    res.writeHead(204).end()
+    return
+  }
 
   if (req.method === 'GET' && path === '/v1/health') {
     sendJson(res, 200, { version: '0.3.0', token_fingerprint: fingerprint(token) })
