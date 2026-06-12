@@ -132,6 +132,21 @@ class TestRegistryData:
         assert entry["files"] is None
         assert is_published(entry) is False
 
+    def test_diarization_carries_the_smoked_component_pins(self) -> None:
+        """Task 5.1's GO freeze fixes the shipped stack: the entry carries the
+        real component/compat shape behind the unpublished flag, so 7.5 only
+        flips `files` to the published pins."""
+        entry = REGISTRY["diarization"]
+        assert entry["install_dir"] == "workers/diarization"
+        assert entry["component_versions"]["pyannote_audio"] == "4.0.4"
+        assert entry["component_versions"]["torch"].startswith("2.12")
+        assert entry["component_versions"]["worker_contract"] == "1"
+        # startup validation has something real to check once installed
+        assert entry["compat"] == {"worker_contract": "1"}
+        names = " ".join(notice["name"] for notice in entry["licenses"])
+        assert "pyannote" in names
+        assert "PyTorch" in names
+
     def test_all_other_packs_are_published(self) -> None:
         for pack_id, entry in REGISTRY.items():
             if pack_id != "diarization":
