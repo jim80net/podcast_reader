@@ -69,7 +69,11 @@ export function mountCookiesSection(container: HTMLElement): CookiesSection {
       window.api
         .deleteCookieJar(jar.domain)
         .then(() => {
-          if (!disposed) void load()
+          if (disposed) return
+          // Re-enable before the refresh: a transient refresh failure must
+          // not leave the row permanently disabled (cubic finding).
+          deleteButton.disabled = false
+          void load()
         })
         .catch((err: unknown) => {
           if (disposed) return
