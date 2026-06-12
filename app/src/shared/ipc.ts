@@ -51,7 +51,15 @@ export const PUSH_CHANNELS = {
 
 export type EngineStatus =
   | { state: 'starting' }
-  | { state: 'ready'; port: number; version: string; adopted: boolean; pid: number }
+  | {
+      state: 'ready'
+      port: number
+      version: string
+      adopted: boolean
+      pid: number
+      /** Providers whose vaulted key failed to push at startup (absent when all succeeded). */
+      keyPushFailures?: string[]
+    }
   | { state: 'failed'; message: string }
   | { state: 'stopped' }
 

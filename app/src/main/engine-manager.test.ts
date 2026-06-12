@@ -26,6 +26,8 @@ interface World {
 function makeWorld(
   opts: {
     vaultKeys?: Record<string, string>
+    /** Providers whose putKey push rejects. */
+    putKeyFails?: string[]
     ensureFails?: boolean
     handle?: Partial<EngineHandle>
   } = {}
@@ -37,6 +39,7 @@ function makeWorld(
   const client = {
     putKey: async (provider: string, key: string) => {
       calls.push(`putKey:${provider}=${key}`)
+      if (opts.putKeyFails?.includes(provider)) throw new Error(`engine rejected ${provider}`)
     },
     shutdown: async () => {
       calls.push('shutdown')
@@ -103,6 +106,44 @@ describe('EngineManager.start', () => {
       expect(pushIndex).toBeGreaterThanOrEqual(0)
       expect(pushIndex).toBeLessThan(readyCallIndex)
     }
+  })
+
+  it('attempts every vault key and surfaces push failures by provider on the ready status', async () => {
+    const world = makeWorld({
+      vaultKeys: { anthropic: 'sk-1', openai: 'sk-2' },
+      putKeyFails: ['anthropic']
+    })
+    await world.manager.start()
+    // the failed push does not stop the remaining keys
+    expect(world.calls).toContain('putKey:anthropic=sk-1')
+    expect(world.calls).toContain('putKey:openai=sk-2')
+    // ...but the failure is visible, not silently logged away
+    expect(world.manager.status).toEqual({
+      state: 'ready',
+      port: 50000,
+      pid: 4242,
+      version: '0.2.0',
+      adopted: true,
+      keyPushFailures: ['anthropic']
+    })
+    const ready = world.sends.find(
+      (s) => s.channel === 'engine:status' && (s.payload as { state: string }).state === 'ready'
+    )
+    expect((ready?.payload as { keyPushFailures?: string[] }).keyPushFailures).toEqual([
+      'anthropic'
+    ])
+  })
+
+  it('omits keyPushFailures from the ready status when every push succeeds', async () => {
+    const world = makeWorld({ vaultKeys: { anthropic: 'sk-1' } })
+    await world.manager.start()
+    expect(world.manager.status).toEqual({
+      state: 'ready',
+      port: 50000,
+      pid: 4242,
+      version: '0.2.0',
+      adopted: true
+    })
   })
 
   it('broadcasts starting, then ready with the handle facts', async () => {

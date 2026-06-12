@@ -70,12 +70,16 @@ export class EngineManager {
 
     // Push-at-engine-start (design decision 5): every vaulted key reaches
     // engine memory BEFORE the renderer hears "ready" — no job submitted
-    // after readiness can miss its key.
+    // after readiness can miss its key. A failed push must stay visible
+    // (the vaulted key silently never reaching the engine looks like a
+    // missing key at job time), so failures ride on the ready status.
+    const keyPushFailures: string[] = []
     for (const [provider, key] of Object.entries(this.deps.vault.keys())) {
       try {
         await client.putKey(provider, key)
       } catch (err) {
         this.deps.log(`key push for ${provider} failed: ${String(err)}`)
+        keyPushFailures.push(provider)
       }
     }
 
@@ -84,7 +88,8 @@ export class EngineManager {
       port: handle.port,
       pid: handle.pid,
       version: handle.version,
-      adopted: handle.adopted
+      adopted: handle.adopted,
+      ...(keyPushFailures.length > 0 ? { keyPushFailures } : {})
     })
 
     this.stream = this.deps.createStream(client, {
