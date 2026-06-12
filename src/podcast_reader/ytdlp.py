@@ -1,10 +1,32 @@
-"""Download audio from any yt-dlp-supported platform."""
+"""Download audio from any yt-dlp-supported platform.
+
+A failed download raises the structured ``PipelineError("download_failed",
+...)`` (per S7) — extractor breakage is an expected, user-explainable
+failure, not an internal error. When the resolved yt-dlp is the *managed*
+copy (it resides in the user-data tools dir), a failure triggers one
+``yt-dlp -U`` self-update and exactly one retry (per Q3): the gate is
+residence alone — no engine/CLI flag — so any caller (engine job or CLI)
+heals identically whenever the managed copy is in play, while PATH/pip
+copies (dev environments) are never touched.
+"""
 
 from __future__ import annotations
 
+import time
 from pathlib import Path  # noqa: TC003 — used at runtime in glob/return
+from typing import TYPE_CHECKING
 
+from podcast_reader.engine.managed_tools import (
+    is_managed,
+    record_ytdlp_update,
+    run_ytdlp_self_update,
+)
+from podcast_reader.engine.settings import data_dir_path
 from podcast_reader.tools import resolve_tool, run_child
+from podcast_reader.types import PipelineError, PipelineEvent
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 def build_download_args(url: str, output_dir: Path, cookies: Path | None = None) -> list[str]:
@@ -34,19 +56,56 @@ def fetch_title(url: str) -> str:
     return result.stdout.strip()
 
 
-def download_audio(url: str, output_dir: Path, cookies: Path | None = None) -> Path:
+def download_audio(
+    url: str,
+    output_dir: Path,
+    cookies: Path | None = None,
+    on_event: Callable[[PipelineEvent], None] | None = None,
+) -> Path:
     """Download and extract audio as mp3 from a URL.
 
-    Returns the path to the downloaded mp3 file.
+    Returns the path to the downloaded mp3 file. A yt-dlp failure raises a
+    structured ``download_failed`` error (per S7); when the resolved yt-dlp
+    is the managed user-data copy, the failure first triggers a single
+    ``yt-dlp -U`` + retry (per Q3) with a warning event — extractor breakage
+    heals in-job without an app release. A second failure surfaces the
+    structured error; there are no further retries.
     """
+    try:
+        return _download_once(url, output_dir, cookies)
+    except PipelineError:
+        binary = resolve_tool("yt-dlp")
+        if not is_managed(binary):
+            raise
+        if on_event is not None:
+            on_event(
+                PipelineEvent(
+                    kind="warning",
+                    step="download",
+                    message=(
+                        "yt-dlp download failed; self-updating the managed yt-dlp and retrying once"
+                    ),
+                    data={"code": "ytdlp_self_update"},
+                )
+            )
+        version = run_ytdlp_self_update(binary)
+        if version is not None:
+            # Keep the recorded version current so a later, older bundle seed
+            # never clobbers the self-updated copy (newer-wins seeding).
+            record_ytdlp_update(data_dir_path(), version, time.time())
+        return _download_once(url, output_dir, cookies)
+
+
+def _download_once(url: str, output_dir: Path, cookies: Path | None) -> Path:
+    """One download attempt: run yt-dlp, locate the mp3, write the URL marker."""
     args = build_download_args(url, output_dir, cookies)
     result = run_child(args)
     if result.returncode != 0:
         stderr = result.stderr.strip()
-        msg = f"yt-dlp failed: {stderr}"
+        hint = ""
         if "login" in stderr.lower() or "auth" in stderr.lower():
-            msg += "\nHint: set YT_DLP_COOKIES to a cookies file path for authenticated content."
-        raise RuntimeError(msg)
+            hint = "Set YT_DLP_COOKIES to a cookies file path for authenticated content."
+        raise PipelineError("download_failed", f"yt-dlp failed: {stderr}", hint)
 
     # Find the downloaded mp3 file
     mp3_files = sorted(output_dir.glob("*.mp3"), key=lambda p: p.stat().st_mtime, reverse=True)

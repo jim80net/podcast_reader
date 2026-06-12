@@ -6,7 +6,7 @@ import json
 import os
 import sys
 from typing import TYPE_CHECKING
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -228,7 +228,9 @@ class TestRunPipelineURL:
         audio_path = tmp_path / "video_id.mp3"
         json_path = tmp_path / "video_id.json"
 
-        def fake_download(url: str, out_dir: Path, *, cookies: Path | None = None) -> Path:
+        def fake_download(
+            url: str, out_dir: Path, *, cookies: Path | None = None, on_event: object = None
+        ) -> Path:
             audio_path.write_text("fake audio")
             return audio_path
 
@@ -245,7 +247,7 @@ class TestRunPipelineURL:
         )
 
         mock_download.assert_called_once_with(
-            "https://x.com/user/status/123456", tmp_path, cookies=None
+            "https://x.com/user/status/123456", tmp_path, cookies=None, on_event=ANY
         )
         mock_transcribe.assert_called_once()
         assert (tmp_path / "video_id.html").exists()
@@ -327,7 +329,9 @@ class TestRunPipelineURL:
 
         audio_path = tmp_path / "video_id.mp3"
 
-        def fake_download(url: str, out_dir: Path, *, cookies: Path | None = None) -> Path:
+        def fake_download(
+            url: str, out_dir: Path, *, cookies: Path | None = None, on_event: object = None
+        ) -> Path:
             audio_path.write_text("fake audio")
             return audio_path
 
@@ -1076,6 +1080,64 @@ class TestRunPipelineFrozenWorkerPath:
             e for e in events if e["kind"] == "step_started" and e["step"] == "transcribe"
         )
         assert "whisper-worker" in started["message"]
+
+
+class TestRunPipelineDownloadSelfHeal:
+    """Task 4.3: the failure-triggered yt-dlp self-update through the real
+    pipeline — the heal happens inside the download step and the warning
+    reaches the pipeline's on_event consumer."""
+
+    @patch("podcast_reader.pipeline._wsl_path", return_value=None)
+    @patch("podcast_reader.pipeline.build_html", return_value="<html>healed</html>")
+    @patch("podcast_reader.pipeline.transcribe")
+    def test_extractor_breakage_heals_with_managed_ytdlp(
+        self,
+        mock_transcribe: MagicMock,
+        _mock_build_html: MagicMock,
+        _mock_wsl: MagicMock,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import subprocess
+
+        data = tmp_path / "data"
+        monkeypatch.setenv("PODCAST_READER_DATA_DIR", str(data))
+        binary = data / "tools" / "yt-dlp"
+        binary.parent.mkdir(parents=True)
+        binary.touch()
+        out_dir = tmp_path / "out"
+        out_dir.mkdir()
+        downloads: list[list[str]] = []
+
+        def fake_download_run(args: list[str]) -> subprocess.CompletedProcess[str]:
+            downloads.append(args)
+            if len(downloads) == 1:
+                return subprocess.CompletedProcess(args, 1, "", "ERROR: unable to extract")
+            (out_dir / "123456.mp3").touch()
+            return subprocess.CompletedProcess(args, 0, "", "")
+
+        def write_json(**kwargs: object) -> None:
+            (out_dir / "123456.json").write_text(json.dumps(_SAMPLE_SEGMENTS))
+
+        mock_transcribe.side_effect = write_json
+        events: list[PipelineEvent] = []
+        with (
+            patch("podcast_reader.ytdlp.resolve_tool", return_value=str(binary)),
+            patch("podcast_reader.ytdlp.run_child", side_effect=fake_download_run),
+            patch(
+                "podcast_reader.engine.managed_tools.run_child",
+                return_value=subprocess.CompletedProcess([], 0, "2026.06.06\n", ""),
+            ),
+        ):
+            result = run_pipeline(
+                _request(input_arg="https://x.com/user/status/123456", output_dir=out_dir),
+                on_event=events.append,
+            )
+
+        assert result["html_path"] == str(out_dir / "123456.html")
+        assert len(downloads) == 2
+        warnings = [e for e in events if e["kind"] == "warning"]
+        assert any(e["data"].get("code") == "ytdlp_self_update" for e in warnings)
 
 
 class TestRunPipelineYtdlpIntegration:

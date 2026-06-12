@@ -163,7 +163,7 @@ def run_pipeline(
             _emit(on_event, "step_finished", "download", "", {"cached": True})
         else:
             _emit(on_event, "step_started", "download", "Downloading with yt-dlp...", {})
-            audio_path = download_audio(source, output_dir, cookies=cookies)
+            audio_path = download_audio(source, output_dir, cookies=cookies, on_event=on_event)
             _emit(on_event, "step_finished", "download", "", {})
         stem = audio_path.stem
         json_path = output_dir / f"{stem}.json"
