@@ -6,22 +6,40 @@ All downloads run through ``httpx.MockTransport`` — never the network.
 from __future__ import annotations
 
 import hashlib
+import io
+import threading
+import time
+import zipfile
 from typing import TYPE_CHECKING
 
 import httpx
 import pytest
 
+from podcast_reader.engine.events import EventBus
 from podcast_reader.engine.pack_manager import (
     InstallAbortedError,
     PackDownloadError,
+    PackInstallingError,
+    PackManager,
+    PackUnavailableError,
+    UnknownPackError,
     discard_stale_partials,
     download_file,
     partial_path,
 )
-from podcast_reader.engine.packs import PackFilePin
+from podcast_reader.engine.packs import (
+    REGISTRY,
+    PackEntry,
+    PackFilePin,
+    pack_dir,
+    read_manifest,
+)
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Iterator
     from pathlib import Path
+
+    from podcast_reader.engine.packs import PackManifest
 
 
 def _pin(content: bytes, path: str = "file.bin") -> PackFilePin:
@@ -184,3 +202,500 @@ class TestStalePartials:
         other.write_text("keep me")
         discard_stale_partials(tmp_path, set())
         assert other.exists()
+
+
+# ---------------------------------------------------------------------------
+# PackManager (installer thread, atomic install, manifest-first uninstall,
+# startup validation)
+# ---------------------------------------------------------------------------
+
+
+def _wait_for(predicate: Callable[[], bool], timeout: float = 10.0) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.01)
+    return predicate()
+
+
+_MODEL_CONTENT = {
+    "model.bin": b"model-weights-bytes" * 10,
+    "config.json": b'{"model": true}',
+}
+
+
+def _test_entry(
+    pack_id: str = "model-test",
+    *,
+    contents: dict[str, bytes] | None = None,
+    platforms: list[str] | None = None,
+    extract_wheels: bool = False,
+    compat: dict[str, str] | None = None,
+) -> tuple[PackEntry, dict[str, bytes]]:
+    """A synthetic published pack plus its URL->bytes body map."""
+    contents = contents if contents is not None else _MODEL_CONTENT
+    pins = [_pin(body, path=name) for name, body in contents.items()]
+    entry = PackEntry(
+        id=pack_id,
+        kind="model",
+        display_name="Test pack",
+        platforms=platforms,
+        install_dir=f"models/{pack_id}",
+        extract_wheels=extract_wheels,
+        files=pins,
+        version="rev-1",
+        component_versions={"model_revision": "rev-1"},
+        compat=compat if compat is not None else {},
+        licenses=[],
+    )
+    bodies = {pin["url"]: contents[pin["path"]] for pin in pins}
+    return entry, bodies
+
+
+class _Harness:
+    """PackManager + mock transport + a subscribed bus queue."""
+
+    def __init__(
+        self,
+        data_dir: Path,
+        registry: dict[str, PackEntry],
+        bodies: dict[str, bytes],
+        *,
+        platform: str = "linux",
+    ) -> None:
+        self.requests: list[httpx.Request] = []
+        self.gate: threading.Event | None = None
+        self.entered = threading.Event()
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            self.entered.set()
+            if self.gate is not None:
+                assert self.gate.wait(timeout=10)
+            self.requests.append(request)
+            body = bodies[str(request.url)]
+            range_header = request.headers.get("range")
+            if range_header:
+                start = int(range_header.removeprefix("bytes=").rstrip("-"))
+                return httpx.Response(206, content=body[start:])
+            return httpx.Response(200, content=body)
+
+        self.bus = EventBus()
+        self.events = self.bus.subscribe()
+        self.manager = PackManager(
+            data_dir,
+            bus=self.bus,
+            registry=registry,
+            transport=httpx.MockTransport(handler),
+            platform=platform,
+            progress_step=1,
+        )
+
+    def drain_events(self) -> list[dict[str, object]]:
+        out: list[dict[str, object]] = []
+        while True:
+            try:
+                out.append(dict(self.events.get_nowait()))
+            except Exception:
+                return out
+
+    def state_of(self, pack_id: str) -> str:
+        for status in self.manager.statuses():
+            if status["id"] == pack_id:
+                return status["state"]
+        raise AssertionError(f"pack {pack_id} not listed")
+
+    def status_of(self, pack_id: str) -> dict[str, object]:
+        for status in self.manager.statuses():
+            if status["id"] == pack_id:
+                return dict(status)
+        raise AssertionError(f"pack {pack_id} not listed")
+
+
+@pytest.fixture
+def harness(tmp_path: Path) -> Iterator[_Harness]:
+    entry, bodies = _test_entry()
+    h = _Harness(tmp_path, {entry["id"]: entry}, bodies)
+    h.manager.start_worker()
+    yield h
+    if h.gate is not None:
+        h.gate.set()
+    h.manager.shutdown()
+
+
+class TestInstall:
+    def test_install_places_files_and_writes_manifest_last(
+        self, harness: _Harness, tmp_path: Path
+    ) -> None:
+        harness.manager.request_install("model-test")
+        assert _wait_for(lambda: harness.state_of("model-test") == "installed")
+        target = tmp_path / "models" / "model-test"
+        for name, body in _MODEL_CONTENT.items():
+            assert (target / name).read_bytes() == body
+        manifest = read_manifest(target)
+        assert manifest is not None
+        assert manifest["id"] == "model-test"
+        assert manifest["version"] == "rev-1"
+        assert {f["path"] for f in manifest["files"]} == set(_MODEL_CONTENT)
+        status = harness.status_of("model-test")
+        assert status["installed_version"] == "rev-1"
+
+    def test_installed_survives_restart(self, harness: _Harness, tmp_path: Path) -> None:
+        """Spec scenario: Compatible packs pass silently — a fresh manager
+        derives installed state from disk."""
+        harness.manager.request_install("model-test")
+        assert _wait_for(lambda: harness.state_of("model-test") == "installed")
+        entry, bodies = _test_entry()
+        fresh = _Harness(tmp_path, {entry["id"]: entry}, bodies)
+        assert fresh.state_of("model-test") == "installed"
+
+    def test_pack_events_flow_with_pack_id_and_never_job_id(self, harness: _Harness) -> None:
+        """Spec scenario: Job event consumers unaffected (per Q5) — pack
+        events are self-describing by kind, carry pack_id, and MUST NOT
+        carry a job_id field."""
+        harness.manager.request_install("model-test")
+        assert _wait_for(lambda: harness.state_of("model-test") == "installed")
+        events = harness.drain_events()
+        kinds = {e["kind"] for e in events}
+        assert "pack_state" in kinds
+        assert "pack_progress" in kinds
+        for event in events:
+            data = event["data"]
+            assert isinstance(data, dict)
+            assert data["pack_id"] == "model-test"
+            assert "job_id" not in data, f"pack event leaked job_id: {event}"
+
+    def test_progress_events_report_monotonic_bytes(self, harness: _Harness) -> None:
+        """Spec scenario: Progress observable live."""
+        harness.manager.request_install("model-test")
+        assert _wait_for(lambda: harness.state_of("model-test") == "installed")
+        progress = [e for e in harness.drain_events() if e["kind"] == "pack_progress"]
+        assert progress
+        sizes = [e["data"]["bytes"] for e in progress]  # type: ignore[index]
+        assert sizes == sorted(sizes)
+        total = sum(len(b) for b in _MODEL_CONTENT.values())
+        assert progress[-1]["data"]["total"] == total  # type: ignore[index]
+
+    def test_duplicate_request_while_installing_is_idempotent(self, harness: _Harness) -> None:
+        """Spec scenario: Duplicate install request is idempotent — no
+        second download starts."""
+        harness.gate = threading.Event()
+        harness.manager.request_install("model-test")
+        assert harness.entered.wait(timeout=10)
+        assert harness.state_of("model-test") == "installing"
+        harness.manager.request_install("model-test")  # idempotent, no error
+        harness.gate.set()
+        assert _wait_for(lambda: harness.state_of("model-test") == "installed")
+        urls = [str(r.url) for r in harness.requests]
+        assert len(urls) == len(set(urls)), f"a file downloaded twice: {urls}"
+
+    def test_request_for_installed_pack_does_no_work(self, harness: _Harness) -> None:
+        harness.manager.request_install("model-test")
+        assert _wait_for(lambda: harness.state_of("model-test") == "installed")
+        first_count = len(harness.requests)
+        harness.manager.request_install("model-test")
+        time.sleep(0.1)  # give a wrongly-enqueued install time to surface
+        assert len(harness.requests) == first_count
+
+    def test_unknown_pack_raises(self, harness: _Harness) -> None:
+        with pytest.raises(UnknownPackError):
+            harness.manager.request_install("nonsense")
+        with pytest.raises(UnknownPackError):
+            harness.manager.uninstall("nonsense")
+
+    def test_unpublished_pack_not_installable(self, tmp_path: Path) -> None:
+        """Spec scenario: Unpublished pack is not installable (per S5) —
+        against the real registry's diarization entry."""
+        manager = PackManager(tmp_path, registry=REGISTRY, platform="linux")
+        with pytest.raises(PackUnavailableError):
+            manager.request_install("diarization")
+        states = {s["id"]: s["state"] for s in manager.statuses()}
+        assert states["diarization"] == "unavailable"
+
+    def test_platform_gated_pack_not_installable(self, tmp_path: Path) -> None:
+        """Spec scenario: Platform-gated pack excluded — CUDA off-Windows."""
+        manager = PackManager(tmp_path, registry=REGISTRY, platform="darwin")
+        with pytest.raises(PackUnavailableError):
+            manager.request_install("cuda-runtime")
+        states = {s["id"]: s["state"] for s in manager.statuses()}
+        assert states["cuda-runtime"] == "unavailable"
+
+    def test_sha_mismatch_marks_failed_without_manifest(self, tmp_path: Path) -> None:
+        """Spec scenario: Hash mismatch fails closed (manager level)."""
+        entry, bodies = _test_entry()
+        tampered = {url: b"tampered!" + body for url, body in bodies.items()}
+        h = _Harness(tmp_path, {entry["id"]: entry}, tampered)
+        h.manager.start_worker()
+        try:
+            h.manager.request_install("model-test")
+            assert _wait_for(lambda: h.state_of("model-test") == "failed")
+            status = h.status_of("model-test")
+            error = status["error"]
+            assert isinstance(error, dict)
+            assert error["code"] == "verification_failed"
+            assert "sha256" in str(error["message"])
+            assert read_manifest(pack_dir(tmp_path, entry)) is None
+            failed_events = [
+                e
+                for e in h.drain_events()
+                if e["kind"] == "pack_state" and e["data"]["state"] == "failed"  # type: ignore[index]
+            ]
+            assert failed_events
+        finally:
+            h.manager.shutdown()
+
+    def test_failed_install_can_be_retried(self, tmp_path: Path) -> None:
+        entry, bodies = _test_entry()
+        h = _Harness(tmp_path, {entry["id"]: entry}, bodies)
+        # first attempt fails: poison one body via a mutable mapping
+        poisoned = dict(bodies)
+        first_url = next(iter(bodies))
+        poisoned[first_url] = b"wrong-bytes"
+        h2 = _Harness(tmp_path, {entry["id"]: entry}, poisoned)
+        h2.manager.start_worker()
+        try:
+            h2.manager.request_install("model-test")
+            assert _wait_for(lambda: h2.state_of("model-test") == "failed")
+        finally:
+            h2.manager.shutdown()
+        # retry against the healthy host succeeds and clears the error
+        h.manager.start_worker()
+        try:
+            h.manager.request_install("model-test")
+            assert _wait_for(lambda: h.state_of("model-test") == "installed")
+            assert h.status_of("model-test")["error"] is None
+        finally:
+            h.manager.shutdown()
+
+
+class TestResumeAndStaging:
+    def test_crash_mid_install_leaves_no_phantom_pack(self, tmp_path: Path) -> None:
+        """Spec scenario: Crash mid-install leaves no phantom pack — files
+        without a manifest are not installed."""
+        entry, bodies = _test_entry()
+        target = pack_dir(tmp_path, entry)
+        target.mkdir(parents=True)
+        (target / "model.bin").write_bytes(b"staged-before-crash")
+        h = _Harness(tmp_path, {entry["id"]: entry}, bodies)
+        assert h.state_of("model-test") == "not-installed"
+
+    def test_partial_download_surfaces_as_resumable(self, tmp_path: Path) -> None:
+        """Spec scenario: Partial download surfaces as resumable."""
+        entry, bodies = _test_entry()
+        h = _Harness(tmp_path, {entry["id"]: entry}, bodies)
+        pin = entry["files"][0]  # type: ignore[index]
+        staging = h.manager.staging_dir("model-test")
+        staging.mkdir(parents=True)
+        partial_path(staging, pin).write_bytes(b"first-bytes")
+        assert h.state_of("model-test") == "resumable"
+
+    def test_reinstall_resumes_from_partial_offset(self, tmp_path: Path) -> None:
+        """Spec scenario: Interrupted download resumes (manager level)."""
+        entry, bodies = _test_entry()
+        h = _Harness(tmp_path, {entry["id"]: entry}, bodies)
+        pin = entry["files"][0]  # type: ignore[index]
+        body = bodies[pin["url"]]
+        staging = h.manager.staging_dir("model-test")
+        staging.mkdir(parents=True)
+        partial_path(staging, pin).write_bytes(body[:10])
+        h.manager.start_worker()
+        try:
+            h.manager.request_install("model-test")
+            assert _wait_for(lambda: h.state_of("model-test") == "installed")
+        finally:
+            h.manager.shutdown()
+        ranged = [r.headers.get("range") for r in h.requests if str(r.url) == pin["url"]]
+        assert ranged == ["bytes=10-"]
+
+    def test_stale_partial_discarded_at_install_start(self, tmp_path: Path) -> None:
+        """Spec scenario: Stale partial discarded after a pin bump (per S2,
+        manager level) — the stale partial never resumes."""
+        entry, bodies = _test_entry()
+        h = _Harness(tmp_path, {entry["id"]: entry}, bodies)
+        staging = h.manager.staging_dir("model-test")
+        staging.mkdir(parents=True)
+        stale = staging / ("ff" * 32 + ".part")
+        stale.write_bytes(b"bytes-of-the-previous-revision")
+        h.manager.start_worker()
+        try:
+            h.manager.request_install("model-test")
+            assert _wait_for(lambda: h.state_of("model-test") == "installed")
+        finally:
+            h.manager.shutdown()
+        assert not stale.exists()
+        assert all(r.headers.get("range") is None for r in h.requests)
+
+
+class TestUninstall:
+    def _install(self, harness: _Harness) -> None:
+        harness.manager.request_install("model-test")
+        assert _wait_for(lambda: harness.state_of("model-test") == "installed")
+
+    def test_uninstall_removes_manifest_and_files(self, harness: _Harness, tmp_path: Path) -> None:
+        """Spec scenario: Uninstall removes the pack."""
+        self._install(harness)
+        harness.manager.uninstall("model-test")
+        target = tmp_path / "models" / "model-test"
+        assert read_manifest(target) is None
+        for name in _MODEL_CONTENT:
+            assert not (target / name).exists()
+        assert harness.state_of("model-test") == "not-installed"
+
+    def test_uninstall_deletes_manifest_first(
+        self, harness: _Harness, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Per S1: the manifest goes first — even when file removal dies
+        mid-way, the pack is already atomically not-installed."""
+        self._install(harness)
+
+        def boom(pack_dir_path: Path, manifest: PackManifest) -> None:
+            raise OSError("file removal interrupted")
+
+        monkeypatch.setattr(PackManager, "_remove_files", staticmethod(boom))
+        with pytest.raises(OSError, match="interrupted"):
+            harness.manager.uninstall("model-test")
+        target = tmp_path / "models" / "model-test"
+        assert read_manifest(target) is None  # manifest already gone
+        assert (target / "model.bin").exists()  # files orphaned, pack not installed
+        assert harness.state_of("model-test") == "not-installed"
+
+    def test_uninstall_while_installing_is_409(self, harness: _Harness) -> None:
+        """Spec scenario: Uninstall refused while installing."""
+        harness.gate = threading.Event()
+        harness.manager.request_install("model-test")
+        assert harness.entered.wait(timeout=10)
+        with pytest.raises(PackInstallingError):
+            harness.manager.uninstall("model-test")
+        harness.gate.set()
+        assert _wait_for(lambda: harness.state_of("model-test") == "installed")
+
+    def test_uninstall_not_installed_is_idempotent(self, harness: _Harness) -> None:
+        harness.manager.uninstall("model-test")  # no error
+        assert harness.state_of("model-test") == "not-installed"
+
+    def test_uninstall_clears_resumable_partials(self, harness: _Harness) -> None:
+        staging = harness.manager.staging_dir("model-test")
+        staging.mkdir(parents=True)
+        (staging / ("aa" * 32 + ".part")).write_bytes(b"partial")
+        harness.manager.uninstall("model-test")
+        assert harness.state_of("model-test") == "not-installed"
+
+
+class TestStartupValidation:
+    def _installed(self, tmp_path: Path, entry: PackEntry, bodies: dict[str, bytes]) -> None:
+        h = _Harness(tmp_path, {entry["id"]: entry}, bodies)
+        h.manager.start_worker()
+        try:
+            h.manager.request_install(entry["id"])
+            assert _wait_for(lambda: h.state_of(entry["id"]) == "installed")
+        finally:
+            h.manager.shutdown()
+
+    def test_compat_range_moved_by_update_flags_incompatible(self, tmp_path: Path) -> None:
+        """Spec scenario: App update moves the compat range."""
+        entry, bodies = _test_entry()
+        self._installed(tmp_path, entry, bodies)
+        # the "updated" registry now requires a different component major
+        updated = dict(entry)
+        updated["compat"] = {"model_revision": "rev2"}
+        fresh = _Harness(tmp_path, {entry["id"]: dict(updated)}, bodies)  # type: ignore[arg-type]
+        assert fresh.state_of("model-test") == "incompatible"
+        flagged = fresh.manager.validate_installed()
+        assert "model-test" in flagged
+
+    def test_missing_file_flags_failed_with_error(self, tmp_path: Path) -> None:
+        """Spec scenario: Missing or truncated pack file detected at startup
+        (per S8)."""
+        entry, bodies = _test_entry()
+        self._installed(tmp_path, entry, bodies)
+        (pack_dir(tmp_path, entry) / "model.bin").unlink()
+        fresh = _Harness(tmp_path, {entry["id"]: entry}, bodies)
+        status = fresh.status_of("model-test")
+        assert status["state"] == "failed"
+        error = status["error"]
+        assert isinstance(error, dict)
+        assert "model.bin" in str(error["message"])
+        assert "model-test" in fresh.manager.validate_installed()
+
+    def test_truncated_file_flags_failed(self, tmp_path: Path) -> None:
+        entry, bodies = _test_entry()
+        self._installed(tmp_path, entry, bodies)
+        (pack_dir(tmp_path, entry) / "model.bin").write_bytes(b"tr")
+        fresh = _Harness(tmp_path, {entry["id"]: entry}, bodies)
+        assert fresh.state_of("model-test") == "failed"
+
+    def test_failed_pack_is_reinstallable(self, tmp_path: Path) -> None:
+        """Per S8: integrity failures route to the re-download affordance."""
+        entry, bodies = _test_entry()
+        self._installed(tmp_path, entry, bodies)
+        (pack_dir(tmp_path, entry) / "model.bin").unlink()
+        fresh = _Harness(tmp_path, {entry["id"]: entry}, bodies)
+        fresh.manager.start_worker()
+        try:
+            fresh.manager.request_install("model-test")
+            assert _wait_for(lambda: fresh.state_of("model-test") == "installed")
+        finally:
+            fresh.manager.shutdown()
+
+    def test_clean_install_passes_validation(self, tmp_path: Path) -> None:
+        entry, bodies = _test_entry()
+        self._installed(tmp_path, entry, bodies)
+        fresh = _Harness(tmp_path, {entry["id"]: entry}, bodies)
+        assert fresh.manager.validate_installed() == {}
+        assert fresh.state_of("model-test") == "installed"
+
+
+def _wheel_bytes(members: dict[str, bytes]) -> bytes:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as zf:
+        for name, body in members.items():
+            zf.writestr(name, body)
+    return buffer.getvalue()
+
+
+class TestWheelExtraction:
+    def test_complete_dll_set_extracted_and_archives_deleted(self, tmp_path: Path) -> None:
+        """Spec scenario: Complete DLL set installed (runtime-packs) — every
+        nvidia/*/bin/*.dll lands flat in the pack dir; archives are deleted."""
+        cublas = _wheel_bytes(
+            {
+                "nvidia/cublas/bin/cublas64_12.dll": b"cublas-dll",
+                "nvidia/cublas/bin/cublasLt64_12.dll": b"cublaslt-dll",
+                "nvidia/cublas/include/cublas.h": b"not-a-dll",
+                "nvidia_cublas_cu12-1.0.dist-info/METADATA": b"meta",
+            }
+        )
+        cudnn = _wheel_bytes(
+            {
+                "nvidia/cudnn/bin/cudnn64_9.dll": b"cudnn-dll",
+                "nvidia/cudnn/bin/cudnn_ops64_9.dll": b"cudnn-ops-dll",
+                "nvidia/cudnn/lib/x64/cudnn.lib": b"not-a-dll-either",
+            }
+        )
+        contents = {"cublas.whl": cublas, "cudnn.whl": cudnn}
+        entry, bodies = _test_entry(
+            "cuda-test", contents=contents, extract_wheels=True, platforms=["win32"]
+        )
+        entry["install_dir"] = "runtime"
+        h = _Harness(tmp_path, {entry["id"]: entry}, bodies, platform="win32")
+        h.manager.start_worker()
+        try:
+            h.manager.request_install("cuda-test")
+            assert _wait_for(lambda: h.state_of("cuda-test") == "installed")
+        finally:
+            h.manager.shutdown()
+        runtime = tmp_path / "runtime"
+        dll_names = {
+            "cublas64_12.dll",
+            "cublasLt64_12.dll",
+            "cudnn64_9.dll",
+            "cudnn_ops64_9.dll",
+        }
+        assert {p.name for p in runtime.iterdir() if p.suffix == ".dll"} == dll_names
+        assert (runtime / "cublas64_12.dll").read_bytes() == b"cublas-dll"
+        manifest = read_manifest(runtime)
+        assert manifest is not None
+        assert {f["path"] for f in manifest["files"]} == dll_names
+        # wheel archives deleted after extraction
+        staging = h.manager.staging_dir("cuda-test")
+        assert not staging.exists() or list(staging.glob("*.part")) == []

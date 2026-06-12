@@ -57,7 +57,7 @@ class JobStateError(Exception):
     """
 
 
-class _WakeQueue:
+class WakeQueue:
     """FIFO whose blocking get also wakes when the caller's stop event is set.
 
     Replaces ``queue.Queue`` + ``None`` sentinel: a sentinel can be stolen by
@@ -103,7 +103,7 @@ class JobStore:
         self._runner = runner
         self._lock = threading.RLock()
         self._jobs: dict[str, JobRecord] = {}
-        self._queue = _WakeQueue()
+        self._queue = WakeQueue()
         self._worker: threading.Thread | None = None
         self._stop = threading.Event()
         # Per P2: while stopping, a failing job is journaled "interrupted",
