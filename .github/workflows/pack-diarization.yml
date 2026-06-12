@@ -32,8 +32,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Fail fast without the HF token secret (task 7.4)
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
-          if [ -z "${{ secrets.HF_TOKEN }}" ]; then
+          if [ -z "$HF_TOKEN" ]; then
             echo "::error::HF_TOKEN secret is not provisioned (download-manager task 7.4). The diarization pack build downloads the gated pyannote/speaker-diarization-community-1 pipeline at build time; the token's account must have accepted that model's terms."
             exit 1
           fi
@@ -44,8 +46,11 @@ jobs:
       - name: Build, seed cache, offline-smoke, compress
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          # Untrusted dispatch input reaches the shell via env, never via
+          # expression interpolation into the script text.
+          PACK_VERSION: ${{ inputs.pack_version }}
         run: |
-          python3 packaging/build_diarization_pack.py --version "${{ inputs.pack_version }}"
+          python3 packaging/build_diarization_pack.py --version "$PACK_VERSION"
       - uses: actions/upload-artifact@v4
         with:
           name: diarization-pack-v${{ inputs.pack_version }}
@@ -56,9 +61,10 @@ jobs:
         if: ${{ inputs.publish }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PACK_VERSION: ${{ inputs.pack_version }}
         run: |
-          gh release create "pack-diarization-v${{ inputs.pack_version }}" \
-            "packaging/dist/diarization-pack-v${{ inputs.pack_version }}.tar.gz" \
-            "packaging/dist/diarization-pack-v${{ inputs.pack_version }}.json" \
+          gh release create "pack-diarization-v$PACK_VERSION" \
+            "packaging/dist/diarization-pack-v$PACK_VERSION.tar.gz" \
+            "packaging/dist/diarization-pack-v$PACK_VERSION.json" \
             --title "Diarization worker pack v${{ inputs.pack_version }}" \
             --notes "Frozen diarization worker + offline pyannote pipeline cache. See the manifest asset for sha256/size; registry pin flip follows in a PR."
