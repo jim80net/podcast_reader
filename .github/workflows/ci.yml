@@ -53,10 +53,14 @@ jobs:
         with:
           python-version: "3.10"
       - name: Cache tool seed downloads
+        # Keyed on the build script (same pattern as the model pack cache
+        # below): fetch_tool_sources reuses any cached file by name, so a
+        # URL/asset change must invalidate the cache or CI would keep
+        # seeding stale binaries.
         uses: actions/cache@v4
         with:
           path: packaging/.tool-cache
-          key: tool-seeds-${{ runner.os }}-v1
+          key: tool-seeds-${{ runner.os }}-v1-${{ hashFiles('packaging/build_engine.py') }}
       - name: Cache installed tiny model pack
         # Keyed on the registry (any pin bump re-downloads). The data dir is
         # reused, so a cache hit makes the install POST an idempotent no-op

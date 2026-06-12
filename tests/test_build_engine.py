@@ -54,6 +54,31 @@ class TestParseToolVersion:
             build_engine.parse_tool_version("ffmpeg", "")
 
 
+class TestDownload:
+    def test_download_passes_a_bounded_timeout(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An unresponsive host must time out, not hang the build forever."""
+        import io
+        import urllib.request
+
+        seen: dict[str, object] = {}
+
+        def fake_urlopen(url: str, timeout: float | None = None) -> io.BytesIO:
+            seen["url"] = url
+            seen["timeout"] = timeout
+            return io.BytesIO(b"payload")
+
+        monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+        dest = tmp_path / "tool.bin"
+        build_engine._download("https://example.invalid/tool.bin", dest)
+
+        assert dest.read_bytes() == b"payload"
+        assert not dest.with_suffix(dest.suffix + ".part").exists()
+        timeout = seen["timeout"]
+        assert isinstance(timeout, (int, float)) and timeout > 0
+
+
 def _stub_tool(directory: Path, filename: str, version_line: str) -> Path:
     """An executable stub that answers --version/-version like the real tool."""
     path = directory / filename

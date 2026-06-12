@@ -170,10 +170,16 @@ def tools_from_dir(tools_dir: Path, platform: str) -> dict[str, Path]:
     return sources
 
 
-def _download(url: str, dest: Path) -> None:
+def _download(url: str, dest: Path, timeout: float = 600.0) -> None:
+    """Download *url* to *dest* atomically, with a bounded socket timeout.
+
+    Generous (the FFmpeg archives run to hundreds of MB) but bounded — an
+    unresponsive host must fail the build, not hang it forever; the same
+    posture as frozen_smoke.py and the pack manager's httpx timeouts.
+    """
     print(f"downloading {url}")
     tmp = dest.with_suffix(dest.suffix + ".part")
-    with urllib.request.urlopen(url) as response, tmp.open("wb") as fh:  # noqa: S310
+    with urllib.request.urlopen(url, timeout=timeout) as response, tmp.open("wb") as fh:  # noqa: S310
         shutil.copyfileobj(response, fh)
     tmp.replace(dest)
 
