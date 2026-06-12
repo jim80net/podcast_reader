@@ -15,8 +15,12 @@ details.
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING, TypedDict
+from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
+
+# pydantic (the GET /v1/cookies response model) requires
+# typing_extensions.TypedDict on Python < 3.12 (same note as types.py).
+from typing_extensions import TypedDict
 
 from podcast_reader.engine.settings import atomic_write_text
 

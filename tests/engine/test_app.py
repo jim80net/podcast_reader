@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import stat
 import threading
 import time
 from typing import TYPE_CHECKING
@@ -1480,3 +1481,97 @@ class TestPairing:
         for path in engine.data_dir.rglob("*"):
             if path.is_file():
                 assert code not in path.read_text(errors="replace"), path
+
+
+def _cookie_line(domain: str, value: str = "secret-cookie-value") -> str:
+    return f"{domain}\tTRUE\t/\tTRUE\t1900000000\tsession\t{value}"
+
+
+class TestCookieRoutes:
+    """Spec: Cookie jar endpoints with metadata-only readback."""
+
+    def test_put_valid_jar_stored_owner_only(self, engine: _Engine) -> None:
+        """Spec scenario: a well-formed jar for example.com lands at
+        <data_dir>/cookies/example.com.txt with mode 0600, exact content."""
+        jar = _cookie_line(".example.com") + "\n"
+        response = engine.client.put(
+            "/v1/cookies", json={"domain": "example.com", "jar": jar}, headers=engine.headers
+        )
+        assert response.status_code == 204
+        path = engine.data_dir / "cookies" / "example.com.txt"
+        assert path.read_text() == jar
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600
+
+    def test_put_foreign_domain_400_stores_nothing(self, engine: _Engine) -> None:
+        """Spec scenario: foreign-domain cookies rejected — 400, nothing
+        stored, and the detail carries no cookie values."""
+        response = engine.client.put(
+            "/v1/cookies",
+            json={"domain": "example.com", "jar": _cookie_line("other.org")},
+            headers=engine.headers,
+        )
+        assert response.status_code == 400
+        assert not (engine.data_dir / "cookies" / "example.com.txt").exists()
+        assert "secret-cookie-value" not in response.text
+
+    def test_put_malformed_jar_400(self, engine: _Engine) -> None:
+        """Spec scenario: a body that does not parse as Netscape lines is 400."""
+        response = engine.client.put(
+            "/v1/cookies",
+            json={"domain": "example.com", "jar": "not a cookie jar"},
+            headers=engine.headers,
+        )
+        assert response.status_code == 400
+
+    def test_listing_exposes_no_cookie_values(self, engine: _Engine) -> None:
+        """Spec scenario: GET /v1/cookies returns domains and timestamps only."""
+        engine.client.put(
+            "/v1/cookies",
+            json={"domain": "example.com", "jar": _cookie_line("example.com")},
+            headers=engine.headers,
+        )
+        response = engine.client.get("/v1/cookies", headers=engine.headers)
+        assert response.status_code == 200
+        (entry,) = response.json()
+        assert set(entry) == {"domain", "created_at"}
+        assert entry["domain"] == "example.com"
+        assert "secret-cookie-value" not in response.text
+        assert "session" not in response.text
+
+    def test_delete_removes_the_jar(self, engine: _Engine) -> None:
+        """Spec scenario: DELETE removes the jar and the domain leaves the
+        listing."""
+        engine.client.put(
+            "/v1/cookies",
+            json={"domain": "example.com", "jar": _cookie_line("example.com")},
+            headers=engine.headers,
+        )
+        response = engine.client.delete("/v1/cookies/example.com", headers=engine.headers)
+        assert response.status_code == 204
+        assert engine.client.get("/v1/cookies", headers=engine.headers).json() == []
+        assert not (engine.data_dir / "cookies" / "example.com.txt").exists()
+
+    def test_delete_absent_jar_404(self, engine: _Engine) -> None:
+        response = engine.client.delete("/v1/cookies/example.com", headers=engine.headers)
+        assert response.status_code == 404
+
+    def test_jar_content_never_in_responses_or_logs(
+        self, engine: _Engine, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Task 2.5 sweep: jar content appears in no API response and no log."""
+        jar = _cookie_line("example.com", value="super-secret-token")
+        with caplog.at_level(logging.DEBUG):
+            responses = [
+                engine.client.put(
+                    "/v1/cookies",
+                    json={"domain": "example.com", "jar": jar},
+                    headers=engine.headers,
+                ),
+                engine.client.get("/v1/cookies", headers=engine.headers),
+                engine.client.get("/v1/settings", headers=engine.headers),
+                engine.client.get("/v1/health", headers=engine.headers),
+                engine.client.delete("/v1/cookies/example.com", headers=engine.headers),
+            ]
+        for response in responses:
+            assert "super-secret-token" not in response.text
+        assert "super-secret-token" not in caplog.text

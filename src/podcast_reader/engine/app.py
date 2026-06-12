@@ -22,6 +22,17 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from podcast_reader.chapters import verify_key
+
+# CookieJarInfo backs a FastAPI response model, so it must be importable at
+# runtime (a TYPE_CHECKING import leaves unresolvable ForwardRefs).
+from podcast_reader.engine.cookies import (
+    CookieJarError,
+    CookieJarInfo,  # noqa: TC001 — runtime response model
+    delete_jar,
+    list_jars,
+    store_jar,
+    validate_jar,
+)
 from podcast_reader.engine.jobs import JobStateError
 from podcast_reader.engine.library import get_entry, list_entries
 from podcast_reader.engine.pack_manager import (
@@ -152,6 +163,17 @@ class HealthInfo(BaseModel):
 
     version: str
     token_fingerprint: str
+
+
+class CookieJarBody(BaseModel):
+    """Body of ``PUT /v1/cookies`` — write-only; no endpoint returns jar content.
+
+    *domain* is the registrable domain declared by the capturing client
+    (per U4); *jar* is the Netscape-format cookie file content.
+    """
+
+    domain: str
+    jar: str
 
 
 class PairMintResponse(BaseModel):
@@ -471,6 +493,32 @@ def create_app(
             )
             for name, spec in PROVIDERS.items()
         ]
+
+    @app.put("/v1/cookies", status_code=status.HTTP_204_NO_CONTENT)
+    def put_cookies(body: CookieJarBody) -> None:
+        """Validate and store a Netscape cookie jar for one declared domain.
+
+        Validation (cookie-management spec): Netscape parse incl.
+        ``#HttpOnly_`` lines, per-cookie domain suffix-match with leading
+        dots stripped (per U4), 1 MB cap. The error detail is self-authored
+        (line numbers, never cookie names/values), so safe to echo.
+        """
+        try:
+            validate_jar(body.domain, body.jar)
+        except CookieJarError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        store_jar(data_dir, body.domain, body.jar)
+
+    @app.get("/v1/cookies")
+    def get_cookies() -> list[CookieJarInfo]:
+        """Stored-jar metadata only (``[{domain, created_at}]``) — never values."""
+        return list_jars(data_dir)
+
+    @app.delete("/v1/cookies/{domain}", status_code=status.HTTP_204_NO_CONTENT)
+    def delete_cookies(domain: str) -> None:
+        """Remove a stored jar (404 when absent or not a valid domain name)."""
+        if not delete_jar(data_dir, domain):
+            raise HTTPException(status_code=404, detail="cookie jar not found")
 
     @app.get("/v1/settings")
     def get_settings() -> EngineSettings:
