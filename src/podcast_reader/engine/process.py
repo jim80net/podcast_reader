@@ -19,6 +19,7 @@ import logging
 import os
 import socket
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, TypedDict
@@ -29,6 +30,11 @@ from podcast_reader.engine import library
 from podcast_reader.engine.app import create_app
 from podcast_reader.engine.events import EventBus
 from podcast_reader.engine.jobs import JobStore
+from podcast_reader.engine.managed_tools import (
+    export_tools_dir,
+    maybe_self_update_ytdlp,
+    seed_tools,
+)
 from podcast_reader.engine.pack_manager import PackManager
 from podcast_reader.engine.settings import (
     atomic_write_json,
@@ -253,6 +259,12 @@ def serve_engine(
     trigger a clean shutdown via ``server.should_exit``).
     """
     base = data_dir()
+    # Reconcile bundle tool seeds into <data_dir>/tools (newer wins) and make
+    # that dir the effective default for every resolve_tool call site — both
+    # before anything can spawn a tool (tools-seeding spec). Seeding failures
+    # log and continue: the engine serves regardless.
+    seed_tools(base)
+    export_tools_dir(base)
     state = load_engine_state(base)
     sock = bind_engine_socket(base, state)
     if sys.platform == "win32":
@@ -295,6 +307,12 @@ def serve_engine(
     try:
         store.start_worker()
         pack_manager.start_worker()
+        # Scheduled yt-dlp self-update (design decision 8): background thread,
+        # gated inside on the 24 h cadence and the user-data residence of the
+        # resolved binary; never touches PATH/pip copies, never raises.
+        threading.Thread(
+            target=maybe_self_update_ytdlp, args=(base,), name="ytdlp-self-update", daemon=True
+        ).start()
         write_discovery(path, state, sock)
         server.run(sockets=[sock])
     finally:

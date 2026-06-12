@@ -40,11 +40,23 @@ from podcast_reader.tools import live_children, run_child
 from podcast_reader.types import PipelineResult, new_job_record
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterator
 
     import uvicorn
 
     from podcast_reader.engine.settings import EngineState
+
+
+@pytest.fixture(autouse=True)
+def _isolate_tools_dir_env() -> Iterator[None]:
+    """serve_engine exports PODCAST_READER_TOOLS_DIR (tools-seeding spec);
+    restore the pre-test state so per-test data dirs never leak between tests."""
+    before = os.environ.get("PODCAST_READER_TOOLS_DIR")
+    yield
+    if before is None:
+        os.environ.pop("PODCAST_READER_TOOLS_DIR", None)
+    else:  # pragma: no cover — CI never pre-sets the variable
+        os.environ["PODCAST_READER_TOOLS_DIR"] = before
 
 
 def _noop(event: object) -> None:
@@ -238,6 +250,45 @@ class TestChildManagement:
         assert not thread.is_alive()
         with pytest.raises(ProcessLookupError):
             os.killpg(child_pid, 0)  # the child's process group is gone
+
+
+class TestManagedToolsWiring:
+    def test_serve_engine_seeds_exports_and_schedules_update(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """serve_engine reconciles tool seeds before serving, exports
+        PODCAST_READER_TOOLS_DIR when unset, and runs the scheduled yt-dlp
+        self-update on a background thread (tasks 4.1/4.2)."""
+        monkeypatch.setenv("PODCAST_READER_DATA_DIR", str(tmp_path))
+        monkeypatch.delenv("PODCAST_READER_TOOLS_DIR", raising=False)
+        seeded: list[Path] = []
+        updated: list[Path] = []
+        monkeypatch.setattr(
+            "podcast_reader.engine.process.seed_tools",
+            lambda base: seeded.append(base),
+        )
+        monkeypatch.setattr(
+            "podcast_reader.engine.process.maybe_self_update_ytdlp",
+            lambda base: updated.append(base),
+        )
+        discovery = tmp_path / "discovery.json"
+        servers: list[uvicorn.Server] = []
+        thread = threading.Thread(
+            target=serve_engine,
+            kwargs={"discovery_file": discovery, "on_server": servers.append},
+            daemon=True,
+        )
+        thread.start()
+        try:
+            assert _wait_for(discovery.exists), "discovery file never appeared"
+            assert seeded == [tmp_path]  # seeded before the engine served
+            assert os.environ["PODCAST_READER_TOOLS_DIR"] == str(tmp_path / "tools")
+            assert _wait_for(lambda: updated == [tmp_path]), "self-update never scheduled"
+        finally:
+            for server in servers:
+                server.should_exit = True
+            thread.join(timeout=15)
+        assert not thread.is_alive()
 
 
 class TestPipelineRunner:

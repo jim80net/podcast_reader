@@ -22,8 +22,8 @@
 
 ## 4. Tools seeding & yt-dlp self-update
 
-- [ ] 4.1 Seeding at engine startup: reconcile bundle `tools/` + `tools-manifest.json` into `<data_dir>/tools/` (absent-or-newer wins, atomic copy preserving exec bits, user-data manifest updated; failures log-and-serve); export `PODCAST_READER_TOOLS_DIR` when unset; unit tests for first-run / newer-seed / newer-user-copy / failure cases
-- [ ] 4.2 Scheduled self-update: background `yt-dlp -U` against the user-data copy when last check > 24 h (recorded in the user-data manifest; version re-read from `yt-dlp --version` after success); only when yt-dlp resolves inside the user-data tools dir; tests with mocked subprocess
+- [x] 4.1 Seeding at engine startup: reconcile bundle `tools/` + `tools-manifest.json` into `<data_dir>/tools/` (absent-or-newer wins, atomic copy preserving exec bits, user-data manifest updated; failures log-and-serve); export `PODCAST_READER_TOOLS_DIR` when unset; unit tests for first-run / newer-seed / newer-user-copy / failure cases
+- [x] 4.2 Scheduled self-update: background `yt-dlp -U` against the user-data copy when last check > 24 h (recorded in the user-data manifest; version re-read from `yt-dlp --version` after success); only when yt-dlp resolves inside the user-data tools dir; tests with mocked subprocess
 - [ ] 4.3 Failure-triggered self-update: introduce a structured download failure in `ytdlp.py` (`PipelineError("download_failed", ...)`) — prerequisite for the retry gate and the tools-seeding scenario (per S7); implement the `-U` + single-retry hook in `ytdlp.py` itself, gated purely on the resolved binary residing in the user-data tools dir — no engine/CLI flag, so engine and CLI behave identically (per Q3); warning event on the self-update attempt; second failure surfaces the structured error; pipeline tests for heal and persistent-failure paths plus the structured-error shape (per S7)
 
 ## 5. Diarization (cut-line group — 5.1 gates 5.2–5.5)
