@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING, Any
 import httpx
 
 from podcast_reader.engine.events import EventBus
+from podcast_reader.engine.hardware import detect_hardware, recommended_pack_ids
 from podcast_reader.engine.jobs import WakeQueue
 from podcast_reader.engine.packs import (
     PACK_SCHEMA,
@@ -34,6 +35,7 @@ from podcast_reader.engine.packs import (
     PackInstallError,
     PackManifest,
     PackProgress,
+    PacksResponse,
     PackStatus,
     compat_error,
     files_error,
@@ -52,7 +54,7 @@ if TYPE_CHECKING:
     from collections.abc import Set as AbstractSet
     from pathlib import Path
 
-    from podcast_reader.engine.packs import PackEntry, PackFilePin, PackState
+    from podcast_reader.engine.packs import HardwareInfo, PackEntry, PackFilePin, PackState
 
 logger = logging.getLogger(__name__)
 
@@ -222,6 +224,7 @@ class PackManager:
         transport: httpx.BaseTransport | None = None,
         platform: str = sys.platform,
         progress_step: int = 4 * 1024 * 1024,
+        hardware_provider: Callable[[], HardwareInfo] | None = None,
     ) -> None:
         self._data_dir = data_dir
         self._bus = bus if bus is not None else EventBus()
@@ -229,6 +232,11 @@ class PackManager:
         self._transport = transport
         self._platform = platform
         self._progress_step = progress_step
+        self._hardware_provider = (
+            hardware_provider
+            if hardware_provider is not None
+            else lambda: detect_hardware(platform)
+        )
         self._lock = threading.Lock()
         self._installing: dict[str, PackProgress] = {}
         self._errors: dict[str, PackInstallError] = {}
@@ -318,6 +326,12 @@ class PackManager:
         self._publish_state(
             pack_id, "not-installed", message=f"{entry['display_name']} uninstalled"
         )
+
+    def packs_response(self) -> PacksResponse:
+        """Body of ``GET /v1/packs``: one round-trip gives the wizard
+        hardware, recommendations, and per-pack state (design decision 9)."""
+        hw = self._hardware_provider()
+        return PacksResponse(hardware=hw, packs=self.statuses(recommended_pack_ids(hw)))
 
     def statuses(self, recommended: AbstractSet[str] = frozenset()) -> list[PackStatus]:
         """Per-pack status in registry order, derived from disk + memory."""

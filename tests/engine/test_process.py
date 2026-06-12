@@ -392,10 +392,15 @@ class TestServeKeyStoreWiring:
             *,
             key_store: dict[str, str] | None = None,
             on_shutdown: Callable[[], None] | None = None,
+            pack_manager: object = None,
         ) -> object:
             captured["app_store"] = key_store
             return real_create(  # type: ignore[arg-type]
-                data_dir, store, key_store=key_store, on_shutdown=on_shutdown
+                data_dir,
+                store,
+                key_store=key_store,
+                on_shutdown=on_shutdown,
+                pack_manager=pack_manager,
             )
 
         monkeypatch.setattr("podcast_reader.engine.process.make_pipeline_runner", spy_make)

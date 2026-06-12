@@ -17,6 +17,13 @@ from fastapi.testclient import TestClient
 from podcast_reader.engine.app import create_app
 from podcast_reader.engine.jobs import JobStore
 from podcast_reader.engine.library import add_entry, entry_dir, source_identity
+from podcast_reader.engine.pack_manager import PackManager
+from podcast_reader.engine.packs import (
+    REGISTRY,
+    HardwareInfo,
+    PackEntry,
+    PackFilePin,
+)
 from podcast_reader.engine.settings import load_engine_state, load_settings, save_settings
 from podcast_reader.providers import PROVIDERS
 from podcast_reader.types import LibraryEntry, PipelineEvent, PipelineResult
@@ -56,8 +63,40 @@ _ROUTES = [
     ("PUT", "/v1/keys"),
     ("POST", "/v1/keys/test"),
     ("GET", "/v1/providers"),
+    ("GET", "/v1/packs"),
+    ("POST", "/v1/packs/some-id/install"),
+    ("DELETE", "/v1/packs/some-id"),
     ("POST", "/v1/shutdown"),
 ]
+
+_PACK_CONTENT = {"model.bin": b"engine-test-weights" * 16, "config.json": b'{"ok": true}'}
+
+
+def _pack_entry() -> tuple[PackEntry, dict[str, bytes]]:
+    """A synthetic installable pack plus its URL -> bytes body map."""
+    pins = [
+        PackFilePin(
+            path=name,
+            url=f"https://packs.example.com/{name}",
+            sha256=hashlib.sha256(body).hexdigest(),
+            size=len(body),
+        )
+        for name, body in _PACK_CONTENT.items()
+    ]
+    entry = PackEntry(
+        id="model-apitest",
+        kind="model",
+        display_name="API test pack",
+        platforms=None,
+        install_dir="models/apitest",
+        extract_wheels=False,
+        files=pins,
+        version="rev-api-1",
+        component_versions={"model_revision": "rev-api-1"},
+        compat={},
+        licenses=[],
+    )
+    return entry, {pin["url"]: _PACK_CONTENT[pin["path"]] for pin in pins}
 
 
 def _wait_for(predicate: Callable[[], bool], timeout: float = 10.0) -> bool:
@@ -97,6 +136,34 @@ class _Engine:
             self.key_test_requests.append(request)
             return self.key_test_handler(request)
 
+        # Pack surface: real registry plus a synthetic installable pack served
+        # by a Range-aware mock host (never the network); hardware injected.
+        self.pack_entry, pack_bodies = _pack_entry()
+        self.pack_requests: list[httpx.Request] = []
+        self.pack_gate: threading.Event | None = None
+        self.hardware = HardwareInfo(platform="win32", nvidia_gpu=True, gpu_names=["Test GPU 4090"])
+
+        def pack_handler(request: httpx.Request) -> httpx.Response:
+            if self.pack_gate is not None:
+                assert self.pack_gate.wait(timeout=10)
+            self.pack_requests.append(request)
+            body = pack_bodies[str(request.url)]
+            range_header = request.headers.get("range")
+            if range_header:
+                start = int(range_header.removeprefix("bytes=").rstrip("-"))
+                return httpx.Response(206, content=body[start:])
+            return httpx.Response(200, content=body)
+
+        self.pack_manager = PackManager(
+            data_dir,
+            bus=self.store.bus,
+            registry={**REGISTRY, self.pack_entry["id"]: self.pack_entry},
+            transport=httpx.MockTransport(pack_handler),
+            platform="win32",
+            progress_step=1,
+            hardware_provider=lambda: self.hardware,
+        )
+
         self.app = create_app(
             data_dir,
             self.store,
@@ -104,6 +171,7 @@ class _Engine:
             heartbeat_s=0.05,
             on_shutdown=lambda: self.shutdown_requests.append(True),
             key_test_transport=httpx.MockTransport(key_test_transport_handler),
+            pack_manager=self.pack_manager,
         )
         self.token = load_engine_state(data_dir)["token"]
         self.headers = {"Authorization": f"Bearer {self.token}"}
@@ -117,8 +185,12 @@ def engine(tmp_path: Path) -> Iterator[_Engine]:
     release.set()  # jobs run immediately unless a test clears it
     harness = _Engine(tmp_path, release)
     harness.store.start_worker()
+    harness.pack_manager.start_worker()
     yield harness
     release.set()
+    if harness.pack_gate is not None:
+        harness.pack_gate.set()
+    harness.pack_manager.shutdown()
     harness.store.shutdown()
 
 
@@ -133,6 +205,7 @@ def live_engine(tmp_path: Path) -> Iterator[_Engine]:
     release.set()
     harness = _Engine(tmp_path, release)
     harness.store.start_worker()
+    harness.pack_manager.start_worker()
 
     config = uvicorn.Config(harness.app, host="127.0.0.1", port=0, log_level="warning")
     server = uvicorn.Server(config)
@@ -147,6 +220,7 @@ def live_engine(tmp_path: Path) -> Iterator[_Engine]:
     server.should_exit = True
     thread.join(timeout=10)
     release.set()
+    harness.pack_manager.shutdown()
     harness.store.shutdown()
 
 
@@ -1015,3 +1089,212 @@ class TestProviders:
             assert pushed[:12] not in response.text
             assert env_value[:12] not in response.text
         assert all(p["key_available"] is True for p in response.json())
+
+
+class TestPacks:
+    """Spec: Pack status / installation / uninstall endpoints."""
+
+    PACK_ID = "model-apitest"
+
+    def _packs_by_id(self, engine: _Engine) -> dict[str, dict[str, object]]:
+        response = engine.client.get("/v1/packs", headers=engine.headers)
+        assert response.status_code == 200
+        return {p["id"]: p for p in response.json()["packs"]}
+
+    def _state(self, engine: _Engine, pack_id: str) -> str:
+        return str(self._packs_by_id(engine)[pack_id]["state"])
+
+    def test_fresh_install_shows_recommendations(self, engine: _Engine) -> None:
+        """Spec scenario: Fresh install shows recommendations — Windows +
+        NVIDIA reports the CUDA pack and large-v3 recommended, all packs
+        not-installed."""
+        response = engine.client.get("/v1/packs", headers=engine.headers)
+        assert response.status_code == 200
+        body = response.json()
+        assert body["hardware"] == {
+            "platform": "win32",
+            "nvidia_gpu": True,
+            "gpu_names": ["Test GPU 4090"],
+        }
+        packs = {p["id"]: p for p in body["packs"]}
+        assert packs["cuda-runtime"]["recommended"] is True
+        assert packs["model-large-v3"]["recommended"] is True
+        assert packs["model-small"]["recommended"] is False
+        assert packs["diarization"]["recommended"] is False
+        assert packs["cuda-runtime"]["state"] == "not-installed"
+        assert packs["model-large-v3"]["state"] == "not-installed"
+        # unpublished entry is unavailable, not not-installed (per S5)
+        assert packs["diarization"]["state"] == "unavailable"
+
+    def test_install_endpoint_202_then_installed(self, engine: _Engine) -> None:
+        response = engine.client.post(f"/v1/packs/{self.PACK_ID}/install", headers=engine.headers)
+        assert response.status_code == 202
+        assert _wait_for(lambda: self._state(engine, self.PACK_ID) == "installed")
+        status = self._packs_by_id(engine)[self.PACK_ID]
+        assert status["installed_version"] == "rev-api-1"
+        assert status["error"] is None
+
+    def test_install_unknown_pack_404(self, engine: _Engine) -> None:
+        response = engine.client.post("/v1/packs/nonsense/install", headers=engine.headers)
+        assert response.status_code == 404
+
+    def test_install_unpublished_pack_409_and_no_download(self, engine: _Engine) -> None:
+        """Spec scenario: Unpublished pack is not installable (per S5)."""
+        response = engine.client.post("/v1/packs/diarization/install", headers=engine.headers)
+        assert response.status_code == 409
+        assert "diarization" in response.json()["detail"]
+        assert engine.pack_requests == []
+        assert self._state(engine, "diarization") == "unavailable"
+
+    def test_duplicate_install_idempotent_202(self, engine: _Engine) -> None:
+        """Spec scenario: Duplicate install request is idempotent — 202 and
+        no second download."""
+        engine.pack_gate = threading.Event()
+        first = engine.client.post(f"/v1/packs/{self.PACK_ID}/install", headers=engine.headers)
+        assert first.status_code == 202
+        assert _wait_for(lambda: self._state(engine, self.PACK_ID) == "installing")
+        second = engine.client.post(f"/v1/packs/{self.PACK_ID}/install", headers=engine.headers)
+        assert second.status_code == 202
+        engine.pack_gate.set()
+        assert _wait_for(lambda: self._state(engine, self.PACK_ID) == "installed")
+        urls = [str(r.url) for r in engine.pack_requests]
+        assert len(urls) == len(set(urls)), f"a file downloaded twice: {urls}"
+
+    def test_installing_status_carries_progress(self, engine: _Engine) -> None:
+        engine.pack_gate = threading.Event()
+        engine.client.post(f"/v1/packs/{self.PACK_ID}/install", headers=engine.headers)
+        assert _wait_for(lambda: self._state(engine, self.PACK_ID) == "installing")
+        status = self._packs_by_id(engine)[self.PACK_ID]
+        progress = status["progress"]
+        assert isinstance(progress, dict)
+        assert progress["total"] == sum(len(b) for b in _PACK_CONTENT.values())
+        engine.pack_gate.set()
+
+    def test_install_does_not_block_transcription_jobs(self, engine: _Engine) -> None:
+        """Spec scenario: Install does not block transcription jobs."""
+        engine.pack_gate = threading.Event()  # download held open
+        engine.client.post(f"/v1/packs/{self.PACK_ID}/install", headers=engine.headers)
+        assert _wait_for(lambda: self._state(engine, self.PACK_ID) == "installing")
+        job = engine.client.post(
+            "/v1/jobs", json={"source": "https://example.com/a"}, headers=engine.headers
+        ).json()
+        assert _wait_for(
+            lambda: (
+                engine.client.get(f"/v1/jobs/{job['id']}", headers=engine.headers).json()["state"]
+                == "done"
+            )
+        )
+        assert self._state(engine, self.PACK_ID) == "installing"  # still downloading
+        engine.pack_gate.set()
+
+    def test_uninstall_204_removes_pack(self, engine: _Engine, tmp_path: Path) -> None:
+        """Spec scenario: Uninstall removes the pack."""
+        engine.client.post(f"/v1/packs/{self.PACK_ID}/install", headers=engine.headers)
+        assert _wait_for(lambda: self._state(engine, self.PACK_ID) == "installed")
+        response = engine.client.delete(f"/v1/packs/{self.PACK_ID}", headers=engine.headers)
+        assert response.status_code == 204
+        assert self._state(engine, self.PACK_ID) == "not-installed"
+        target = tmp_path / "models" / "apitest"
+        assert not (target / "pack-manifest.json").exists()
+        for name in _PACK_CONTENT:
+            assert not (target / name).exists()
+
+    def test_uninstall_unknown_404(self, engine: _Engine) -> None:
+        response = engine.client.delete("/v1/packs/nonsense", headers=engine.headers)
+        assert response.status_code == 404
+
+    def test_uninstall_while_installing_409(self, engine: _Engine) -> None:
+        """Spec scenario: Uninstall refused while installing."""
+        engine.pack_gate = threading.Event()
+        engine.client.post(f"/v1/packs/{self.PACK_ID}/install", headers=engine.headers)
+        assert _wait_for(lambda: self._state(engine, self.PACK_ID) == "installing")
+        response = engine.client.delete(f"/v1/packs/{self.PACK_ID}", headers=engine.headers)
+        assert response.status_code == 409
+        engine.pack_gate.set()
+        assert _wait_for(lambda: self._state(engine, self.PACK_ID) == "installed")
+
+    def test_uninstall_allowed_while_job_running(self, engine: _Engine) -> None:
+        """Per S1: a running job is no reason to refuse an uninstall — the
+        manifest-first ordering makes the race structurally safe."""
+        engine.client.post(f"/v1/packs/{self.PACK_ID}/install", headers=engine.headers)
+        assert _wait_for(lambda: self._state(engine, self.PACK_ID) == "installed")
+        engine.runner_release.clear()  # a job is now running and held open
+        job = engine.client.post(
+            "/v1/jobs", json={"source": "https://example.com/a"}, headers=engine.headers
+        ).json()
+        assert _wait_for(
+            lambda: (
+                engine.client.get(f"/v1/jobs/{job['id']}", headers=engine.headers).json()["state"]
+                == "running"
+            )
+        )
+        response = engine.client.delete(f"/v1/packs/{self.PACK_ID}", headers=engine.headers)
+        assert response.status_code == 204
+        engine.runner_release.set()
+
+    def test_packs_routes_503_without_manager(self, engine: _Engine, tmp_path: Path) -> None:
+        """An app built without a pack manager refuses loudly, not silently."""
+        bare_app = create_app(tmp_path, engine.store, key_store={})
+        client = TestClient(bare_app)
+        assert client.get("/v1/packs", headers=engine.headers).status_code == 503
+        assert client.post("/v1/packs/x/install", headers=engine.headers).status_code == 503
+        assert client.delete("/v1/packs/x", headers=engine.headers).status_code == 503
+
+
+class TestPackEventsOnStream:
+    """Spec: Pack progress on the event stream (per S6/Q5)."""
+
+    def test_pack_and_job_events_interleave_with_correct_discriminators(
+        self, live_engine: _Engine
+    ) -> None:
+        """Spec scenarios: Progress observable live + Job event consumers
+        unaffected — pack events carry pack_id and MUST NOT carry job_id;
+        job events keep carrying job_id (per Q5)."""
+        events: list[dict[str, object]] = []
+        with httpx.stream(
+            "GET",
+            f"{live_engine.base_url}/v1/events",
+            headers=live_engine.headers,
+            timeout=10,
+        ) as stream:
+            install = httpx.post(
+                f"{live_engine.base_url}/v1/packs/model-apitest/install",
+                headers=live_engine.headers,
+                timeout=10,
+            )
+            assert install.status_code == 202
+            job = httpx.post(
+                f"{live_engine.base_url}/v1/jobs",
+                json={"source": "https://example.com/a"},
+                headers=live_engine.headers,
+                timeout=10,
+            ).json()
+
+            def seen(kind: str) -> bool:
+                return any(e["kind"] == kind for e in events)
+
+            def pack_installed() -> bool:
+                return any(
+                    e["kind"] == "pack_state" and e["data"]["state"] == "installed"  # type: ignore[index]
+                    for e in events
+                )
+
+            for line in stream.iter_lines():
+                if line.startswith("data: "):
+                    events.append(json.loads(line.removeprefix("data: ")))
+                if seen("job_done") and pack_installed():
+                    break
+
+        pack_events = [e for e in events if str(e["kind"]).startswith("pack_")]
+        job_events = [e for e in events if not str(e["kind"]).startswith("pack_")]
+        assert any(e["kind"] == "pack_progress" for e in pack_events)
+        assert pack_events and job_events
+        for event in pack_events:
+            data = event["data"]
+            assert isinstance(data, dict)
+            assert data["pack_id"] == "model-apitest"
+            assert "job_id" not in data, f"pack event leaked job_id: {event}"
+        for event in job_events:
+            data = event["data"]
+            assert isinstance(data, dict)
+            assert data["job_id"] == job["id"]
