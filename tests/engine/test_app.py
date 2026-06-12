@@ -756,6 +756,27 @@ class TestKeys:
         assert api_key not in caplog.text
         assert "Incorrect API key" not in caplog.text
 
+    def test_transport_failure_fails_with_self_authored_detail(self, engine: _Engine) -> None:
+        """The httpx.HTTPError branch: a transport failure (connection refused,
+        DNS, TLS) yields ok=False with a self-authored, exception-type-only
+        detail — the transport error's own message never reaches the response
+        (K4: it can embed URLs or proxy details)."""
+
+        def refuse(request: httpx.Request) -> httpx.Response:
+            raise httpx.ConnectError("connection refused")
+
+        engine.key_test_handler = refuse
+        response = engine.client.post(
+            "/v1/keys/test",
+            json={"provider": "anthropic", "api_key": "sk-x"},
+            headers=engine.headers,
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["ok"] is False
+        assert body["detail"] == "connection to provider failed (ConnectError)"
+        assert "connection refused" not in response.text
+
     def test_valid_key_tests_successfully(self, engine: _Engine) -> None:
         """Spec scenario: Valid key tests successfully (a real round-trip
         through the injected transport)."""
