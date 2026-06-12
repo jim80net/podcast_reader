@@ -21,7 +21,8 @@ export default tseslint.config(
         { property: 'innerHTML', message: 'Build DOM via dom.ts, never from strings (CSP compensation).' },
         { property: 'outerHTML', message: 'Build DOM via dom.ts, never from strings (CSP compensation).' },
         { property: 'insertAdjacentHTML', message: 'Build DOM via dom.ts, never from strings (CSP compensation).' },
-        { object: 'document', property: 'write', message: 'Build DOM via dom.ts, never from strings (CSP compensation).' }
+        { object: 'document', property: 'write', message: 'Build DOM via dom.ts, never from strings (CSP compensation).' },
+        { object: 'document', property: 'writeln', message: 'Build DOM via dom.ts, never from strings (CSP compensation).' }
       ]
     }
   },
