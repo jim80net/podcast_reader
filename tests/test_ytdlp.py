@@ -151,6 +151,12 @@ class TestDownloadAudio:
             "ERROR: [generic] clip: unable to extract author info",
             "ERROR: OAuth token refresh failed unexpectedly",
             "ERROR: no login form found on the embed page",
+            # Bare "--cookies"/"authentication" substrings over-matched too
+            # (OCR review on PR #12): option mentions and proxy-layer errors
+            # are not missing-credential failures — they must keep
+            # download_failed so the self-heal retry path stays reachable.
+            "ERROR: fragment 3 not found\nWARNING: --cookies-from-browser is deprecated",
+            "ERROR: unable to download video data: HTTP Error 407: Proxy Authentication Required",
         ],
     )
     def test_extractor_noise_stays_download_failed(self, tmp_path: Path, stderr: str) -> None:

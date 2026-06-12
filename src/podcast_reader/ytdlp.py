@@ -39,12 +39,17 @@ if TYPE_CHECKING:
 #: yt-dlp's actual auth-failure phrasings (per V6), matched case-insensitively.
 #: Anchored phrases, not bare substrings: "login"/"auth" alone misrouted
 #: extractor noise like "author info" or "OAuth" to download_auth_required,
-#: which also suppressed the managed-copy self-heal retry below.
+#: and bare "--cookies"/"authentication" matched option mentions
+#: (deprecation notices) and proxy-layer errors ("Proxy Authentication
+#: Required") — all of which also suppressed the self-heal retry below.
+#: "use --cookies" anchors yt-dlp's raise_login_required suggestion
+#: ("Use --cookies-from-browser or --cookies ..."), which every
+#: cookie-fixable failure carries.
 _AUTH_STDERR_MARKERS = (
     "login required",
     "sign in to confirm",
-    "--cookies",
-    "authentication",
+    "use --cookies",
+    "authentication needed",
 )
 
 
