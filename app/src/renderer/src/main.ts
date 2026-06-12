@@ -1,6 +1,7 @@
 import './style.css'
 
 import { el } from './dom'
+import { createJobsHydrator } from './jobs-hydrator'
 import { hrefFor, navigate, onRouteChange, parseHash } from './router'
 import { AppStore } from './store'
 import { mountLibrary } from './views/library'
@@ -19,6 +20,9 @@ import type { EngineStatus, UpdateStatus } from '../../shared/ipc'
  */
 
 const store = new AppStore()
+// All job re-hydration goes through one gate so concurrent fetches resolving
+// out of order can never regress the store to a stale snapshot.
+const jobsHydrator = createJobsHydrator(() => window.api.listJobs(), store)
 
 // ---- static chrome -----------------------------------------------------------
 
@@ -126,16 +130,11 @@ window.api.onEngineStatus((status) => {
   store.setEngine(status)
   renderEngineStatus(status)
 })
-window.api.onJobsHydrated((jobs) => store.hydrate(jobs))
+window.api.onJobsHydrated((jobs) => jobsHydrator.applyPush(jobs))
 window.api.onPipelineEvent((event) => {
   const needsHydration = store.applyEvent(event)
   // An event for a job we don't know: the records are the truth — re-fetch.
-  if (needsHydration) {
-    void window.api
-      .listJobs()
-      .then((jobs) => store.hydrate(jobs))
-      .catch(() => undefined)
-  }
+  if (needsHydration) void jobsHydrator.refresh()
 })
 window.api.onProtocolRequest((job) => {
   // Protocol arrivals surface on the New view for explicit Run/Dismiss
@@ -149,10 +148,7 @@ void window.api.getEngineStatus().then((status) => {
   store.setEngine(status)
   renderEngineStatus(status)
 })
-void window.api
-  .listJobs()
-  .then((jobs) => store.hydrate(jobs))
-  .catch(() => undefined) // engine not ready yet — the hydration push follows
+void jobsHydrator.refresh() // engine not ready yet? the hydration push follows
 
 // ---- routing ---------------------------------------------------------------------
 
