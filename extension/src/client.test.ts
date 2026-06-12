@@ -107,6 +107,21 @@ describe('EngineClient', () => {
     await expect(c.health()).rejects.toMatchObject({ status: 401, detail: 'unauthorized' })
   })
 
+  it('never calls fetch with the client as receiver (window.fetch rejects that)', async () => {
+    // Pin of an e2e-caught bug: `this.fetchFn(...)` passed the EngineClient
+    // instance as `this`, which the browser's window.fetch throws on
+    // ("Illegal invocation"). Node's fetch doesn't check, so this test
+    // simulates the browser's receiver check.
+    const receivers: unknown[] = []
+    const fetchFn = async function (this: unknown): Promise<Response> {
+      receivers.push(this)
+      return json({ version: '0.3.0', token_fingerprint: 'f' })
+    } as typeof fetch
+    const c = new EngineClient(pairing, fetchFn)
+    await c.health()
+    expect(receivers[0]).toBeUndefined()
+  })
+
   it('opens the events stream with header auth and an abort signal', async () => {
     let sawSignal: AbortSignal | undefined
     const { calls, fetchFn } = makeFetch(() => new Response('', { status: 200 }))

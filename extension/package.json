@@ -10,11 +10,13 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest",
+    "e2e": "playwright test",
     "dist": "npm run build"
   },
   "author": "Jim Park",
   "license": "MIT",
   "devDependencies": {
+    "@playwright/test": "1.60.0",
     "@types/chrome": "0.1.43",
     "@types/node": "24.13.2",
     "eslint": "10.4.1",

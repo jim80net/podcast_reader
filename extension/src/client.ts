@@ -46,13 +46,16 @@ export async function claimToken(
 export class EngineClient {
   readonly baseUrl: string
   private readonly token: string
+  private readonly fetchFn: typeof fetch
 
-  constructor(
-    pairing: Pairing,
-    private readonly fetchFn: typeof fetch = fetch
-  ) {
+  constructor(pairing: Pairing, fetchFn: typeof fetch = fetch) {
     this.baseUrl = `http://127.0.0.1:${pairing.port}`
     this.token = pairing.token
+    // Detach the receiver: `this.fetchFn(...)` would pass the client
+    // instance as `this`, which the browser's window.fetch rejects
+    // ("Illegal invocation" — caught by the e2e suite; node's fetch never
+    // checks, so unit tests with injected mocks can't see it).
+    this.fetchFn = (...args: Parameters<typeof fetch>) => fetchFn(...args)
   }
 
   // engine/app.py:257 (GET /v1/health — doubles as the pairing verifier)
