@@ -1575,3 +1575,19 @@ class TestCookieRoutes:
         for response in responses:
             assert "super-secret-token" not in response.text
         assert "super-secret-token" not in caplog.text
+
+    def test_jar_content_on_disk_only_in_the_jar_file(self, engine: _Engine) -> None:
+        """Task 2.5 sweep: after a PUT and a job submission, the jar bytes
+        exist in exactly one place on disk — the jar file itself; journal,
+        settings, and every other engine file stay clean."""
+        jar = _cookie_line("example.com", value="sweep-secret-value")
+        engine.client.put(
+            "/v1/cookies", json={"domain": "example.com", "jar": jar}, headers=engine.headers
+        )
+        engine.client.post(
+            "/v1/jobs", json={"source": "https://example.com/a"}, headers=engine.headers
+        )
+        jar_file = engine.data_dir / "cookies" / "example.com.txt"
+        for path in engine.data_dir.rglob("*"):
+            if path.is_file() and path != jar_file:
+                assert "sweep-secret-value" not in path.read_text(errors="replace"), path
