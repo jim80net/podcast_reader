@@ -155,6 +155,16 @@ class TestRegistryData:
             if pack_id != "diarization":
                 assert is_published(entry), pack_id
 
+    def test_pin_sha256s_are_unique_within_each_pack(self) -> None:
+        """T5: staging partials are named by sha256 (per S2), so duplicate
+        shas within one pack would collide on the same staging file."""
+        for pack_id, entry in REGISTRY.items():
+            files = entry["files"]
+            if files is None:
+                continue
+            shas = [pin["sha256"] for pin in files]
+            assert len(shas) == len(set(shas)), f"duplicate pin sha256 in pack {pack_id}"
+
     def test_pack_total_size_sums_pins(self) -> None:
         tiny = REGISTRY["model-tiny"]
         files = tiny["files"]
