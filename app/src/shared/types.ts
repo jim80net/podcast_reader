@@ -104,6 +104,7 @@ export interface EngineSettings {
   chapter_model: string // "" means: the chapter provider's default model
   chapter_provider: string // a podcast_reader.providers.PROVIDERS key
   custom_provider_url: string // base URL for the "custom" provider ("" otherwise)
+  diarize: boolean // default false; engine warns-and-skips when the pack is absent
 }
 
 // -- src/podcast_reader/engine/app.py:100 (SettingsBody) --
@@ -117,6 +118,7 @@ export interface SettingsUpdate {
   chapter_model: string
   chapter_provider?: string
   custom_provider_url?: string
+  diarize?: boolean
 }
 
 // -- src/podcast_reader/engine/app.py:50 (JobSubmission) --

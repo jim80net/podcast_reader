@@ -72,6 +72,7 @@ interface EngineSettings {
   chapter_model: string
   chapter_provider: string
   custom_provider_url: string
+  diarize: boolean
 }
 
 interface PackProgress {
@@ -130,7 +131,8 @@ let settings: EngineSettings = {
   library_dir: '/tmp/mock-library',
   chapter_model: '',
   chapter_provider: 'anthropic',
-  custom_provider_url: ''
+  custom_provider_url: '',
+  diarize: false
 }
 let keyTestResult: { ok: boolean; detail: string | null } = { ok: true, detail: null }
 const pushedKeys = new Set<string>()

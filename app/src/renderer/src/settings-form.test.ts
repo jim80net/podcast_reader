@@ -11,7 +11,8 @@ const settings: EngineSettings = {
   library_dir: '/home/jim/PodcastReader/library',
   chapter_model: '',
   chapter_provider: 'anthropic',
-  custom_provider_url: ''
+  custom_provider_url: '',
+  diarize: false
 }
 
 const providers: ProviderInfo[] = [

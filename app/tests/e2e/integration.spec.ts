@@ -45,7 +45,8 @@ const ENGINE_SETTINGS_KEYS: Record<keyof EngineSettings, true> = {
   library_dir: true,
   chapter_model: true,
   chapter_provider: true,
-  custom_provider_url: true
+  custom_provider_url: true,
+  diarize: true
 }
 const JOB_RECORD_KEYS: Record<keyof JobRecord, true> = {
   id: true,
