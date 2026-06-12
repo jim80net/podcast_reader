@@ -3,6 +3,7 @@ import type {
   JobRecord,
   KeyTestResult,
   LibraryEntry,
+  PacksResponse,
   PipelineEvent,
   ProviderInfo,
   SettingsUpdate
@@ -31,6 +32,11 @@ export const CHANNELS = {
   keysTest: 'keys:test',
   keysStorageMode: 'keys:storage-mode',
   providersList: 'providers:list',
+  packsList: 'packs:list',
+  packsInstall: 'packs:install',
+  packsUninstall: 'packs:uninstall',
+  firstRunGet: 'first-run:get',
+  firstRunComplete: 'first-run:complete',
   updateGetStatus: 'update:get-status',
   updateInstall: 'update:install'
 } as const
@@ -102,6 +108,14 @@ export interface PodcastReaderApi {
   testKey(provider: string, apiKey?: string): Promise<KeyTestResult>
   keyStorageMode(): Promise<'encrypted' | 'session-memory'>
   listProviders(): Promise<ProviderInfo[]>
+  /** Hardware block + per-pack status — the hydration source of truth for pack state. */
+  listPacks(): Promise<PacksResponse>
+  /** Start (or idempotently re-request) an async pack install; progress arrives as pack events. */
+  installPack(packId: string): Promise<void>
+  uninstallPack(packId: string): Promise<void>
+  /** App-side first-run flag (setup wizard): true once setup was completed or skipped. */
+  isFirstRunComplete(): Promise<boolean>
+  markFirstRunComplete(): Promise<void>
   /** Resolve a dropped File's real filesystem path (webUtils.getPathForFile). */
   getPathForFile(file: File): string
   getUpdateStatus(): Promise<UpdateStatus>

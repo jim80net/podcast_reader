@@ -4,6 +4,7 @@ import { join, resolve } from 'node:path'
 import { BrowserWindow, app, dialog, ipcMain, safeStorage } from 'electron'
 import { autoUpdater } from 'electron-updater'
 
+import { AppConfigStore } from './app-config'
 import { broadcastTo } from './broadcast'
 import { resolveDataDir } from './data-dir'
 import { defaultSupervisorDeps, ensureEngine } from './engine'
@@ -121,7 +122,8 @@ async function start(): Promise<void> {
     sleep: supervisorDeps.sleep,
     log
   })
-  registerIpcHandlers(ipcMain, manager, setupUpdater())
+  const appConfig = new AppConfigStore(join(app.getPath('userData'), 'app-config.json'), log)
+  registerIpcHandlers(ipcMain, manager, setupUpdater(), appConfig)
 
   createWindow()
   await manager.start()

@@ -6,6 +6,7 @@ import type {
   JobSubmission,
   KeyTestResult,
   LibraryEntry,
+  PacksResponse,
   PipelineEvent,
   ProviderInfo,
   SettingsUpdate
@@ -114,6 +115,22 @@ export class EngineClient {
   // engine/app.py:331 (GET /v1/providers — availability booleans, never key material)
   listProviders(): Promise<ProviderInfo[]> {
     return this.json('GET', '/v1/providers')
+  }
+
+  // engine/app.py:283 (GET /v1/packs — hardware block + per-pack statuses)
+  listPacks(): Promise<PacksResponse> {
+    return this.json('GET', '/v1/packs')
+  }
+
+  // engine/app.py:289 (POST /v1/packs/{id}/install — 202 always when installable,
+  // idempotent; 404 unknown, 409 unpublished/platform-gated)
+  async installPack(packId: string): Promise<void> {
+    await this.request('POST', `/v1/packs/${encodeURIComponent(packId)}/install`)
+  }
+
+  // engine/app.py:304 (DELETE /v1/packs/{id} — 409 only while installing, per S1)
+  async uninstallPack(packId: string): Promise<void> {
+    await this.request('DELETE', `/v1/packs/${encodeURIComponent(packId)}`)
   }
 
   // engine/app.py:244 (GET /v1/events — SSE; consumed by EventStream below)
