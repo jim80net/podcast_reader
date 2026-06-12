@@ -143,7 +143,12 @@ class TestStorage:
         the engine-state re-hardening in settings.load_engine_state (OCR
         review on PR #12)."""
         loose = tmp_path / "cookies"
-        loose.mkdir(mode=0o755)
+        loose.mkdir()
+        # chmod, not mkdir(mode=...): the mode argument is umask-subjected, so
+        # under a strict umask the dir would already be 0700 and this test
+        # would pass without exercising the re-hardening path.
+        loose.chmod(0o755)
+        assert stat.S_IMODE(loose.stat().st_mode) == 0o755, "precondition: dir must be loose"
         store_jar(tmp_path, "example.com", _VALID_JAR)
         assert stat.S_IMODE(loose.stat().st_mode) == 0o700
 
