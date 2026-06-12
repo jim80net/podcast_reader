@@ -253,7 +253,7 @@ async function handleV1(req: IncomingMessage, res: ServerResponse, path: string)
   record('request', `${req.method} ${path}`)
 
   if (req.method === 'GET' && path === '/v1/health') {
-    sendJson(res, 200, { version: '0.2.0', token_fingerprint: fingerprint(token) })
+    sendJson(res, 200, { version: '0.3.0', token_fingerprint: fingerprint(token) })
     return
   }
   if (req.method === 'POST' && path === '/v1/shutdown') {

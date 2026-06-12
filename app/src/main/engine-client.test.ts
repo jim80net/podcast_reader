@@ -45,7 +45,7 @@ function client(respond: (req: Captured) => Response | Promise<Response>) {
 
 describe('EngineClient', () => {
   it('targets 127.0.0.1:<port> and sends the bearer token on every request', async () => {
-    const { calls, client: c } = client(() => json({ version: '0.2.0', token_fingerprint: 'f' }))
+    const { calls, client: c } = client(() => json({ version: '0.3.0', token_fingerprint: 'f' }))
     await c.health()
     expect(calls[0]?.url).toBe('http://127.0.0.1:51234/v1/health')
     expect(calls[0]?.headers['authorization']).toBe('Bearer tok-123')
