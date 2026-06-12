@@ -485,7 +485,10 @@ def _manifest_shape_ok(loaded: object) -> bool:
         isinstance(version, str) for version in components.values()
     ):
         return False
-    if not isinstance(loaded.get("licenses", []), list):
+    licenses = loaded.get("licenses", [])
+    if not isinstance(licenses, list) or not all(
+        _license_notice_shape_ok(item) for item in licenses
+    ):
         return False
     files = loaded.get("files")
     return isinstance(files, list) and all(_manifest_file_shape_ok(item) for item in files)
@@ -498,6 +501,20 @@ def _manifest_file_shape_ok(item: object) -> bool:
         and isinstance(item.get("path"), str)
         and isinstance(item.get("sha256"), str)
         and isinstance(item.get("size"), int)
+    )
+
+
+def _license_notice_shape_ok(item: object) -> bool:
+    """True when *item* looks like a :class:`LicenseNotice`.
+
+    Notices cross the typed boundary verbatim (``GET /v1/packs`` →
+    the app's attribution rendering of ``name``/``text``), so they get the
+    same per-item discipline as ``files``.
+    """
+    return (
+        isinstance(item, dict)
+        and isinstance(item.get("name"), str)
+        and isinstance(item.get("text"), str)
     )
 
 

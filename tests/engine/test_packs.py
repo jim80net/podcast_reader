@@ -322,6 +322,12 @@ class TestManifestShape:
             ("files", [{"path": "f", "sha256": 0, "size": 7}]),
             ("files", [{"path": "f", "sha256": "0" * 64, "size": "7"}]),
             ("licenses", "MIT"),
+            ("licenses", ["MIT"]),
+            ("licenses", [{}]),
+            ("licenses", [{"name": "MIT"}]),
+            ("licenses", [{"text": "..."}]),
+            ("licenses", [{"name": 1, "text": "..."}]),
+            ("licenses", [{"name": "MIT", "text": None}]),
         ],
     )
     def test_wrong_typed_field_reads_as_not_installed(
@@ -336,3 +342,9 @@ class TestManifestShape:
         manifest = _manifest(files=[ManifestFile(path="model.bin", sha256="0" * 64, size=7)])
         self._write(tmp_path, manifest)
         assert read_manifest(tmp_path) == manifest
+
+    def test_well_shaped_license_notices_read_back(self, tmp_path: Path) -> None:
+        payload = dict(_manifest())
+        payload["licenses"] = [{"name": "MIT", "text": "Permission is hereby granted..."}]
+        self._write(tmp_path, payload)
+        assert read_manifest(tmp_path) == payload
