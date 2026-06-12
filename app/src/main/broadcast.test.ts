@@ -47,4 +47,25 @@ describe('broadcastTo', () => {
     expect(dying.received).toEqual([])
     expect(live.received).toHaveLength(1)
   })
+
+  it('never throws when destruction races between the guard and the send (TOCTOU)', () => {
+    // Liveness checks pass, but the native send still throws — the window
+    // was torn down between check and use.
+    const received: { channel: string; payload: unknown }[] = []
+    const racing: BroadcastWindowLike = {
+      isDestroyed: () => false,
+      webContents: {
+        isDestroyed: () => false,
+        send: () => {
+          throw new TypeError('Object has been destroyed')
+        }
+      }
+    }
+    const live = makeWindow()
+    expect(() =>
+      broadcastTo([racing, live.window], 'engine:status', { state: 'stopped' })
+    ).not.toThrow()
+    expect(live.received).toHaveLength(1)
+    expect(received).toEqual([])
+  })
 })

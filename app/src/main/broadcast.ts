@@ -24,6 +24,13 @@ export function broadcastTo(
 ): void {
   for (const window of windows) {
     if (window.isDestroyed() || window.webContents.isDestroyed()) continue
-    window.webContents.send(channel, payload)
+    try {
+      window.webContents.send(channel, payload)
+    } catch {
+      // Native teardown can race the liveness check (TOCTOU): a window
+      // destroyed between the guard and the send must never propagate a
+      // throw into the SSE loop or the quit path. Skipping is correct —
+      // the window is gone, there is nothing to notify.
+    }
   }
 }
