@@ -4,6 +4,7 @@ import { join, resolve } from 'node:path'
 import { BrowserWindow, app, dialog, ipcMain, safeStorage } from 'electron'
 import { autoUpdater } from 'electron-updater'
 
+import { broadcastTo } from './broadcast'
 import { resolveDataDir } from './data-dir'
 import { defaultSupervisorDeps, ensureEngine } from './engine'
 import { EngineClient, EventStream } from './engine-client'
@@ -29,9 +30,7 @@ const PROTOCOL_SCHEME = 'podcast-reader'
 const log = (message: string): void => console.log(`[podcast-reader] ${message}`)
 
 function broadcast(channel: string, payload: unknown): void {
-  for (const window of BrowserWindow.getAllWindows()) {
-    window.webContents.send(channel, payload)
-  }
+  broadcastTo(BrowserWindow.getAllWindows(), channel, payload)
 }
 
 let manager: EngineManager | null = null
