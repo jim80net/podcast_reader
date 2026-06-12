@@ -3,7 +3,7 @@
 ## ADDED Requirements
 
 ### Requirement: User-mediated pairing
-The extension popup SHALL provide a pairing form accepting the port and 6-character code displayed by the desktop app (including the combined `<port>-<code>` paste form), exchange the code via `POST /v1/pair/claim` at `http://127.0.0.1:<port>`, verify the received token with an authed `GET /v1/health`, and persist `{port, token}` in `chrome.storage.local` only after verification succeeds. A failed claim or verification SHALL leave any previously stored pairing untouched and show a self-authored error with a retry affordance.
+The extension popup SHALL provide a pairing form accepting the combined `<port>-<code>` paste string as the primary input, with separate port and 6-character-code fields as fallback (per review adjudication, matching the app's display), exchange the code via `POST /v1/pair/claim` at `http://127.0.0.1:<port>`, verify the received token with an authed `GET /v1/health`, and persist `{port, token}` in `chrome.storage.local` only after verification succeeds. A failed claim or verification SHALL leave any previously stored pairing untouched and show a self-authored error with a retry affordance.
 
 #### Scenario: Successful pairing stores the connection
 - **WHEN** the user enters the port and a valid unexpired code

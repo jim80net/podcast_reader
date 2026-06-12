@@ -3,11 +3,15 @@
 ## ADDED Requirements
 
 ### Requirement: Cookie jar endpoints with metadata-only readback
-The engine SHALL accept Netscape-format cookie jars via `PUT /v1/cookies` (`{domain, jar}`, bearer-authed), validating before storing: *domain* is a bare lowercase hostname; *jar* parses as Netscape cookie lines (including `#HttpOnly_`-prefixed entries); every cookie's domain field suffix-matches the declared domain; and the jar does not exceed the size cap. The jar SHALL be stored at `<data_dir>/cookies/<domain>.txt` via atomic write with owner-only permissions (0600; on Windows, user-profile ACLs as for `engine-state.json`), replacing any previous jar for that domain. `GET /v1/cookies` SHALL return metadata only — `[{domain, created_at}]`, never cookie values. `DELETE /v1/cookies/{domain}` SHALL remove the stored jar (404 if absent). Jar content SHALL appear in no API response, no log, and no diagnostic output.
+The engine SHALL accept Netscape-format cookie jars via `PUT /v1/cookies` (`{domain, jar}`, bearer-authed), validating before storing: *domain* is a bare lowercase hostname (the registrable domain declared by the capturing client, per U4); *jar* parses as Netscape cookie lines (including `#HttpOnly_`-prefixed entries); every cookie's domain field — with any leading `.` stripped first, so parent-domain entries like `.example.com` match their declared `example.com` jar (per U4) — suffix-matches the declared domain; and the jar does not exceed the 1 MB size cap (per review adjudication: SSO-heavy domains can legitimately carry dozens of cookies at up to ~4 KB apiece plus jar overhead, so 256 KB could clip a real jar while 1 MB still bounds abuse). The jar SHALL be stored at `<data_dir>/cookies/<domain>.txt` via atomic write with owner-only permissions (0600; on Windows, user-profile ACLs as for `engine-state.json`), replacing any previous jar for that domain. `GET /v1/cookies` SHALL return metadata only — `[{domain, created_at}]`, never cookie values. `DELETE /v1/cookies/{domain}` SHALL remove the stored jar (404 if absent). Jar content SHALL appear in no API response, no log, and no diagnostic output.
 
 #### Scenario: Valid jar stored owner-only
 - **WHEN** a well-formed jar for `example.com` is PUT
 - **THEN** `<data_dir>/cookies/example.com.txt` exists with mode 0600 and the exact jar content
+
+#### Scenario: Parent-domain cookie lines accepted (per U4)
+- **WHEN** a jar declared for `example.com` contains a cookie line whose domain field is `.example.com`
+- **THEN** validation accepts it — the leading dot is stripped before the suffix match
 
 #### Scenario: Foreign-domain cookies rejected
 - **WHEN** a jar declared for `example.com` contains a cookie line whose domain field is `other.org`
