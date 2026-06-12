@@ -33,6 +33,7 @@ from podcast_reader.engine.pack_manager import (
 # PacksResponse backs a FastAPI response model, so it must be importable at
 # runtime (a TYPE_CHECKING import leaves unresolvable ForwardRefs).
 from podcast_reader.engine.packs import PacksResponse  # noqa: TC001 — runtime response model
+from podcast_reader.engine.pairing import PairingState
 from podcast_reader.engine.settings import (
     engine_version,
     load_engine_state,
@@ -153,6 +154,23 @@ class HealthInfo(BaseModel):
     token_fingerprint: str
 
 
+class PairMintResponse(BaseModel):
+    """Body of the ``POST /v1/pair`` response.
+
+    *expires_at* is epoch seconds; the code itself lives only in process
+    memory and in this one response — never in any file or log.
+    """
+
+    code: str
+    expires_at: float
+
+
+class PairClaimResponse(BaseModel):
+    """Body of a successful ``POST /v1/pair/claim`` — the engine bearer token."""
+
+    token: str
+
+
 def create_app(
     data_dir: Path,
     store: JobStore,
@@ -162,6 +180,7 @@ def create_app(
     on_shutdown: Callable[[], None] | None = None,
     key_test_transport: httpx.BaseTransport | None = None,
     pack_manager: PackManager | None = None,
+    pairing: PairingState | None = None,
 ) -> FastAPI:
     """Build the engine's FastAPI app bound to *store* and *data_dir*.
 
@@ -180,15 +199,25 @@ def create_app(
     one sharing the store's :class:`EventBus` so pack events ride the same
     SSE stream (per S6). Without one, the routes answer 503 (the shutdown-hook
     pattern) — never a silent no-op.
+
+    *pairing* is the in-memory pairing-code state backing ``POST /v1/pair``
+    and ``POST /v1/pair/claim``; tests inject one with a settable clock.
     """
     app = FastAPI(title="podcast-reader engine", version=engine_version())
     expected_token = load_engine_state(data_dir)["token"].encode()
     keys: dict[str, str] = key_store if key_store is not None else {}
+    pairing_state = pairing if pairing is not None else PairingState()
 
     @app.middleware("http")
     async def _require_bearer_token(
         request: Request, call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:
+        # The engine's single unauthenticated route: POST /v1/pair/claim
+        # exists precisely to issue the token to a not-yet-authenticated
+        # extension. The exemption matches (method, path) exactly — any other
+        # method on the claim path still requires the bearer token (per U5).
+        if request.method == "POST" and request.url.path == "/v1/pair/claim":
+            return await call_next(request)
         # RFC 7235: the scheme token is case-insensitive; only the credentials
         # are secret, so the constant-time comparison covers just the token.
         scheme, _, credentials = request.headers.get("authorization", "").partition(" ")
@@ -210,6 +239,47 @@ def create_app(
             version=engine_version(),
             token_fingerprint=token_fingerprint(state["token"]),
         )
+
+    @app.post("/v1/pair")
+    def pair_mint() -> PairMintResponse:
+        """Mint a pairing code (bearer-authed: only token-holders can mint).
+
+        The code is single-use with a 300 s TTL and replaces any pending one;
+        it is held exclusively in process memory.
+        """
+        code, expires_at = pairing_state.mint()
+        return PairMintResponse(code=code, expires_at=expires_at)
+
+    @app.post("/v1/pair/claim")
+    async def pair_claim(request: Request) -> PairClaimResponse:
+        """Exchange a pending pairing code for the engine bearer token.
+
+        The single unauthenticated route (exempted by the middleware's
+        (method, path) match). Per U3, two gates keep in-browser attackers
+        from burning the attempt budget: a non-``application/json`` content
+        type is rejected (a page-initiated JSON request is non-simple, so the
+        browser preflights it and it never arrives), and an ``http``/``https``
+        scheme ``Origin`` is rejected as the simple-request backstop —
+        ``chrome-extension://`` origins pass. Gate rejections never reach the
+        pairing state, so they cannot burn the attempt budget. Every rejection
+        is the same self-authored 403: no oracle distinguishes wrong, expired,
+        exhausted, or absent codes from gated requests.
+        """
+        rejection = HTTPException(status_code=403, detail="pairing claim rejected")
+        media_type = request.headers.get("content-type", "").partition(";")[0].strip().lower()
+        if media_type != "application/json":
+            raise rejection
+        origin_scheme = request.headers.get("origin", "").partition(":")[0].strip().lower()
+        if origin_scheme in ("http", "https"):
+            raise rejection
+        try:
+            body = json.loads(await request.body())
+        except ValueError:
+            body = None
+        code = body.get("code") if isinstance(body, dict) else None
+        if not isinstance(code, str) or not pairing_state.claim(code):
+            raise rejection
+        return PairClaimResponse(token=expected_token.decode())
 
     @app.post("/v1/shutdown", status_code=status.HTTP_202_ACCEPTED)
     def shutdown(background: BackgroundTasks) -> None:

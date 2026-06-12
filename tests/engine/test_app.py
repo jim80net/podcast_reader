@@ -25,6 +25,7 @@ from podcast_reader.engine.packs import (
     PackEntry,
     PackFilePin,
 )
+from podcast_reader.engine.pairing import CODE_ALPHABET, CODE_LENGTH, CODE_TTL_S, PairingState
 from podcast_reader.engine.settings import load_engine_state, load_settings, save_settings
 from podcast_reader.providers import PROVIDERS
 from podcast_reader.types import LibraryEntry, PipelineEvent, PipelineResult
@@ -68,6 +69,13 @@ _ROUTES = [
     ("POST", "/v1/packs/some-id/install"),
     ("DELETE", "/v1/packs/some-id"),
     ("POST", "/v1/shutdown"),
+    ("POST", "/v1/pair"),
+    # The middleware exemption is (method, path): only POST /v1/pair/claim is
+    # unauthenticated — any other method on the claim path still 401s (per U5).
+    ("GET", "/v1/pair/claim"),
+    ("PUT", "/v1/cookies"),
+    ("GET", "/v1/cookies"),
+    ("DELETE", "/v1/cookies/example.com"),
 ]
 
 _PACK_CONTENT = {"model.bin": b"engine-test-weights" * 16, "config.json": b'{"ok": true}'}
@@ -165,6 +173,10 @@ class _Engine:
             hardware_provider=lambda: self.hardware,
         )
 
+        # Pairing with a settable clock so expiry is testable via TestClient.
+        self.pairing_now = time.time()
+        self.pairing = PairingState(clock=lambda: self.pairing_now)
+
         self.app = create_app(
             data_dir,
             self.store,
@@ -173,6 +185,7 @@ class _Engine:
             on_shutdown=lambda: self.shutdown_requests.append(True),
             key_test_transport=httpx.MockTransport(key_test_transport_handler),
             pack_manager=self.pack_manager,
+            pairing=self.pairing,
         )
         self.token = load_engine_state(data_dir)["token"]
         self.headers = {"Authorization": f"Bearer {self.token}"}
@@ -1332,3 +1345,138 @@ class TestPackEventsOnStream:
             data = event["data"]
             assert isinstance(data, dict)
             assert data["job_id"] == job["id"]
+
+
+class TestPairing:
+    """Spec: Pairing-code exchange — mint bearer-authed, claim unauthenticated."""
+
+    def _mint(self, engine: _Engine) -> str:
+        response = engine.client.post("/v1/pair", headers=engine.headers)
+        assert response.status_code == 200
+        return str(response.json()["code"])
+
+    def _claim(self, engine: _Engine, code: str, **kwargs: object) -> httpx.Response:
+        return engine.client.post("/v1/pair/claim", json={"code": code}, **kwargs)  # type: ignore[arg-type]
+
+    def test_mint_requires_the_bearer_token(self, engine: _Engine) -> None:
+        """Spec scenario: Mint requires the bearer token — 401 and no code
+        created (a subsequent claim with any code is rejected)."""
+        assert engine.client.post("/v1/pair").status_code == 401
+        assert self._claim(engine, "ABCDEF").status_code == 403
+
+    def test_mint_returns_code_and_expiry(self, engine: _Engine) -> None:
+        response = engine.client.post("/v1/pair", headers=engine.headers)
+        assert response.status_code == 200
+        body = response.json()
+        assert len(body["code"]) == CODE_LENGTH
+        assert all(c in CODE_ALPHABET for c in body["code"])
+        assert body["expires_at"] == engine.pairing_now + CODE_TTL_S
+
+    def test_valid_claim_returns_the_token_once(self, engine: _Engine) -> None:
+        """Spec scenario: Valid claim returns the token once — the second
+        claim with the same code responds 403 (single-use)."""
+        code = self._mint(engine)
+        first = self._claim(engine, code)
+        assert first.status_code == 200
+        assert first.json() == {"token": engine.token}
+        assert self._claim(engine, code).status_code == 403
+
+    def test_claim_needs_no_authorization_header(self, engine: _Engine) -> None:
+        """Spec scenario: Claim is reachable without credentials — the auth
+        middleware exempts exactly POST /v1/pair/claim."""
+        code = self._mint(engine)
+        response = engine.client.post("/v1/pair/claim", json={"code": code})
+        assert response.status_code == 200
+
+    @pytest.mark.parametrize("method", ["GET", "PUT", "DELETE", "PATCH"])
+    def test_non_post_methods_on_claim_path_still_401(self, engine: _Engine, method: str) -> None:
+        """Spec scenario (per U5): the exemption matches (method, path) — any
+        other method on /v1/pair/claim without a token responds 401."""
+        assert engine.client.request(method, "/v1/pair/claim").status_code == 401
+
+    def test_rejections_are_uniform_403(self, engine: _Engine) -> None:
+        """Spec scenarios: wrong, expired, exhausted, and absent codes all
+        produce the same 403 — no oracle distinguishes the cases."""
+        wrong_while_pending = self._claim(engine, "WRONG2")  # code pending
+        self._mint(engine)
+        engine.pairing_now += CODE_TTL_S  # expire it
+        expired = self._claim(engine, "WRONG2")
+        no_pending = self._claim(engine, "WRONG2")  # nothing pending anymore
+        missing_code = engine.client.post("/v1/pair/claim", json={})
+        responses = [wrong_while_pending, expired, no_pending, missing_code]
+        assert [r.status_code for r in responses] == [403, 403, 403, 403]
+        assert len({r.text for r in responses}) == 1
+
+    def test_expired_code_rejected(self, engine: _Engine) -> None:
+        """Spec scenario: Expired code rejected uniformly."""
+        code = self._mint(engine)
+        engine.pairing_now += CODE_TTL_S
+        assert self._claim(engine, code).status_code == 403
+
+    def test_attempt_budget_invalidates_the_code(self, engine: _Engine) -> None:
+        """Spec scenario: Attempt budget invalidates the code — five wrong
+        claims, then even the correct code responds 403."""
+        code = self._mint(engine)
+        for _ in range(5):
+            assert self._claim(engine, "WRONG2").status_code == 403
+        assert self._claim(engine, code).status_code == 403
+
+    def test_new_mint_replaces_the_old_code(self, engine: _Engine) -> None:
+        """Spec scenario: New mint replaces the old code."""
+        old = self._mint(engine)
+        new = self._mint(engine)
+        assert self._claim(engine, old).status_code == 403
+        assert self._claim(engine, new).status_code == 200
+
+    def test_page_origin_and_content_type_gates_do_not_burn_the_budget(
+        self, engine: _Engine
+    ) -> None:
+        """Spec scenario (per U3): gate rejections (http/https Origin, wrong
+        content type) leave the pending code's attempt budget unchanged — a
+        subsequent valid claim still succeeds."""
+        code = self._mint(engine)
+        for origin in ("https://evil.example", "http://evil.example"):
+            for _ in range(3):
+                response = self._claim(engine, code, headers={"Origin": origin})
+                assert response.status_code == 403
+        for _ in range(6):
+            response = engine.client.post(
+                "/v1/pair/claim",
+                content=f'{{"code": "{code}"}}',
+                headers={"Content-Type": "text/plain"},
+            )
+            assert response.status_code == 403
+        assert self._claim(engine, code).status_code == 200
+
+    def test_chrome_extension_origin_passes(self, engine: _Engine) -> None:
+        """Spec (per U3): a chrome-extension:// Origin is NOT rejected."""
+        code = self._mint(engine)
+        response = self._claim(
+            engine, code, headers={"Origin": "chrome-extension://abcdefghijklmnop"}
+        )
+        assert response.status_code == 200
+        assert response.json() == {"token": engine.token}
+
+    def test_non_json_content_type_rejected(self, engine: _Engine) -> None:
+        """Spec (per U3): claim requires Content-Type application/json."""
+        code = self._mint(engine)
+        response = engine.client.post(
+            "/v1/pair/claim",
+            content=f'{{"code": "{code}"}}',
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        assert response.status_code == 403
+
+    def test_codes_never_persisted_or_logged(
+        self, engine: _Engine, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Spec scenario: Codes never persisted — no engine file (journal,
+        settings, discovery, ...) and no log record contains a minted code."""
+        with caplog.at_level(logging.DEBUG):
+            code = self._mint(engine)
+            self._claim(engine, "WRONG2")
+            assert self._claim(engine, code).status_code == 200
+        assert code not in caplog.text
+        for path in engine.data_dir.rglob("*"):
+            if path.is_file():
+                assert code not in path.read_text(errors="replace"), path
