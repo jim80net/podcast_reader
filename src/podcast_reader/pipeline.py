@@ -21,6 +21,7 @@ from podcast_reader.chapters import (
     generate_chapters,
     snap_chapters_to_segments,
 )
+from podcast_reader.diarize import diarize_step
 from podcast_reader.html import build_html
 from podcast_reader.providers import PROVIDERS, resolve_provider
 from podcast_reader.tools import run_child
@@ -137,6 +138,17 @@ def run_pipeline(
                 {},
             )
 
+        if request["diarize"]:
+            # Captions are fetched text — there is no audio to diarize. Say
+            # so instead of silently ignoring the enabled setting.
+            _emit(
+                on_event,
+                "warning",
+                "diarize",
+                "Diarization skipped: YouTube captions provide no audio to diarize",
+                {"code": "diarization_skipped"},
+            )
+
     elif input_type == InputType.URL:
         if title is None:
             try:
@@ -179,6 +191,8 @@ def run_pipeline(
             hf_token=request["hf_token"],
             on_event=on_event,
         )
+        if request["diarize"]:
+            diarize_step(audio_path=audio_path, json_path=json_path, on_event=on_event)
 
     else:
         audio_path = Path(source).resolve()
@@ -205,6 +219,8 @@ def run_pipeline(
             hf_token=request["hf_token"],
             on_event=on_event,
         )
+        if request["diarize"]:
+            diarize_step(audio_path=audio_path, json_path=json_path, on_event=on_event)
 
     # --- Generate chapters (optional; never fatal — spec: chapters fault isolation) ---
     chapters_path = output_dir / f"{stem}_chapters.json"

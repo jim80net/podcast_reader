@@ -122,6 +122,7 @@ class SettingsBody(BaseModel):
     chapter_model: str
     chapter_provider: str | None = None
     custom_provider_url: str | None = None
+    diarize: bool | None = None
 
     def to_settings(self, current: EngineSettings) -> EngineSettings:
         return EngineSettings(
@@ -141,6 +142,7 @@ class SettingsBody(BaseModel):
                 if self.custom_provider_url is not None
                 else current["custom_provider_url"]
             ),
+            diarize=self.diarize if self.diarize is not None else current["diarize"],
         )
 
 

@@ -102,6 +102,9 @@ def _run_one_shot(argv: list[str]) -> None:
         chapter_provider=args.provider,
         chapter_api_key=os.environ.get(PROVIDERS[args.provider]["key_env"]),
         custom_provider_url=os.environ.get("PODCAST_READER_CUSTOM_PROVIDER_URL", ""),
+        # CLI diarization stays the whisper-ctranslate2 --hf_token path; the
+        # pack-based diarize step is an engine setting (desktop app).
+        diarize=False,
     )
 
     try:

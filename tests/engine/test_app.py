@@ -639,6 +639,34 @@ class TestSettings:
         assert fetched["custom_provider_url"] == "https://llm.example.com/v1"
         assert load_settings(tmp_path)["chapter_provider"] == "custom"
 
+    def test_diarize_roundtrip_and_default(self, engine: _Engine, tmp_path: Path) -> None:
+        """diarization-worker spec: `diarize` defaults false, settable via
+        PUT /v1/settings."""
+        current = engine.client.get("/v1/settings", headers=engine.headers).json()
+        assert current["diarize"] is False
+
+        current["diarize"] = True
+        put = engine.client.put("/v1/settings", json=current, headers=engine.headers)
+        assert put.status_code == 200
+
+        assert engine.client.get("/v1/settings", headers=engine.headers).json()["diarize"] is True
+        assert load_settings(tmp_path)["diarize"] is True
+
+    def test_put_without_diarize_keeps_current_value(self, engine: _Engine, tmp_path: Path) -> None:
+        """A PUT from a pre-change client (no `diarize` field) must not reset
+        the persisted value (established optional-field discipline)."""
+        current = engine.client.get("/v1/settings", headers=engine.headers).json()
+        current["diarize"] = True
+        assert (
+            engine.client.put("/v1/settings", json=current, headers=engine.headers).status_code
+            == 200
+        )
+
+        del current["diarize"]
+        put = engine.client.put("/v1/settings", json=current, headers=engine.headers)
+        assert put.status_code == 200
+        assert load_settings(tmp_path)["diarize"] is True
+
     def test_put_settings_unknown_provider_400(self, engine: _Engine, tmp_path: Path) -> None:
         """M1: an unknown chapter_provider is rejected at PUT time (mirrors
         PUT /v1/keys) instead of surfacing later as an opaque job warning."""

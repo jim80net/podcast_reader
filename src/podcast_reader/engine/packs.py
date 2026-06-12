@@ -375,16 +375,35 @@ REGISTRY: dict[str, PackEntry] = {
         install_dir="workers/diarization",
         extract_wheels=False,
         # Unpublished (per S5): no download spec until the release pipeline
-        # publishes a pack-diarization-v* artifact (task 7.5).
+        # publishes a pack-diarization-v* artifact (task 7.5). Everything
+        # else reflects the stack the 5.1 freeze smoke proved
+        # (packaging/DIARIZATION_SMOKE.md): 7.5 only flips `files`.
         files=None,
-        version="0",
-        component_versions={},
-        compat={},
+        version="1",
+        component_versions={
+            # The argv/turns.json contract the engine's diarize step speaks.
+            "worker_contract": "1",
+            "pyannote_audio": "4.0.4",
+            "torch": "2.12.0+cpu",
+        },
+        compat={"worker_contract": "1"},
         licenses=[
             LicenseNotice(
                 name="MIT (pyannote.audio)",
-                text="Diarization pipeline by pyannote.audio, MIT-licensed.",
-            )
+                text=(
+                    "Speaker diarization powered by pyannote.audio "
+                    "(https://github.com/pyannote/pyannote-audio), MIT-licensed; "
+                    "pipeline models by pyannoteAI/CNRS, MIT-licensed."
+                ),
+            ),
+            LicenseNotice(
+                name="BSD-3-Clause (PyTorch)",
+                text=(
+                    "This pack bundles the CPU build of PyTorch "
+                    "(https://pytorch.org), BSD-3-Clause licensed, "
+                    "(c) PyTorch contributors."
+                ),
+            ),
         ],
     ),
 }

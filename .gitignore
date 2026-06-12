@@ -48,3 +48,8 @@ __pycache__/
 *.pyc
 .gitnexus
 *.title
+
+# Packaging build outputs (diarization freeze smoke, engine builds)
+packaging/.venv-*/
+packaging/build/
+packaging/dist/

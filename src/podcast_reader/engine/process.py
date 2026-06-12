@@ -191,6 +191,7 @@ def make_pipeline_runner(base: Path, key_store: dict[str, str] | None = None) ->
             chapter_provider=provider,
             chapter_api_key=_resolve_chapter_key(provider, keys),
             custom_provider_url=settings["custom_provider_url"],
+            diarize=settings["diarize"],
         )
         staged = run_pipeline(request, on_event)
         result = _commit_artifacts(staged, library.entry_dir(library_dir, source_id))
