@@ -50,6 +50,18 @@ describe('applyPipelineEvent', () => {
     const jobs = hydrateJobs([job()])
     const { jobs: next } = applyPipelineEvent(jobs, event())
     expect(next.get('j1')?.state).toBe('running')
+    const finished = applyPipelineEvent(jobs, event({ kind: 'step_finished' }))
+    expect(finished.jobs.get('j1')?.state).toBe('running')
+  })
+
+  it('does not infer running from a warning — only step events mean pickup', () => {
+    const jobs = hydrateJobs([job()])
+    const { jobs: next } = applyPipelineEvent(
+      jobs,
+      event({ kind: 'warning', step: null, message: 'chapters skipped' })
+    )
+    expect(next.get('j1')?.state).toBe('queued')
+    expect(next.get('j1')?.events).toHaveLength(1) // still recorded on the timeline
   })
 
   it('marks the job done on job_done', () => {

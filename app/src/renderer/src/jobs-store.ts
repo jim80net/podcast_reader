@@ -53,9 +53,11 @@ export function applyPipelineEvent(jobs: JobsMap, event: PipelineEvent): ApplyRe
 function nextState(record: JobRecord, event: PipelineEvent): JobRecord['state'] {
   if (event.kind === 'job_done') return 'done'
   if (event.kind === 'job_failed') return 'failed'
-  // A step event means the worker picked the job up; any other state (incl.
-  // terminal ones the records already established) is never regressed.
-  if (record.state === 'queued') return 'running'
+  // Only a step event means the worker picked the job up (the engine
+  // transitions to running before the pipeline emits anything); other kinds
+  // (warning) never promote, and established states are never regressed.
+  const isStepEvent = event.kind === 'step_started' || event.kind === 'step_finished'
+  if (isStepEvent && record.state === 'queued') return 'running'
   return record.state
 }
 
