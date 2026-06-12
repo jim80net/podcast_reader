@@ -42,7 +42,7 @@ function makeRegistrar() {
   }
 }
 
-function makeManager(opts: { ready?: boolean } = {}) {
+function makeManager(opts: { ready?: boolean; results?: Record<string, unknown> } = {}) {
   const calls: unknown[][] = []
   const client =
     (opts.ready ?? true)
@@ -53,13 +53,14 @@ function makeManager(opts: { ready?: boolean } = {}) {
               (_t, prop: string) =>
               (...args: unknown[]) => {
                 calls.push([prop, ...args])
-                return Promise.resolve(`${prop}-result`)
+                return Promise.resolve(opts.results?.[prop] ?? `${prop}-result`)
               }
           }
         )
       : null
   const manager = {
     client,
+    port: client !== null ? 51234 : null,
     status: { state: client !== null ? 'ready' : 'starting' },
     keyStorageMode: 'encrypted',
     putKey: (...args: unknown[]) => {
@@ -126,6 +127,36 @@ describe('registerIpcHandlers', () => {
     expect(calls).toContainEqual(['listPacks'])
     expect(calls).toContainEqual(['installPack', 'cuda-runtime'])
     expect(calls).toContainEqual(['uninstallPack', 'model-tiny'])
+  })
+
+  it('composes the pairing display from the engine mint and the manager port', async () => {
+    const reg = makeRegistrar()
+    const { manager, calls } = makeManager({
+      results: { mintPairing: { code: 'ABC234', expires_at: 1234.5 } }
+    })
+    registerIpcHandlers(reg.ipcMain, manager, fakeUpdates, makeConfig())
+    await expect(reg.invoke(CHANNELS.pairStart)).resolves.toEqual({
+      port: 51234,
+      code: 'ABC234',
+      expires_at: 1234.5
+    })
+    expect(calls).toContainEqual(['mintPairing'])
+  })
+
+  it('rejects pairing while the engine is not ready', async () => {
+    const reg = makeRegistrar()
+    registerIpcHandlers(reg.ipcMain, makeManager({ ready: false }).manager, fakeUpdates, makeConfig())
+    await expect(reg.invoke(CHANNELS.pairStart)).rejects.toThrow(/not ready/i)
+  })
+
+  it('routes cookie-jar listing and deletion to the engine client', async () => {
+    const reg = makeRegistrar()
+    const { manager, calls } = makeManager()
+    registerIpcHandlers(reg.ipcMain, manager, fakeUpdates, makeConfig())
+    await reg.invoke(CHANNELS.cookiesList)
+    await reg.invoke(CHANNELS.cookiesDelete, 'example.com')
+    expect(calls).toContainEqual(['listCookieJars'])
+    expect(calls).toContainEqual(['deleteCookieJar', 'example.com'])
   })
 
   it('serves the first-run flag from the app config, engine-independent', async () => {

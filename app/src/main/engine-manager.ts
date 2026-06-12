@@ -50,6 +50,11 @@ export class EngineManager {
     return this.engineClient
   }
 
+  /** The connected engine's port (pairing display needs it). Null until ready. */
+  get port(): number | null {
+    return this.handle?.port ?? null
+  }
+
   get keyStorageMode(): KeyStorageMode {
     return this.deps.vault.mode
   }

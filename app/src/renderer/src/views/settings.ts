@@ -1,8 +1,12 @@
+import { mountCookiesSection } from './cookies-section'
 import { mountPacksSection } from './packs-section'
+import { mountPairingSection } from './pairing-section'
 import { el } from '../dom'
 import { extractEngineDetail, settingsErrorField } from '../engine-error'
 import { keyPlaceholder, modelPlaceholder, toSettingsUpdate } from '../settings-form'
+import type { CookiesSection } from './cookies-section'
 import type { PacksSection } from './packs-section'
+import type { PairingSection } from './pairing-section'
 import type { SettingsFormValues } from '../settings-form'
 import type { ViewCleanup } from '../store'
 import type { EngineSettings, ProviderInfo } from '../../../shared/types'
@@ -22,6 +26,8 @@ export function mountSettings(container: HTMLElement): ViewCleanup {
   let disposed = false
   let loaded = false
   let packsSection: PacksSection | null = null
+  let pairingSection: PairingSection | null = null
+  let cookiesSection: CookiesSection | null = null
 
   async function load(): Promise<void> {
     try {
@@ -260,6 +266,14 @@ export function mountSettings(container: HTMLElement): ViewCleanup {
     container.append(packsContainer)
     packsSection = mountPacksSection(packsContainer, () => deviceSelect.value)
 
+    // Extension pairing + captured-login management (chrome-extension change,
+    // task 3.2): Settings sections, not new views (design decision 11).
+    const pairingContainer = el('section', { class: 'pairing-section' })
+    const cookiesContainer = el('section', { class: 'cookies-section' })
+    container.append(pairingContainer, cookiesContainer)
+    pairingSection = mountPairingSection(pairingContainer)
+    cookiesSection = mountCookiesSection(cookiesContainer)
+
     form.addEventListener('submit', (event) => {
       event.preventDefault()
       clearErrors()
@@ -312,5 +326,7 @@ export function mountSettings(container: HTMLElement): ViewCleanup {
     disposed = true
     unsubscribeStatus()
     packsSection?.cleanup()
+    pairingSection?.cleanup()
+    cookiesSection?.cleanup()
   }
 }

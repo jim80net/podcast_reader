@@ -1,5 +1,6 @@
 import { SseParser } from './sse'
 import type {
+  CookieJarInfo,
   EngineSettings,
   HealthInfo,
   JobRecord,
@@ -7,6 +8,7 @@ import type {
   KeyTestResult,
   LibraryEntry,
   PacksResponse,
+  PairStartResponse,
   PipelineEvent,
   ProviderInfo,
   SettingsUpdate
@@ -131,6 +133,22 @@ export class EngineClient {
   // engine/app.py:304 (DELETE /v1/packs/{id} — 409 only while installing, per S1)
   async uninstallPack(packId: string): Promise<void> {
     await this.request('DELETE', `/v1/packs/${encodeURIComponent(packId)}`)
+  }
+
+  // engine/app.py:265 (POST /v1/pair — bearer-authed mint; the code rides
+  // only this response and the Settings display, never any file or log)
+  mintPairing(): Promise<PairStartResponse> {
+    return this.json('POST', '/v1/pair')
+  }
+
+  // engine/app.py:512 (GET /v1/cookies — metadata only, never jar content)
+  listCookieJars(): Promise<CookieJarInfo[]> {
+    return this.json('GET', '/v1/cookies')
+  }
+
+  // engine/app.py:517 (DELETE /v1/cookies/{domain} — 404 when absent)
+  async deleteCookieJar(domain: string): Promise<void> {
+    await this.request('DELETE', `/v1/cookies/${encodeURIComponent(domain)}`)
   }
 
   // engine/app.py:244 (GET /v1/events — SSE; consumed by EventStream below)

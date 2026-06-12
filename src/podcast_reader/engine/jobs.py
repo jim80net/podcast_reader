@@ -48,6 +48,28 @@ MAX_TERMINAL_JOBS = 200
 
 _TERMINAL_STATES = frozenset({"done", "failed", "interrupted"})
 
+#: Engine-face hint for ``download_auth_required`` (per N2): the affordances
+#: an engine job's user actually has — never the broken Chrome/Windows
+#: cookies-from-browser path.
+_AUTH_REQUIRED_HINT = (
+    "Share your login for this site via the browser extension, "
+    "or import a cookies file in Settings."
+)
+
+
+def _job_error(exc: PipelineError) -> JobError:
+    """Map a pipeline failure to a :class:`JobError`, authoring engine-face hints.
+
+    ``download_auth_required`` is raised with a neutral message and no hint
+    (per U2) — the raise site cannot know which face is running. The job
+    store is the engine face, so it authors the extension + cookies-file
+    hint here; hints authored at the raise site pass through verbatim.
+    """
+    hint = exc.hint
+    if exc.code == "download_auth_required" and not hint:
+        hint = _AUTH_REQUIRED_HINT
+    return JobError(code=exc.code, message=exc.message, hint=hint)
+
 
 class JobStateError(Exception):
     """A transition was requested from a state that does not allow it.
@@ -303,9 +325,7 @@ class JobStore:
         try:
             result = self._runner(record, on_event)
         except PipelineError as exc:
-            self._fail(
-                job_id, JobError(code=exc.code, message=exc.message, hint=exc.hint), on_event
-            )
+            self._fail(job_id, _job_error(exc), on_event)
         except Exception as exc:  # worker must never die; unexpected → internal
             self._fail(job_id, JobError(code="internal", message=str(exc), hint=""), on_event)
         else:

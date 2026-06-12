@@ -79,6 +79,20 @@ export function registerIpcHandlers(
   ipcMain.handle(CHANNELS.packsInstall, (_e, packId: string) => client().installPack(packId))
   ipcMain.handle(CHANNELS.packsUninstall, (_e, packId: string) => client().uninstallPack(packId))
 
+  // Extension pairing: mint engine-side, compose with the port so Settings
+  // can show the combined <port>-<code> paste string (design decision 11).
+  // The code crosses this bridge exactly once, render-bound — never logged.
+  ipcMain.handle(CHANNELS.pairStart, async () => {
+    const minted = await client().mintPairing()
+    const port = manager.port
+    if (port === null) throw new Error('engine is not ready')
+    return { port, code: minted.code, expires_at: minted.expires_at }
+  })
+
+  // Cookie jars: metadata listing + delete only — jar content has no IPC path.
+  ipcMain.handle(CHANNELS.cookiesList, () => client().listCookieJars())
+  ipcMain.handle(CHANNELS.cookiesDelete, (_e, domain: string) => client().deleteCookieJar(domain))
+
   // First-run flag (setup wizard gate) — app-side state, no engine involved.
   ipcMain.handle(CHANNELS.firstRunGet, () => config.isFirstRunComplete())
   ipcMain.handle(CHANNELS.firstRunComplete, () => config.markFirstRunComplete())

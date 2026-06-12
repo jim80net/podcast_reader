@@ -44,6 +44,11 @@
 !app/**/*.json
 !app/**/*.html
 
+# Likewise the Chrome extension (extension/); its own .gitignore covers
+# node_modules/, dist/, and the build zip
+!extension/**/*.json
+!extension/**/*.html
+
 # Python
 __pycache__/
 *.pyc

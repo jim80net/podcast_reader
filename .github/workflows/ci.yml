@@ -138,6 +138,48 @@ jobs:
       - name: Packaging pipeline proof (engine-less linux dir build)
         run: node scripts/dist.mjs --linux dir
 
+  extension:
+    # Chrome extension (extension/): typecheck, lint, unit tests, MV3 build,
+    # then Playwright e2e under xvfb against the app's mock engine
+    # (../app/tests/mock-engine — node builtins only, no app npm install
+    # needed). Design decision 13: one job mirroring the node job's shape.
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: extension
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          # >= 23.6 required: the e2e mock engine runs .ts via native type stripping
+          node-version: 24
+          cache: npm
+          cache-dependency-path: extension/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Lint
+        run: npm run lint
+      - name: Unit tests
+        run: npm run test
+      - name: Build (vite MV3 + deterministic zip)
+        run: npm run build
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('extension/package-lock.json') }}
+      - name: Install Playwright chromium
+        run: npx playwright install chromium
+      - name: Mock-engine e2e (xvfb — extensions need a headed Chromium)
+        run: xvfb-run -a npx playwright test
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: extension-playwright-results
+          path: extension/test-results/
+
   app-e2e:
     # Playwright e2e against the mock engine, then the real-engine smoke
     # (integration project) against `uv run podcast-reader serve`.

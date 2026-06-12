@@ -107,6 +107,46 @@ attributions. Approximate download sizes:
 not work unsigned). Signed/notarized release pipelines are gated on
 code-signing credentials. Details in [`app/README.md`](app/README.md).
 
+### Chrome extension (`extension/`)
+
+A Manifest V3 extension (see [`extension/README.md`](extension/README.md))
+adds "transcribe this tab" to Chrome: submit the current page from the
+toolbar popup or the right-click context menu, watch live step progress in
+the popup, and get a notification when the transcript is ready — all
+against the desktop app's engine over its authenticated `/v1` API.
+
+**Install (side-load, while unpublished):** the extension is not yet on the
+Chrome Web Store, so it installs unpacked: build it (`cd extension && npm
+install && npm run build`, or unzip a release
+`podcast-reader-extension.zip`), open `chrome://extensions`, enable
+**Developer mode**, click **Load unpacked**, and select the `extension/dist`
+directory (or the unzipped folder). Requires Chrome 120+.
+
+**Pairing:** the extension never reads the engine's token file. In the
+desktop app open **Settings → Connect browser extension** and click the
+mint button — it shows a combined `<port>-<code>` string (the 6-character
+code is single-use and expires in 5 minutes). Paste it into the extension
+popup's pairing form (or enter port and code separately). The popup
+exchanges the code for the engine's bearer token, verifies it against
+`GET /v1/health`, and stores `{port, token}` in `chrome.storage.local`.
+Pairing survives restarts (the engine port is fixed per install); if the
+popup ever reports the pairing expired (token rotated), mint a new code and
+pair again. When the desktop app isn't running, the popup offers to launch
+it instead.
+
+**Cookie capture (members-only sources):** when a download fails because
+the source requires a login (`download_auth_required`), the popup offers
+"Share your `<domain>` login". Clicking it asks Chrome — at that moment, for
+that site only — for permission to read its cookies; declining changes
+nothing. On grant, the extension serializes the site's cookies into a
+Netscape jar, pushes it to the engine (`PUT /v1/cookies`), and offers
+one-click resubmission. The extension keeps nothing; the engine stores the
+jar at `<data_dir>/cookies/<domain>.txt` (owner-only permissions) and uses
+it for that site's downloads **until you delete or replace it** — manage
+jars in the desktop app under **Settings → Cookies** (the list shows only
+domain and capture date; cookie contents are never displayed, logged, or
+included in diagnostics).
+
 ### Frozen engine builds (`packaging/`)
 
 The production engine ships as a PyInstaller onedir (engine +

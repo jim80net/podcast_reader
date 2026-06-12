@@ -17,6 +17,7 @@ import httpx
 import pytest
 
 from podcast_reader.engine.app import create_app
+from podcast_reader.engine.cookies import jar_path, store_jar
 from podcast_reader.engine.jobs import JobStore
 from podcast_reader.engine.library import entry_dir, list_entries, source_identity
 from podcast_reader.engine.process import (
@@ -616,3 +617,69 @@ class TestServeSmoke:
             probe.bind(("127.0.0.1", port))
         finally:
             probe.close()
+
+
+class TestJarAwareCookieResolution:
+    """Spec: Jar-aware download step — stored jar wins over YT_DLP_COOKIES."""
+
+    def _store_jar(self, base: Path, domain: str) -> Path:
+        store_jar(base, domain, f"{domain}\tTRUE\t/\tTRUE\t1900000000\tsession\tvalue")
+        return jar_path(base, domain)
+
+    def _run(self, base: Path, source: str) -> MagicMock:
+        with patch(
+            "podcast_reader.engine.process.run_pipeline", side_effect=_fake_run_pipeline
+        ) as mock_run:
+            runner = make_pipeline_runner(base)
+            runner(new_job_record(job_id="j1", source=source, title=None), _noop)
+        return mock_run
+
+    def test_matching_jar_feeds_the_download(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Spec scenario: a jar stored for x.com backs an x.com job — the
+        pipeline's cookies input is the jar path."""
+        monkeypatch.setenv("PODCAST_READER_DATA_DIR", str(tmp_path))
+        monkeypatch.delenv("YT_DLP_COOKIES", raising=False)
+        jar = self._store_jar(tmp_path, "x.com")
+        mock_run = self._run(tmp_path, "https://x.com/user/status/1")
+        assert mock_run.call_args.args[0]["cookies"] == str(jar)
+
+    def test_subdomain_host_matches_the_jar(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Spec scenario: a media.example.com source selects the stored
+        example.com jar (suffix match)."""
+        monkeypatch.setenv("PODCAST_READER_DATA_DIR", str(tmp_path))
+        monkeypatch.delenv("YT_DLP_COOKIES", raising=False)
+        jar = self._store_jar(tmp_path, "example.com")
+        mock_run = self._run(tmp_path, "https://media.example.com/video/1")
+        assert mock_run.call_args.args[0]["cookies"] == str(jar)
+
+    def test_jar_takes_precedence_over_env(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("PODCAST_READER_DATA_DIR", str(tmp_path))
+        monkeypatch.setenv("YT_DLP_COOKIES", "/env/cookies.txt")
+        jar = self._store_jar(tmp_path, "x.com")
+        mock_run = self._run(tmp_path, "https://x.com/user/status/1")
+        assert mock_run.call_args.args[0]["cookies"] == str(jar)
+
+    def test_no_match_falls_back_to_env(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Spec scenario: no stored jar matches — YT_DLP_COOKIES applies as
+        before this change."""
+        monkeypatch.setenv("PODCAST_READER_DATA_DIR", str(tmp_path))
+        monkeypatch.setenv("YT_DLP_COOKIES", "/env/cookies.txt")
+        self._store_jar(tmp_path, "example.com")
+        mock_run = self._run(tmp_path, "https://other.org/video/1")
+        assert mock_run.call_args.args[0]["cookies"] == "/env/cookies.txt"
+
+    def test_no_match_no_env_means_no_cookies(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("PODCAST_READER_DATA_DIR", str(tmp_path))
+        monkeypatch.delenv("YT_DLP_COOKIES", raising=False)
+        mock_run = self._run(tmp_path, "https://other.org/video/1")
+        assert mock_run.call_args.args[0]["cookies"] is None

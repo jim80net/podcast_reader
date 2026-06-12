@@ -157,20 +157,41 @@ def engine_version() -> str:
 
 
 def atomic_write_json(path: Path, payload: object, *, mode: int | None = None) -> None:
-    """Write *payload* as JSON via temp file + ``os.replace`` under the module lock.
+    """Write *payload* as JSON via :func:`atomic_write_text`."""
+    atomic_write_text(path, json.dumps(payload, indent=2), mode=mode)
+
+
+def atomic_write_text(path: Path, data: str, *, mode: int | None = None) -> None:
+    """Write *data* via temp file + ``os.replace`` under the module lock.
 
     With *mode*, the temp file is created with that mode applied at ``os.open``
     time (``O_CREAT | O_EXCL``), so the payload is never readable by other
-    users, even transiently.
+    users, even transiently. Public so secret-bearing writers outside this
+    module (the cookie-jar store) share one secure-write implementation.
     """
     tmp = path.with_suffix(path.suffix + ".tmp")
-    data = json.dumps(payload, indent=2)
     with _WRITE_LOCK:
         if mode is None:
             tmp.write_text(data)
         else:
             _secure_write_text(tmp, data, mode)
         os.replace(tmp, path)
+
+
+def ensure_owner_only_dir(path: Path) -> None:
+    """Re-harden an existing secret-bearing directory to 0700 (POSIX only).
+
+    ``mkdir(mode=0o700, exist_ok=True)`` applies the mode only on creation —
+    a directory that already existed with loose permissions keeps them. Public
+    for the same reason as :func:`atomic_write_text`: secret-bearing writers
+    outside this module (the cookie-jar store) share one hardening
+    implementation. No-op on Windows (see module docstring — ACLs carry the
+    protection there).
+    """
+    if os.name != "posix":  # pragma: no cover — exercised on Windows only
+        return
+    if stat.S_IMODE(path.stat().st_mode) != 0o700:
+        path.chmod(0o700)
 
 
 def _ensure_owner_only(path: Path) -> None:

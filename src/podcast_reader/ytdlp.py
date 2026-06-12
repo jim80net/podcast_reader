@@ -1,13 +1,21 @@
 """Download audio from any yt-dlp-supported platform.
 
-A failed download raises the structured ``PipelineError("download_failed",
-...)`` (per S7) — extractor breakage is an expected, user-explainable
-failure, not an internal error. When the resolved yt-dlp is the *managed*
-copy (it resides in the user-data tools dir), a failure triggers one
+A failed download raises a structured ``PipelineError`` (per S7) —
+extractor breakage is an expected, user-explainable failure, not an
+internal error. Authentication-required failures carry the distinct code
+``download_auth_required`` with a neutral, hint-free message (per U2): the
+raise site cannot know which face is running, so the hint is authored by
+the face — the CLI prints the ``YT_DLP_COOKIES`` advice, the engine job
+store maps the extension + cookies-file-import hint. Everything else is
+``download_failed``.
+
+When the resolved yt-dlp is the *managed* copy (it resides in the
+user-data tools dir), a ``download_failed`` failure triggers one
 ``yt-dlp -U`` self-update and exactly one retry (per Q3): the gate is
 residence alone — no engine/CLI flag — so any caller (engine job or CLI)
 heals identically whenever the managed copy is in play, while PATH/pip
-copies (dev environments) are never touched.
+copies (dev environments) are never touched. ``download_auth_required``
+bypasses the retry (per U2): an update cannot conjure missing credentials.
 """
 
 from __future__ import annotations
@@ -27,6 +35,22 @@ from podcast_reader.types import PipelineError, PipelineEvent
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+#: yt-dlp's actual auth-failure phrasings (per V6), matched case-insensitively.
+#: Anchored phrases, not bare substrings: "login"/"auth" alone misrouted
+#: extractor noise like "author info" or "OAuth" to download_auth_required,
+#: and bare "--cookies"/"authentication" matched option mentions
+#: (deprecation notices) and proxy-layer errors ("Proxy Authentication
+#: Required") — all of which also suppressed the self-heal retry below.
+#: "use --cookies" anchors yt-dlp's raise_login_required suggestion
+#: ("Use --cookies-from-browser or --cookies ..."), which every
+#: cookie-fixable failure carries.
+_AUTH_STDERR_MARKERS = (
+    "login required",
+    "sign in to confirm",
+    "use --cookies",
+    "authentication needed",
+)
 
 
 def build_download_args(url: str, output_dir: Path, cookies: Path | None = None) -> list[str]:
@@ -65,15 +89,21 @@ def download_audio(
     """Download and extract audio as mp3 from a URL.
 
     Returns the path to the downloaded mp3 file. A yt-dlp failure raises a
-    structured ``download_failed`` error (per S7); when the resolved yt-dlp
-    is the managed user-data copy, the failure first triggers a single
-    ``yt-dlp -U`` + retry (per Q3) with a warning event — extractor breakage
-    heals in-job without an app release. A second failure surfaces the
-    structured error; there are no further retries.
+    structured ``download_failed`` error (per S7), or ``download_auth_required``
+    for auth-detected failures (per U2). When the resolved yt-dlp is the
+    managed user-data copy, a ``download_failed`` failure first triggers a
+    single ``yt-dlp -U`` + retry (per Q3) with a warning event — extractor
+    breakage heals in-job without an app release. A second failure surfaces
+    the structured error; there are no further retries, and
+    ``download_auth_required`` never retries at all.
     """
     try:
         return _download_once(url, output_dir, cookies)
-    except PipelineError:
+    except PipelineError as exc:
+        if exc.code != "download_failed":
+            # download_auth_required (per U2): a yt-dlp update cannot conjure
+            # missing credentials — surface immediately, no -U, no retry.
+            raise
         binary = resolve_tool("yt-dlp")
         if not is_managed(binary):
             raise
@@ -102,10 +132,13 @@ def _download_once(url: str, output_dir: Path, cookies: Path | None) -> Path:
     result = run_child(args)
     if result.returncode != 0:
         stderr = result.stderr.strip()
-        hint = ""
-        if "login" in stderr.lower() or "auth" in stderr.lower():
-            hint = "Set YT_DLP_COOKIES to a cookies file path for authenticated content."
-        raise PipelineError("download_failed", f"yt-dlp failed: {stderr}", hint)
+        # Auth-detected failures get the distinct code with a neutral message
+        # and NO hint (per U2) — the face authors its own affordances. The
+        # detection anchors on yt-dlp's actual phrasings (per V6).
+        stderr_lower = stderr.lower()
+        auth_required = any(marker in stderr_lower for marker in _AUTH_STDERR_MARKERS)
+        code = "download_auth_required" if auth_required else "download_failed"
+        raise PipelineError(code, f"yt-dlp failed: {stderr}", "")
 
     # Find the downloaded mp3 file
     mp3_files = sorted(output_dir.glob("*.mp3"), key=lambda p: p.stat().st_mtime, reverse=True)

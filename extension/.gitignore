@@ -1,0 +1,6 @@
+node_modules/
+dist/
+podcast-reader-extension.zip
+*.tsbuildinfo
+test-results/
+playwright-report/

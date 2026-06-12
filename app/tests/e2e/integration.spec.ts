@@ -15,7 +15,8 @@ import type {
   JobRecord,
   LibraryEntry,
   PacksResponse,
-  PackStatus
+  PackStatus,
+  PairStartResponse
 } from '../../src/shared/types'
 
 /**
@@ -84,6 +85,10 @@ const HARDWARE_INFO_KEYS: Record<keyof HardwareInfo, true> = {
   platform: true,
   nvidia_gpu: true,
   gpu_names: true
+}
+const PAIR_START_KEYS: Record<keyof PairStartResponse, true> = {
+  code: true,
+  expires_at: true
 }
 const PACK_STATUS_KEYS: Record<keyof PackStatus, true> = {
   id: true,
@@ -160,6 +165,26 @@ test('real engine: dev-fallback spawn, handshake, key-set parity, clean quit', a
     // EngineSettings parity.
     const settings = (await (await engine('/v1/settings')).json()) as EngineSettings
     expectKeySetEquality(settings, ENGINE_SETTINGS_KEYS, 'EngineSettings')
+
+    // Pairing round-trip (chrome-extension task 8.2): mint (bearer-authed)
+    // -> claim on the engine's single unauthenticated route (JSON content
+    // type, no Origin — node fetch sends neither gate-tripping header) ->
+    // authed health with the claimed token. Brackets the mock engine's
+    // pairing fidelity against the real engine/pairing.py.
+    const mint = (await (await engine('/v1/pair', { method: 'POST' })).json()) as PairStartResponse
+    expectKeySetEquality(mint, PAIR_START_KEYS, 'PairStartResponse')
+    const claim = await fetch(`http://127.0.0.1:${discovery.port}/v1/pair/claim`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ code: mint.code })
+    })
+    expect(claim.status, 'pair claim').toBe(200)
+    const claimed = (await claim.json()) as { token: string }
+    expect(claimed.token).toBe(engineState.token)
+    const pairedHealth = await fetch(`http://127.0.0.1:${discovery.port}/v1/health`, {
+      headers: { authorization: `Bearer ${claimed.token}` }
+    })
+    expect(pairedHealth.status, 'authed health with the claimed token').toBe(200)
 
     // Pack payload parity (task 6.4): the wizard/Settings hydration source.
     const packsResponse = (await (await engine('/v1/packs')).json()) as PacksResponse

@@ -111,8 +111,9 @@ def _run_one_shot(argv: list[str]) -> None:
         result = run_pipeline(request, on_event=_print_event)
     except PipelineError as exc:
         print(f"Error: {exc.message}", file=sys.stderr)
-        if exc.hint:
-            print(exc.hint, file=sys.stderr)
+        hint = _cli_hint(exc)
+        if hint:
+            print(hint, file=sys.stderr)
         sys.exit(1)
 
     print()
@@ -125,6 +126,19 @@ def _run_one_shot(argv: list[str]) -> None:
     win_path = _wsl_path(Path(result["html_path"]))
     if win_path:
         print(f"  Windows: {win_path}")
+
+
+def _cli_hint(exc: PipelineError) -> str:
+    """The CLI-face hint for a pipeline failure.
+
+    ``download_auth_required`` is raised with a neutral message and no hint
+    (per U2) — the face authors its own affordances, and the CLI's is the
+    ``YT_DLP_COOKIES`` environment variable (copy unchanged from before the
+    split). Hints authored at the raise site pass through verbatim.
+    """
+    if exc.code == "download_auth_required" and not exc.hint:
+        return "Set YT_DLP_COOKIES to a cookies file path for authenticated content."
+    return exc.hint
 
 
 def _print_event(event: PipelineEvent) -> None:

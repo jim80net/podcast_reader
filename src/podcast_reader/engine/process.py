@@ -28,6 +28,7 @@ import uvicorn
 
 from podcast_reader.engine import library
 from podcast_reader.engine.app import create_app
+from podcast_reader.engine.cookies import resolve_jar_for_source
 from podcast_reader.engine.events import EventBus
 from podcast_reader.engine.jobs import JobStore
 from podcast_reader.engine.managed_tools import (
@@ -176,6 +177,10 @@ def make_pipeline_runner(base: Path, key_store: dict[str, str] | None = None) ->
         staging = library.staging_dir(library_dir, source_id)
         staging.mkdir(parents=True, exist_ok=True)
 
+        # Jar-aware download (cookie-management spec): a stored jar whose
+        # domain suffix-matches the source host wins over the YT_DLP_COOKIES
+        # env fallback, which still applies when no jar matches.
+        jar = resolve_jar_for_source(base, source)
         provider = settings["chapter_provider"]
         request = PipelineRequest(
             source=record["source"],
@@ -187,7 +192,7 @@ def make_pipeline_runner(base: Path, key_store: dict[str, str] | None = None) ->
             whisper_device=settings["whisper_device"],
             hf_token=os.environ.get("HF_TOKEN"),
             sentences=settings["sentences"],
-            cookies=os.environ.get("YT_DLP_COOKIES"),
+            cookies=str(jar) if jar is not None else os.environ.get("YT_DLP_COOKIES"),
             chapter_provider=provider,
             chapter_api_key=_resolve_chapter_key(provider, keys),
             custom_provider_url=settings["custom_provider_url"],

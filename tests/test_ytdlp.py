@@ -109,20 +109,76 @@ class TestDownloadAudio:
         — an expected, user-explainable failure, not an internal error."""
         with patch("podcast_reader.ytdlp.run_child") as mock_run:
             mock_run.return_value = subprocess.CompletedProcess(
-                args=[], returncode=1, stdout="", stderr="ERROR: login required"
+                args=[], returncode=1, stdout="", stderr="ERROR: unable to extract"
             )
             with pytest.raises(PipelineError, match="yt-dlp failed") as excinfo:
                 download_audio("https://x.com/user/status/123", tmp_path)
         assert excinfo.value.code == "download_failed"
 
-    def test_auth_error_suggests_cookies_in_hint(self, tmp_path: Path) -> None:
+    @pytest.mark.parametrize(
+        "stderr",
+        [
+            "ERROR: login required",
+            "ERROR: authentication needed to access this content",
+            # Real yt-dlp phrasings (per V6): the detection anchors on these.
+            "ERROR: [youtube] dQw4w9WgXcQ: Sign in to confirm you're not a bot. "
+            "Use --cookies-from-browser or --cookies for the authentication.",
+            "ERROR: [youtube] dQw4w9WgXcQ: Sign in to confirm your age. "
+            "This video may be inappropriate for some users.",
+            "ERROR: This video is available to channel members. "
+            "Use --cookies-from-browser or --cookies to pass your credentials.",
+        ],
+    )
+    def test_auth_failure_raises_download_auth_required(self, tmp_path: Path, stderr: str) -> None:
+        """Per U2: auth-detected failures carry the distinct code
+        download_auth_required with a neutral, hint-free message — the hint
+        is authored by the face (CLI: env var; engine: extension + import)."""
         with patch("podcast_reader.ytdlp.run_child") as mock_run:
             mock_run.return_value = subprocess.CompletedProcess(
-                args=[], returncode=1, stdout="", stderr="ERROR: login required"
+                args=[], returncode=1, stdout="", stderr=stderr
+            )
+            with pytest.raises(PipelineError, match="yt-dlp failed") as excinfo:
+                download_audio("https://x.com/user/status/123", tmp_path)
+        assert excinfo.value.code == "download_auth_required"
+        assert excinfo.value.hint == ""
+
+    @pytest.mark.parametrize(
+        "stderr",
+        [
+            # Bare-substring matching ("login"/"auth") misrouted extractor
+            # noise like these to download_auth_required, which also
+            # suppressed the managed-copy self-heal retry (per V6).
+            "ERROR: [generic] clip: unable to extract author info",
+            "ERROR: OAuth token refresh failed unexpectedly",
+            "ERROR: no login form found on the embed page",
+            # Bare "--cookies"/"authentication" substrings over-matched too
+            # (OCR review on PR #12): option mentions and proxy-layer errors
+            # are not missing-credential failures — they must keep
+            # download_failed so the self-heal retry path stays reachable.
+            "ERROR: fragment 3 not found\nWARNING: --cookies-from-browser is deprecated",
+            "ERROR: unable to download video data: HTTP Error 407: Proxy Authentication Required",
+        ],
+    )
+    def test_extractor_noise_stays_download_failed(self, tmp_path: Path, stderr: str) -> None:
+        """Per V6: 'author'/'OAuth'/bare 'login' noise is NOT an auth failure
+        — it must keep the download_failed code so the self-heal retry path
+        stays reachable."""
+        with patch("podcast_reader.ytdlp.run_child") as mock_run:
+            mock_run.return_value = subprocess.CompletedProcess(
+                args=[], returncode=1, stdout="", stderr=stderr
+            )
+            with pytest.raises(PipelineError, match="yt-dlp failed") as excinfo:
+                download_audio("https://x.com/user/status/123", tmp_path)
+        assert excinfo.value.code == "download_failed"
+
+    def test_auth_marker_matching_is_case_insensitive(self, tmp_path: Path) -> None:
+        with patch("podcast_reader.ytdlp.run_child") as mock_run:
+            mock_run.return_value = subprocess.CompletedProcess(
+                args=[], returncode=1, stdout="", stderr="ERROR: LOGIN REQUIRED"
             )
             with pytest.raises(PipelineError) as excinfo:
                 download_audio("https://x.com/user/status/123", tmp_path)
-        assert "YT_DLP_COOKIES" in excinfo.value.hint
+        assert excinfo.value.code == "download_auth_required"
 
 
 class TestDownloadSelfUpdateRetry:
@@ -232,6 +288,30 @@ class TestDownloadSelfUpdateRetry:
         assert download_run.call_count == 1
         update_run.assert_not_called()
         assert events == []
+
+    def test_auth_required_failure_skips_the_self_update_retry(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Spec scenario (per U2): a managed-copy failure with
+        download_auth_required runs no -U and no retry — a yt-dlp update
+        cannot conjure missing credentials, so the error surfaces at once."""
+        binary = self._managed_binary(tmp_path, monkeypatch)
+        events: list[PipelineEvent] = []
+        with (
+            patch("podcast_reader.ytdlp.resolve_tool", return_value=str(binary)),
+            patch(
+                "podcast_reader.ytdlp.run_child",
+                return_value=self._completed([], 1, stderr="ERROR: login required"),
+            ) as download_run,
+            patch("podcast_reader.engine.managed_tools.run_child") as update_run,
+            pytest.raises(PipelineError) as excinfo,
+        ):
+            download_audio(self.URL, tmp_path, on_event=events.append)
+
+        assert excinfo.value.code == "download_auth_required"
+        assert download_run.call_count == 1  # no retry
+        update_run.assert_not_called()  # no -U
+        assert events == []  # no self-update warning
 
     def test_failed_self_update_still_retries_once(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

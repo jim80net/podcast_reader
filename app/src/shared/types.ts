@@ -207,6 +207,22 @@ export interface HealthInfo {
   token_fingerprint: string
 }
 
+// -- src/podcast_reader/engine/app.py:179 (PairMintResponse) --
+// POST /v1/pair response: the code lives only in engine process memory and
+// in this one payload — never persisted, never logged. expires_at is epoch
+// seconds (300 s TTL; a re-mint replaces the pending code).
+export interface PairStartResponse {
+  code: string
+  expires_at: number
+}
+
+// -- src/podcast_reader/engine/cookies.py:48 (CookieJarInfo) --
+// One GET /v1/cookies entry: metadata only — never cookie values.
+export interface CookieJarInfo {
+  domain: string
+  created_at: number
+}
+
 // -- src/podcast_reader/engine/process.py:73 (DiscoveryInfo) --
 export interface DiscoveryInfo {
   port: number
