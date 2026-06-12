@@ -68,6 +68,8 @@ For speaker diarization, set `HF_TOKEN` and accept model terms at:
 | `src/podcast_reader/ytdlp.py` | Download audio via yt-dlp; structured `download_failed` + residence-gated `-U` single-retry heal |
 | `src/podcast_reader/transcribe.py` | Freeze-aware transcribe switch: bundled `whisper-worker` (model-pack validation, cuda→cpu fallback, streamed progress) or whisper-ctranslate2 |
 | `src/podcast_reader/workers/whisper_worker.py` | Frozen whisper worker: argv in, ctranslate2-shaped JSON out, `progress` lines on stderr (lazy faster-whisper via the `worker` extra) |
+| `src/podcast_reader/workers/diarization_worker.py` | Frozen diarization worker: stdlib WAV in (in-memory waveform, no torchcodec/FFmpeg), `turns.json` out, offline HF cache next to the executable (lazy torch/pyannote via the `diarization` extra) |
+| `src/podcast_reader/diarize.py` | Engine diarize step: ffmpeg pre-convert to staged 16 kHz mono WAV, worker spawn from the validated pack, pure-stdlib max-overlap speaker merge, atomic JSON enrichment; warn-don't-fail |
 | `src/podcast_reader/tools.py` | Tool resolution (external tools + frozen bundled workers), spawn kwargs, `run_child_streaming` |
 | `src/podcast_reader/types.py` | TypedDict boundaries: PipelineRequest/Event, JobRecord, LibraryEntry, EngineSettings; `PipelineError` |
 | `src/podcast_reader/pipeline.py` | Shared step runner with progress events (used by CLI and engine) |
@@ -82,9 +84,10 @@ For speaker diarization, set `HF_TOKEN` and accept model terms at:
 | `src/podcast_reader/engine/app.py` | FastAPI app: bearer auth, jobs (incl. confirm/dismiss of awaiting-confirmation), events, library, settings, keys (push + test), providers, packs (list/install/uninstall), health, shutdown routes |
 | `src/podcast_reader/engine/process.py` | Pre-bound socket handshake, discovery file, child reaping, `serve` |
 | `spike/` | Packaging spike evidence (PyInstaller onedir prototype, SPIKE_REPORT.md) |
+| `packaging/` | Production freeze assets: `diarization.spec` + entry script + `DIARIZATION_SMOKE.md` (task 5.1 GO evidence; engine spec lands with group 7) |
 | `src/podcast_reader/providers.py` | Chapter LLM provider registry (base URL, default model, key env, max_tokens) + custom-URL validation |
 | `src/podcast_reader/chapters.py` | Generate chapter markers via any registry provider's OpenAI-compatible `/chat/completions`; `verify_key` minimal round-trip backs `POST /v1/keys/test` |
-| `src/podcast_reader/html.py` | Convert whisper JSON to styled HTML with TOC, key points, pull quotes |
+| `src/podcast_reader/html.py` | Convert whisper JSON to styled HTML with TOC, key points, pull quotes; optional speaker attribution (byte-identical without speakers) |
 | `pyproject.toml` | Dependencies, entry point, tool configuration |
 
 ### Desktop app (`app/` — independent npm package, see `app/README.md`)
@@ -114,8 +117,9 @@ Engine `/v1` surface the app consumes: `health`, `shutdown`, `jobs` (+
 1. **YouTube URL** → `youtube.py` fetches captions → whisper JSON
 2. **Other URL** → `ytdlp.py` downloads audio → `transcribe.py` runs whisper → whisper JSON
 3. **Local file** → `transcribe.py` runs whisper → whisper JSON
-4. `chapters.py` → `<stem>_chapters.json` (if an API key for the selected chapter provider is available — CLI: the provider's env var; engine: pushed key with env fallback)
-5. `html.py` → `<stem>.html` (styled transcript with TOC, key points, pull quotes)
+4. `diarize.py` → segments enriched with `speaker` labels (engine jobs with the `diarize` setting on and the diarization pack installed; skipped with a warning otherwise — CLI diarization stays whisper-ctranslate2 `--hf_token`)
+5. `chapters.py` → `<stem>_chapters.json` (if an API key for the selected chapter provider is available — CLI: the provider's env var; engine: pushed key with env fallback)
+6. `html.py` → `<stem>.html` (styled transcript with TOC, key points, pull quotes, speaker attribution when present)
 
 ## Development
 

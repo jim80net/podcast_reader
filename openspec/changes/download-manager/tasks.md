@@ -28,11 +28,11 @@
 
 ## 5. Diarization (cut-line group — 5.1 gates 5.2–5.5)
 
-- [ ] 5.1 [CUT-LINE GATE] Diarization worker freeze smoke: dedicated CPU-torch venv, `packaging/diarization.spec`, build the frozen worker, run it against the fixture WAV, measure size; if non-viable in size/effort, document the cut-line decision in this file and detach 5.2–5.5 + 7.5 to post-v1 **entirely** — no merge/setting/rendering code lands dormant; the registry entry stays unpublished/`unavailable` (per S5)
-- [ ] 5.2 `workers/diarization_worker.py`: WAV via stdlib `wave`+numpy → in-memory waveform → pyannote pipeline from the pack's offline cache → `turns.json`; lazy imports; unit tests with mocked pipeline
-- [ ] 5.3 Engine glue: ffmpeg pre-convert to staged 16 kHz mono WAV; `diarize.py` max-overlap merge (pure stdlib, torch-free unit tests); `diarize` step in the pipeline — atomic in-place JSON enrichment, speakers-present = cache hit, worker failure → warning not job failure
-- [ ] 5.4 `diarize: bool` setting (default false): `types.py`/`settings.py`/`SettingsBody`, merge-over-defaults upgrade test, warn-and-skip when the pack is absent/incompatible; Settings view toggle
-- [ ] 5.5 `html.py` speaker rendering: visible attribution at speaker changes; speakerless output byte-identical (regression test)
+- [x] 5.1 [CUT-LINE GATE] Diarization worker freeze smoke: dedicated CPU-torch venv, `packaging/diarization.spec`, build the frozen worker, run it against the fixture WAV, measure size; if non-viable in size/effort, document the cut-line decision in this file and detach 5.2–5.5 + 7.5 to post-v1 **entirely** — no merge/setting/rendering code lands dormant; the registry entry stays unpublished/`unavailable` (per S5) — **GO**: 341 MB compressed / ~1.0 GB on disk, frozen offline run byte-identical to unfrozen (evidence: `packaging/DIARIZATION_SMOKE.md`)
+- [x] 5.2 `workers/diarization_worker.py`: WAV via stdlib `wave` (+`torch.frombuffer`, numpy-free) → in-memory waveform → pyannote pipeline from the pack's offline cache → `turns.json`; lazy imports; unit tests with mocked pipeline
+- [x] 5.3 Engine glue: ffmpeg pre-convert to staged 16 kHz mono WAV; `diarize.py` max-overlap merge (pure stdlib, torch-free unit tests); `diarize` step in the pipeline — atomic in-place JSON enrichment, speakers-present = cache hit, worker failure → warning not job failure
+- [x] 5.4 `diarize: bool` setting (default false): `types.py`/`settings.py`/`SettingsBody`, merge-over-defaults upgrade test, warn-and-skip when the pack is absent/incompatible; Settings view toggle (the engine surface; the app-side toggle UI ships with the group 6 Settings work)
+- [x] 5.5 `html.py` speaker rendering: visible attribution at speaker changes; speakerless output byte-identical (regression test)
 
 ## 6. App: wizard & Settings packs
 
