@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
@@ -11,8 +11,11 @@ import type {
   DiscoveryInfo,
   EngineSettings,
   EngineState,
+  HardwareInfo,
   JobRecord,
-  LibraryEntry
+  LibraryEntry,
+  PacksResponse,
+  PackStatus
 } from '../../src/shared/types'
 
 /**
@@ -42,7 +45,8 @@ const ENGINE_SETTINGS_KEYS: Record<keyof EngineSettings, true> = {
   library_dir: true,
   chapter_model: true,
   chapter_provider: true,
-  custom_provider_url: true
+  custom_provider_url: true,
+  diarize: true
 }
 const JOB_RECORD_KEYS: Record<keyof JobRecord, true> = {
   id: true,
@@ -72,6 +76,27 @@ const ENGINE_STATE_KEYS: Record<keyof EngineState, true> = {
   port: true,
   token: true
 }
+const PACKS_RESPONSE_KEYS: Record<keyof PacksResponse, true> = {
+  hardware: true,
+  packs: true
+}
+const HARDWARE_INFO_KEYS: Record<keyof HardwareInfo, true> = {
+  platform: true,
+  nvidia_gpu: true,
+  gpu_names: true
+}
+const PACK_STATUS_KEYS: Record<keyof PackStatus, true> = {
+  id: true,
+  kind: true,
+  display_name: true,
+  size: true,
+  state: true,
+  recommended: true,
+  installed_version: true,
+  progress: true,
+  error: true,
+  licenses: true
+}
 
 function expectKeySetEquality(payload: object, mirror: Record<string, true>, label: string): void {
   expect(Object.keys(payload).sort(), `${label} key-set drift vs src/shared/types.ts`).toEqual(
@@ -85,6 +110,13 @@ test('real engine: dev-fallback spawn, handshake, key-set parity, clean quit', a
   test.setTimeout(180_000)
   const dataDir = await mkdtemp(join(tmpdir(), 'pr-int-data-'))
   const userDataDir = await mkdtemp(join(tmpdir(), 'pr-int-user-'))
+  // Pre-set the app-side first-run flag: a fresh data dir has no packs, so
+  // the setup wizard would otherwise auto-open and replace the Library view
+  // this smoke asserts on. The wizard has its own mock-engine coverage.
+  await writeFile(
+    join(userDataDir, 'app-config.json'),
+    JSON.stringify({ first_run_complete: true })
+  )
   const app = await launchApp({
     dataDir,
     userDataDir,
@@ -128,6 +160,19 @@ test('real engine: dev-fallback spawn, handshake, key-set parity, clean quit', a
     // EngineSettings parity.
     const settings = (await (await engine('/v1/settings')).json()) as EngineSettings
     expectKeySetEquality(settings, ENGINE_SETTINGS_KEYS, 'EngineSettings')
+
+    // Pack payload parity (task 6.4): the wizard/Settings hydration source.
+    const packsResponse = (await (await engine('/v1/packs')).json()) as PacksResponse
+    expectKeySetEquality(packsResponse, PACKS_RESPONSE_KEYS, 'PacksResponse')
+    expectKeySetEquality(packsResponse.hardware, HARDWARE_INFO_KEYS, 'HardwareInfo')
+    expect(packsResponse.packs.length).toBeGreaterThan(0)
+    for (const pack of packsResponse.packs) {
+      expectKeySetEquality(pack, PACK_STATUS_KEYS, `PackStatus(${pack.id})`)
+    }
+    // The unpublished diarization pack reports `unavailable` (per S5).
+    expect(packsResponse.packs.find((pack) => pack.id === 'diarization')?.state).toBe(
+      'unavailable'
+    )
 
     // JobRecord parity — awaiting-confirmation so no pipeline step ever runs,
     // then discarded to leave the journal clean.

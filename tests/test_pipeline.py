@@ -6,7 +6,7 @@ import json
 import os
 import sys
 from typing import TYPE_CHECKING
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -76,6 +76,7 @@ def _request(
     title: str | None = "Test Title",
     chapter_provider: str = "anthropic",
     chapter_api_key: str | None = None,
+    diarize: bool = False,
 ) -> PipelineRequest:
     """Build a PipelineRequest with test defaults."""
     return PipelineRequest(
@@ -92,6 +93,7 @@ def _request(
         chapter_provider=chapter_provider,
         chapter_api_key=chapter_api_key,
         custom_provider_url="",
+        diarize=diarize,
     )
 
 
@@ -228,7 +230,9 @@ class TestRunPipelineURL:
         audio_path = tmp_path / "video_id.mp3"
         json_path = tmp_path / "video_id.json"
 
-        def fake_download(url: str, out_dir: Path, *, cookies: Path | None = None) -> Path:
+        def fake_download(
+            url: str, out_dir: Path, *, cookies: Path | None = None, on_event: object = None
+        ) -> Path:
             audio_path.write_text("fake audio")
             return audio_path
 
@@ -245,7 +249,7 @@ class TestRunPipelineURL:
         )
 
         mock_download.assert_called_once_with(
-            "https://x.com/user/status/123456", tmp_path, cookies=None
+            "https://x.com/user/status/123456", tmp_path, cookies=None, on_event=ANY
         )
         mock_transcribe.assert_called_once()
         assert (tmp_path / "video_id.html").exists()
@@ -327,7 +331,9 @@ class TestRunPipelineURL:
 
         audio_path = tmp_path / "video_id.mp3"
 
-        def fake_download(url: str, out_dir: Path, *, cookies: Path | None = None) -> Path:
+        def fake_download(
+            url: str, out_dir: Path, *, cookies: Path | None = None, on_event: object = None
+        ) -> Path:
             audio_path.write_text("fake audio")
             return audio_path
 
@@ -552,6 +558,91 @@ class TestRunPipelineLocalFile:
 
         mock_transcribe.assert_not_called()
         mock_build_html.assert_called_once()
+
+
+class TestRunPipelineDiarize:
+    """Gating of the diarize step inside run_pipeline (diarization-worker spec)."""
+
+    @patch("podcast_reader.pipeline.diarize_step")
+    @patch("podcast_reader.pipeline.transcribe")
+    def test_disabled_by_default(
+        self, mock_transcribe: MagicMock, mock_diarize: MagicMock, tmp_path: Path
+    ) -> None:
+        """Spec scenario: with default settings no diarization step executes."""
+        audio_path = tmp_path / "episode.mp3"
+        audio_path.write_text("fake audio")
+        (tmp_path / "episode.json").write_text(json.dumps(_SAMPLE_SEGMENTS))
+
+        run_pipeline(
+            _request(input_arg=str(audio_path), output_dir=tmp_path),
+            on_event=lambda e: None,
+        )
+
+        mock_diarize.assert_not_called()
+
+    @patch("podcast_reader.pipeline.diarize_step")
+    @patch("podcast_reader.pipeline.transcribe")
+    def test_enabled_runs_step_after_transcribe(
+        self, mock_transcribe: MagicMock, mock_diarize: MagicMock, tmp_path: Path
+    ) -> None:
+        audio_path = tmp_path / "episode.mp3"
+        audio_path.write_text("fake audio")
+        json_path = tmp_path / "episode.json"
+        json_path.write_text(json.dumps(_SAMPLE_SEGMENTS))
+        events: list[PipelineEvent] = []
+
+        run_pipeline(
+            _request(input_arg=str(audio_path), output_dir=tmp_path, diarize=True),
+            on_event=events.append,
+        )
+
+        mock_diarize.assert_called_once_with(
+            audio_path=audio_path.resolve(), json_path=json_path, on_event=events.append
+        )
+
+    @patch("podcast_reader.pipeline.transcribe")
+    def test_enabled_without_pack_warns_and_completes(
+        self, mock_transcribe: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Spec scenario: enabled without the pack — the job completes with a
+        warning naming the pack."""
+        monkeypatch.setenv("PODCAST_READER_DATA_DIR", str(tmp_path / "data"))
+        audio_path = tmp_path / "episode.mp3"
+        audio_path.write_text("fake audio")
+        (tmp_path / "episode.json").write_text(json.dumps(_SAMPLE_SEGMENTS))
+        events: list[PipelineEvent] = []
+
+        result = run_pipeline(
+            _request(input_arg=str(audio_path), output_dir=tmp_path, diarize=True),
+            on_event=events.append,
+        )
+
+        warnings = [e for e in events if e["kind"] == "warning" and e["step"] == "diarize"]
+        assert len(warnings) == 1
+        assert warnings[0]["data"]["code"] == "diarization_skipped"
+        assert "diarization pack is not installed" in warnings[0]["message"]
+        assert result["html_path"].endswith("episode.html")
+
+    @patch("podcast_reader.pipeline.fetch_transcript")
+    def test_youtube_captions_source_warns_no_audio(
+        self, mock_fetch: MagicMock, tmp_path: Path
+    ) -> None:
+        """Captions are fetched text: an enabled diarize setting is reported,
+        not silently ignored."""
+        mock_fetch.return_value = [
+            {"text": "Hello world.", "start": 0.0, "duration": 5.0},
+        ]
+        events: list[PipelineEvent] = []
+
+        run_pipeline(
+            _request(input_arg=_YT_URL, output_dir=tmp_path, diarize=True),
+            on_event=events.append,
+        )
+
+        warnings = [e for e in events if e["kind"] == "warning" and e["step"] == "diarize"]
+        assert len(warnings) == 1
+        assert warnings[0]["data"]["code"] == "diarization_skipped"
+        assert "no audio" in warnings[0]["message"]
 
 
 class TestRunPipelineChapters:
@@ -1005,6 +1096,135 @@ class TestRunPipelineTranscriptSource:
 
         call_kwargs = mock_build_html.call_args[1]
         assert call_kwargs["source"] == "whisper-ctranslate2"
+
+
+class TestRunPipelineFrozenWorkerPath:
+    """Frozen-path wiring (tasks 3.2/3.3): the pipeline's on_event consumer
+    receives worker step_progress events, and the step message names the
+    engine actually used."""
+
+    def test_step_progress_events_flow_through_on_event(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import subprocess
+
+        from podcast_reader.engine.packs import MANIFEST_FILE, REGISTRY, pack_dir
+
+        data_dir = tmp_path / "data"
+        monkeypatch.setenv("PODCAST_READER_DATA_DIR", str(data_dir))
+        entry = REGISTRY["model-tiny"]
+        target = pack_dir(data_dir, entry)
+        target.mkdir(parents=True)
+        (target / "model.bin").write_bytes(b"0123456789")
+        (target / MANIFEST_FILE).write_text(
+            json.dumps(
+                {
+                    "pack_schema": 1,
+                    "id": entry["id"],
+                    "version": entry["version"],
+                    "component_versions": dict(entry["component_versions"]),
+                    "files": [{"path": "model.bin", "sha256": "0" * 64, "size": 10}],
+                    "licenses": [],
+                }
+            )
+        )
+        audio_path = tmp_path / "episode.mp3"
+        audio_path.write_text("fake audio")
+        json_path = tmp_path / "episode.json"
+
+        def scripted(
+            args: list[str],
+            *,
+            on_stderr_line: object,
+            env: dict[str, str] | None = None,
+        ) -> subprocess.CompletedProcess[str]:
+            emit_line = on_stderr_line
+            assert callable(emit_line)
+            emit_line("progress duration=10.00\n")
+            emit_line("progress segment_end=4.00\n")
+            json_path.write_text(json.dumps(_SAMPLE_SEGMENTS))
+            return subprocess.CompletedProcess(args, 0, stdout=str(json_path), stderr="")
+
+        events: list[PipelineEvent] = []
+        with (
+            patch(
+                "podcast_reader.transcribe.resolve_bundled_worker",
+                return_value="/bundle/whisper-worker",
+            ),
+            patch("podcast_reader.transcribe.run_child_streaming", side_effect=scripted),
+            patch("podcast_reader.pipeline._wsl_path", return_value=None),
+        ):
+            request = _request(input_arg=str(audio_path), output_dir=tmp_path)
+            request["whisper_model"] = "tiny"
+            run_pipeline(request, on_event=events.append)
+
+        progress = [e for e in events if e["kind"] == "step_progress"]
+        assert [(e["step"], e["data"]["seconds"]) for e in progress] == [
+            ("transcribe", 0.0),
+            ("transcribe", 4.0),
+        ]
+        started = next(
+            e for e in events if e["kind"] == "step_started" and e["step"] == "transcribe"
+        )
+        assert "whisper-worker" in started["message"]
+
+
+class TestRunPipelineDownloadSelfHeal:
+    """Task 4.3: the failure-triggered yt-dlp self-update through the real
+    pipeline — the heal happens inside the download step and the warning
+    reaches the pipeline's on_event consumer."""
+
+    @patch("podcast_reader.pipeline._wsl_path", return_value=None)
+    @patch("podcast_reader.pipeline.build_html", return_value="<html>healed</html>")
+    @patch("podcast_reader.pipeline.transcribe")
+    def test_extractor_breakage_heals_with_managed_ytdlp(
+        self,
+        mock_transcribe: MagicMock,
+        _mock_build_html: MagicMock,
+        _mock_wsl: MagicMock,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import subprocess
+
+        data = tmp_path / "data"
+        monkeypatch.setenv("PODCAST_READER_DATA_DIR", str(data))
+        binary = data / "tools" / "yt-dlp"
+        binary.parent.mkdir(parents=True)
+        binary.touch()
+        out_dir = tmp_path / "out"
+        out_dir.mkdir()
+        downloads: list[list[str]] = []
+
+        def fake_download_run(args: list[str]) -> subprocess.CompletedProcess[str]:
+            downloads.append(args)
+            if len(downloads) == 1:
+                return subprocess.CompletedProcess(args, 1, "", "ERROR: unable to extract")
+            (out_dir / "123456.mp3").touch()
+            return subprocess.CompletedProcess(args, 0, "", "")
+
+        def write_json(**kwargs: object) -> None:
+            (out_dir / "123456.json").write_text(json.dumps(_SAMPLE_SEGMENTS))
+
+        mock_transcribe.side_effect = write_json
+        events: list[PipelineEvent] = []
+        with (
+            patch("podcast_reader.ytdlp.resolve_tool", return_value=str(binary)),
+            patch("podcast_reader.ytdlp.run_child", side_effect=fake_download_run),
+            patch(
+                "podcast_reader.engine.managed_tools.run_child",
+                return_value=subprocess.CompletedProcess([], 0, "2026.06.06\n", ""),
+            ),
+        ):
+            result = run_pipeline(
+                _request(input_arg="https://x.com/user/status/123456", output_dir=out_dir),
+                on_event=events.append,
+            )
+
+        assert result["html_path"] == str(out_dir / "123456.html")
+        assert len(downloads) == 2
+        warnings = [e for e in events if e["kind"] == "warning"]
+        assert any(e["data"].get("code") == "ytdlp_self_update" for e in warnings)
 
 
 class TestRunPipelineYtdlpIntegration:

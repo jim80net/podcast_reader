@@ -45,7 +45,7 @@ function client(respond: (req: Captured) => Response | Promise<Response>) {
 
 describe('EngineClient', () => {
   it('targets 127.0.0.1:<port> and sends the bearer token on every request', async () => {
-    const { calls, client: c } = client(() => json({ version: '0.2.0', token_fingerprint: 'f' }))
+    const { calls, client: c } = client(() => json({ version: '0.3.0', token_fingerprint: 'f' }))
     await c.health()
     expect(calls[0]?.url).toBe('http://127.0.0.1:51234/v1/health')
     expect(calls[0]?.headers['authorization']).toBe('Bearer tok-123')
@@ -100,6 +100,36 @@ describe('EngineClient', () => {
     const { calls, client: c } = client(() => json({ ok: true, detail: null }))
     await c.testKey('openai')
     expect(JSON.parse(calls[0]?.body ?? '')).toEqual({ provider: 'openai' })
+  })
+
+  it('lists packs from /v1/packs', async () => {
+    const payload = { hardware: { platform: 'win32', nvidia_gpu: true, gpu_names: [] }, packs: [] }
+    const { calls, client: c } = client(() => json(payload))
+    await expect(c.listPacks()).resolves.toEqual(payload)
+    expect(calls[0]?.method).toBe('GET')
+    expect(calls[0]?.url).toBe('http://127.0.0.1:51234/v1/packs')
+  })
+
+  it('installs and uninstalls packs on the right routes, URL-encoding the id', async () => {
+    const { calls, client: c } = client((req) =>
+      req.method === 'POST' ? new Response(null, { status: 202 }) : new Response(null, { status: 204 })
+    )
+    await c.installPack('cuda-runtime')
+    await c.uninstallPack('model/odd id')
+    expect(calls[0]?.method).toBe('POST')
+    expect(calls[0]?.url).toBe('http://127.0.0.1:51234/v1/packs/cuda-runtime/install')
+    expect(calls[1]?.method).toBe('DELETE')
+    expect(calls[1]?.url).toBe('http://127.0.0.1:51234/v1/packs/model%2Fodd%20id')
+  })
+
+  it('surfaces pack 409 details (installing / unavailable) as EngineRequestError', async () => {
+    const { client: c } = client(() =>
+      json({ detail: "pack 'diarization' has no published artifact yet and cannot be installed" }, 409)
+    )
+    await expect(c.installPack('diarization')).rejects.toMatchObject({
+      status: 409,
+      detail: "pack 'diarization' has no published artifact yet and cannot be installed"
+    })
   })
 
   it('raises EngineRequestError with the detail on non-2xx', async () => {

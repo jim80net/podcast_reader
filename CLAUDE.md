@@ -58,6 +58,8 @@ For speaker diarization, set `HF_TOKEN` and accept model terms at:
 | `PODCAST_READER_CUSTOM_PROVIDER_KEY` | _(none)_ | API key for `--provider custom` |
 | `SENTENCES` | `5` | Sentences per paragraph in HTML |
 | `YT_DLP_COOKIES` | _(none)_ | Path to cookies file for authenticated yt-dlp downloads |
+| `PODCAST_READER_DATA_DIR` | `~/PodcastReader` | Engine data dir (library, journal, settings, packs: `models/`, `runtime/`, `workers/`, `tools/`) |
+| `PODCAST_READER_TOOLS_DIR` | _(none)_ | Preferred directory for external tools; the engine exports it to `<data_dir>/tools` when unset |
 
 ## Package Structure
 
@@ -65,20 +67,31 @@ For speaker diarization, set `HF_TOKEN` and accept model terms at:
 |--------|---------|
 | `src/podcast_reader/cli.py` | Main CLI entry point — URL routing, pipeline orchestration |
 | `src/podcast_reader/youtube.py` | Fetch YouTube captions as whisper-compatible JSON |
-| `src/podcast_reader/ytdlp.py` | Download audio from X/Twitter and other platforms via yt-dlp |
-| `src/podcast_reader/transcribe.py` | Run whisper-ctranslate2 on audio files |
-| `src/podcast_reader/tools.py` | Tool resolution (external tools + frozen bundled workers) and spawn kwargs |
-| `src/podcast_reader/types.py` | TypedDict boundaries: PipelineRequest/Event, JobRecord, LibraryEntry, EngineSettings |
+| `src/podcast_reader/ytdlp.py` | Download audio via yt-dlp; structured `download_failed` + residence-gated `-U` single-retry heal |
+| `src/podcast_reader/transcribe.py` | Freeze-aware transcribe switch: bundled `whisper-worker` (model-pack validation, cuda→cpu fallback, streamed progress) or whisper-ctranslate2 |
+| `src/podcast_reader/workers/whisper_worker.py` | Frozen whisper worker: argv in, ctranslate2-shaped JSON out, `progress` lines on stderr (lazy faster-whisper via the `worker` extra) |
+| `src/podcast_reader/workers/diarization_worker.py` | Frozen diarization worker: stdlib WAV in (in-memory waveform, no torchcodec/FFmpeg), `turns.json` out, offline HF cache next to the executable (lazy torch/pyannote via the `diarization` extra) |
+| `src/podcast_reader/diarize.py` | Engine diarize step: ffmpeg pre-convert to staged 16 kHz mono WAV, worker spawn from the validated pack, pure-stdlib max-overlap speaker merge, atomic JSON enrichment; warn-don't-fail |
+| `src/podcast_reader/tools.py` | Tool resolution (external tools + frozen bundled workers), spawn kwargs, `run_child_streaming` |
+| `src/podcast_reader/types.py` | TypedDict boundaries: PipelineRequest/Event, JobRecord, LibraryEntry, EngineSettings; `PipelineError` |
 | `src/podcast_reader/pipeline.py` | Shared step runner with progress events (used by CLI and engine) |
 | `src/podcast_reader/engine/settings.py` | Data dir, engine state (port/token), user settings persistence |
 | `src/podcast_reader/engine/library.py` | Managed transcript library: source-identity keys, atomic index, staged writes |
-| `src/podcast_reader/engine/jobs.py` | Persistent job journal, FIFO single-worker execution, SSE fan-out |
-| `src/podcast_reader/engine/app.py` | FastAPI app: bearer auth, jobs (incl. confirm/dismiss of awaiting-confirmation), events, library, settings, keys (push + test), providers, health, shutdown routes |
+| `src/podcast_reader/engine/jobs.py` | Persistent job journal, FIFO single-worker execution; publishes into the shared EventBus |
+| `src/podcast_reader/engine/events.py` | `EventBus` — public event-publish seam (SSE fan-out) shared by the job store and pack manager |
+| `src/podcast_reader/engine/packs.py` | Built-in pack registry (pinned CUDA wheels, HF model snapshots, unpublished diarization), manifest types, compat/integrity pure functions |
+| `src/podcast_reader/engine/pack_manager.py` | Pack downloads (Range resume, sha256-named staging, fail-closed verify) + `PackManager` installer thread (atomic install, manifest-first uninstall) |
+| `src/podcast_reader/engine/hardware.py` | `nvidia-smi` GPU probe (cached) + hardware-derived pack recommendations |
+| `src/podcast_reader/engine/managed_tools.py` | Bundle tool-seed reconciliation into `<data_dir>/tools` (newer wins), `PODCAST_READER_TOOLS_DIR` export, scheduled yt-dlp self-update |
+| `src/podcast_reader/engine/app.py` | FastAPI app: bearer auth, jobs (incl. confirm/dismiss of awaiting-confirmation), events, library, settings, keys (push + test), providers, packs (list/install/uninstall), health, shutdown routes |
 | `src/podcast_reader/engine/process.py` | Pre-bound socket handshake, discovery file, child reaping, `serve` |
 | `spike/` | Packaging spike evidence (PyInstaller onedir prototype, SPIKE_REPORT.md) |
+| `packaging/engine.spec` + `build_engine.py` | Production frozen engine onedir: engine + whisper-worker entry points, MERGE/COLLECT, `copy_metadata("podcast-reader")`, ctranslate2/faster_whisper hooks (`hooks/`), tool seeds + flat `tools-manifest.json` into `_internal/tools/` |
+| `packaging/frozen_smoke.py` | Shared stdlib-only frozen e2e smoke (boot → handshake → version assert → pack install → fixture transcription); CI and local proof both run it |
+| `packaging/diarization.spec` + `build_diarization_pack.py` | Diarization worker pack build (CPU-torch venv per `DIARIZATION_SMOKE.md`, offline community-1 cache, tar.gz + manifest); release job in `pack-diarization.yml` is HF_TOKEN-gated |
 | `src/podcast_reader/providers.py` | Chapter LLM provider registry (base URL, default model, key env, max_tokens) + custom-URL validation |
 | `src/podcast_reader/chapters.py` | Generate chapter markers via any registry provider's OpenAI-compatible `/chat/completions`; `verify_key` minimal round-trip backs `POST /v1/keys/test` |
-| `src/podcast_reader/html.py` | Convert whisper JSON to styled HTML with TOC, key points, pull quotes |
+| `src/podcast_reader/html.py` | Convert whisper JSON to styled HTML with TOC, key points, pull quotes; optional speaker attribution (byte-identical without speakers) |
 | `pyproject.toml` | Dependencies, entry point, tool configuration |
 
 ### Desktop app (`app/` — independent npm package, see `app/README.md`)
@@ -91,23 +104,27 @@ For speaker diarization, set `HF_TOKEN` and accept model terms at:
 | `app/src/main/vault.ts` | safeStorage-encrypted key vault (session-memory fallback when encryption unavailable) |
 | `app/src/main/ipc.ts` + `protocol.ts` | Typed IPC handlers; `podcast-reader://` URL validation (confirm-before-run) |
 | `app/src/main/updater.ts` | electron-updater orchestration: full-download GitHub Releases, consent, engine-quit-before-install; gated off in dev/unsigned |
+| `app/src/main/app-config.ts` | App-side config under userData (`first_run_complete` — the setup wizard's gate) |
 | `app/src/preload/index.ts` | contextBridge `window.api` — the credential-free renderer's only door |
-| `app/src/renderer/` | Vanilla-TS views (Library/Reader/New/Settings) + hash router + jobs store |
+| `app/src/renderer/` | Vanilla-TS views (Library/Reader/New/Settings + first-run Setup wizard) + hash router + jobs/packs stores |
 | `app/src/shared/types.ts` | TS mirrors of the Python boundary types (key-set parity enforced by the e2e integration smoke) |
 | `app/tests/mock-engine/` + `app/tests/e2e/` | Scriptable mock engine (separate process, real handshake) + Playwright suites |
 | `app/electron-builder.config.cjs` + `app/scripts/dist.mjs` | Packaging: NSIS/dmg+zip, protocol registration, `--engine-dir` extraResources input |
 
 Engine `/v1` surface the app consumes: `health`, `shutdown`, `jobs` (+
-`{id}`, `{id}/confirm`, `DELETE {id}`), `events` (SSE), `library`,
-`transcripts/{id}.html`, `settings`, `keys`, `keys/test`, `providers`.
+`{id}`, `{id}/confirm`, `DELETE {id}`), `events` (SSE; job events carry
+`data.job_id`, pack events carry `data.pack_id` and never `job_id`),
+`library`, `transcripts/{id}.html`, `settings`, `keys`, `keys/test`,
+`providers`, `packs` (+ `POST {id}/install`, `DELETE {id}`).
 
 ## Pipeline
 
 1. **YouTube URL** → `youtube.py` fetches captions → whisper JSON
 2. **Other URL** → `ytdlp.py` downloads audio → `transcribe.py` runs whisper → whisper JSON
 3. **Local file** → `transcribe.py` runs whisper → whisper JSON
-4. `chapters.py` → `<stem>_chapters.json` (if an API key for the selected chapter provider is available — CLI: the provider's env var; engine: pushed key with env fallback)
-5. `html.py` → `<stem>.html` (styled transcript with TOC, key points, pull quotes)
+4. `diarize.py` → segments enriched with `speaker` labels (engine jobs with the `diarize` setting on and the diarization pack installed; skipped with a warning otherwise — CLI diarization stays whisper-ctranslate2 `--hf_token`)
+5. `chapters.py` → `<stem>_chapters.json` (if an API key for the selected chapter provider is available — CLI: the provider's env var; engine: pushed key with env fallback)
+6. `html.py` → `<stem>.html` (styled transcript with TOC, key points, pull quotes, speaker attribution when present)
 
 ## Development
 
@@ -140,6 +157,14 @@ npm run build       # electron-vite production build into out/
 npm run e2e         # Playwright vs the mock engine (build first; xvfb-run -a on headless)
 npm run e2e:integration  # real-engine smoke (needs `uv sync --extra dev` at the root)
 npm run dist        # electron-builder installers (--engine-dir maps a frozen engine payload)
+```
+
+```bash
+# Frozen engine (run from packaging/; PyInstaller is a build tool, not a dep)
+uv venv .venv-engine --python 3.10
+uv pip install --python .venv-engine/bin/python '..[worker]' pyinstaller
+.venv-engine/bin/python build_engine.py                       # → dist/engine/
+python3 frozen_smoke.py dist/engine/podcast-reader-engine     # full e2e proof
 ```
 
 - **mypy**: strict mode, all functions fully typed

@@ -133,6 +133,8 @@ class TestUserSettings:
         assert settings["chapter_provider"] == "anthropic"
         assert settings["custom_provider_url"] == ""
         assert settings["library_dir"] == str(tmp_path / "library")
+        # diarization-worker spec: disabled by default.
+        assert settings["diarize"] is False
 
     def test_defaults_not_persisted_until_saved(self, tmp_path: Path) -> None:
         load_settings(tmp_path)
@@ -164,6 +166,26 @@ class TestUserSettings:
         assert settings["whisper_model"] == "medium"  # file values win over defaults
         assert settings["sentences"] == 3
         assert settings["chapter_model"] == ""  # normalized to "provider default"
+
+    def test_pre_diarize_file_upgrades_to_diarize_false(self, tmp_path: Path) -> None:
+        """diarization-worker spec: settings files predating the `diarize`
+        field upgrade cleanly via the merge-over-defaults discipline."""
+        pre_diarize = {
+            "whisper_model": "medium",
+            "whisper_lang": "en",
+            "whisper_device": "cpu",
+            "sentences": 3,
+            "library_dir": str(tmp_path / "library"),
+            "chapter_model": "",
+            "chapter_provider": "anthropic",
+            "custom_provider_url": "",
+        }
+        (tmp_path / "settings.json").write_text(json.dumps(pre_diarize))
+
+        settings = load_settings(tmp_path)
+
+        assert settings["diarize"] is False
+        assert settings["whisper_model"] == "medium"  # file values still win
 
     def test_post_upgrade_file_keeps_explicit_haiku_model(self, tmp_path: Path) -> None:
         """M3: a file WITH chapter_provider chose that model deliberately —

@@ -1,6 +1,8 @@
+import { mountPacksSection } from './packs-section'
 import { el } from '../dom'
 import { extractEngineDetail, settingsErrorField } from '../engine-error'
 import { keyPlaceholder, modelPlaceholder, toSettingsUpdate } from '../settings-form'
+import type { PacksSection } from './packs-section'
 import type { SettingsFormValues } from '../settings-form'
 import type { ViewCleanup } from '../store'
 import type { EngineSettings, ProviderInfo } from '../../../shared/types'
@@ -19,6 +21,7 @@ export function mountSettings(container: HTMLElement): ViewCleanup {
 
   let disposed = false
   let loaded = false
+  let packsSection: PacksSection | null = null
 
   async function load(): Promise<void> {
     try {
@@ -197,6 +200,7 @@ export function mountSettings(container: HTMLElement): ViewCleanup {
       )
     }
     deviceSelect.value = settings.whisper_device
+    deviceSelect.addEventListener('change', () => packsSection?.deviceChanged())
     const langInput = el('input', { attrs: { type: 'text' } })
     langInput.value = settings.whisper_lang
     const sentencesInput = el('input', { attrs: { type: 'number', min: '1', step: '1' } })
@@ -250,6 +254,12 @@ export function mountSettings(container: HTMLElement): ViewCleanup {
     container.append(form)
     syncProviderDependentUi()
 
+    // Packs management below the form (task 6.3). The advisory follows the
+    // device select live; the saved value seeds it (per S4/Q2).
+    const packsContainer = el('section', { class: 'packs-section' })
+    container.append(packsContainer)
+    packsSection = mountPacksSection(packsContainer, () => deviceSelect.value)
+
     form.addEventListener('submit', (event) => {
       event.preventDefault()
       clearErrors()
@@ -301,5 +311,6 @@ export function mountSettings(container: HTMLElement): ViewCleanup {
   return () => {
     disposed = true
     unsubscribeStatus()
+    packsSection?.cleanup()
   }
 }

@@ -55,9 +55,27 @@ def segments_to_paragraphs(
         if not text:
             continue
 
+        # A speaker change always starts a new paragraph (visible attribution
+        # at speaker changes). Speakerless segments compare None == None, so
+        # transcripts without diarization group exactly as before. The carry
+        # is empty whenever a paragraph is open, so nothing is dropped here.
+        if current is not None and seg.get("speaker") != current.get("speaker"):
+            paragraphs.append(current)
+            current = None
+
         if current is None:
+            # A non-empty carry is leftover text from the paragraph appended
+            # by the last sentence-boundary split (always paragraphs[-1]). It
+            # belongs to that paragraph's speaker: prepend it here only when
+            # the speaker matches, otherwise reattach it to its own paragraph
+            # so a speaker change never misattributes the fragment.
+            if carry and paragraphs and seg.get("speaker") != paragraphs[-1].get("speaker"):
+                paragraphs[-1]["text"] += " " + carry
+                carry = ""
             combined = (carry + " " + text).strip() if carry else text
             current = {"start": seg["start"], "end": seg["end"], "text": combined}
+            if seg.get("speaker") is not None:
+                current["speaker"] = seg["speaker"]
             carry = ""
         else:
             current["end"] = seg["end"]
@@ -110,11 +128,15 @@ def segments_to_paragraphs_themed(
             starts_new = True
             break_idx += 1
 
-        if current is None:
+        if current is not None and seg.get("speaker") != current.get("speaker"):
+            starts_new = True  # speaker changes break paragraphs here too
+
+        if current is None or starts_new:
+            if current is not None:
+                paragraphs.append(current)
             current = {"start": seg["start"], "end": seg["end"], "text": text}
-        elif starts_new:
-            paragraphs.append(current)
-            current = {"start": seg["start"], "end": seg["end"], "text": text}
+            if seg.get("speaker") is not None:
+                current["speaker"] = seg["speaker"]
         else:
             current["end"] = seg["end"]
             current["text"] += " " + text
@@ -128,6 +150,26 @@ def segments_to_paragraphs_themed(
 def _slug(text: str) -> str:
     """Turn a chapter title into a URL-safe anchor ID."""
     return "ch-" + "".join(c if c.isalnum() else "-" for c in text.lower()).strip("-")
+
+
+def _speaker_label(speaker: str) -> str:
+    """Friendly display name for a diarization label (SPEAKER_00 -> Speaker 1)."""
+    prefix, _, number = speaker.rpartition("_")
+    if prefix == "SPEAKER" and number.isdigit():
+        return f"Speaker {int(number) + 1}"
+    return speaker
+
+
+def _speaker_prefix(paragraph: dict[str, Any], last_speaker: str | None) -> str:
+    """The attribution span when this paragraph changes speaker, else ``""``.
+
+    Speakerless paragraphs render exactly as before (empty prefix) — the
+    field is optional end to end.
+    """
+    speaker = paragraph.get("speaker")
+    if speaker is None or speaker == last_speaker:
+        return ""
+    return f'<span class="speaker">{_speaker_label(speaker)}</span> '
 
 
 TYPE_LABELS = {
@@ -169,13 +211,17 @@ def build_chapter_body(
     if not chapters:
         paragraphs = segments_to_paragraphs(segments, sentences_per_para)
         parts = []
+        last_speaker: str | None = None
         for p in paragraphs:
             ts = fmt_time(p["start"])
-            parts.append(f'<p><span class="ts">{ts}</span> {p["text"]}</p>')
+            prefix = _speaker_prefix(p, last_speaker)
+            last_speaker = p.get("speaker")
+            parts.append(f'<p>{prefix}<span class="ts">{ts}</span> {p["text"]}</p>')
         return "\n".join(parts)
 
     sorted_chapters = sorted(chapters, key=lambda c: c["start"])
     parts = []
+    last_speaker = None  # tracked across chapters: label only at changes
 
     for i, ch in enumerate(sorted_chapters):
         anchor = _slug(ch["title"])
@@ -227,7 +273,9 @@ def build_chapter_body(
                 text = text.replace(pull_quote, f"<strong>{pull_quote}</strong>", 1)
                 pull_quote_applied = True
 
-            parts.append(f'<p><span class="ts">{ts}</span> {text}</p>')
+            prefix = _speaker_prefix(p, last_speaker)
+            last_speaker = p.get("speaker")
+            parts.append(f'<p>{prefix}<span class="ts">{ts}</span> {text}</p>')
 
         parts.append("</div>")  # close chapter-main
 
@@ -545,6 +593,23 @@ footer {
 }
 """
 
+# Appended to the stylesheet only when segments carry speakers, so
+# speakerless output stays byte-identical to pre-diarization releases.
+_SPEAKER_STYLESHEET = """\
+
+/* ---- SPEAKER ATTRIBUTION (diarization) ---- */
+.speaker {
+  font-family: 'Oswald', sans-serif;
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+  display: block;
+  margin-bottom: 0.15rem;
+}
+"""
+
 _SCROLL_SCRIPT = """\
 document.addEventListener('DOMContentLoaded', function() {
   var sections = document.querySelectorAll('.chapter-section');
@@ -576,16 +641,17 @@ def build_html(
     sentences_per_para: int = 5,
     source: str = "whisper-ctranslate2",
 ) -> str:
-    """Build a styled HTML document from segments, optionally with chapters."""
+    """Build a styled HTML document from segments, optionally with chapters.
+
+    Segments may carry optional ``speaker`` labels (diarization): paragraphs
+    then break at speaker changes and show attribution where the speaker
+    changes. Without them the output is byte-identical to before speaker
+    rendering existed (regression-tested against golden files).
+    """
+    has_speakers = any("speaker" in s for s in segments)
+    stylesheet = _STYLESHEET + _SPEAKER_STYLESHEET if has_speakers else _STYLESHEET
     sidebar_html = build_sidebar_nav(chapters) if chapters else ""
-    body = (
-        build_chapter_body(segments, chapters, sentences_per_para)
-        if chapters
-        else "\n".join(
-            f'<p><span class="ts">{fmt_time(p["start"])}</span> {p["text"]}</p>'
-            for p in segments_to_paragraphs(segments, sentences_per_para)
-        )
-    )
+    body = build_chapter_body(segments, chapters or [], sentences_per_para)
     script_tag = f"<script>\n{_SCROLL_SCRIPT}</script>" if chapters else ""
 
     # Use string concatenation instead of f-string to avoid CSS brace escaping
@@ -594,7 +660,7 @@ def build_html(
         '<meta charset="UTF-8">\n'
         '<meta name="viewport" content="width=device-width, initial-scale=1.0">\n'
         f"<title>{title}</title>\n"
-        f"<style>\n{_STYLESHEET}</style>\n"
+        f"<style>\n{stylesheet}</style>\n"
         "</head>\n<body>\n",
         sidebar_html,
         '\n<div id="content">\n<header>\n'

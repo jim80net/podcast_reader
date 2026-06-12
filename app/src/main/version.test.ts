@@ -49,9 +49,13 @@ describe('MIN_ENGINE_VERSION', () => {
     expect(versionAtLeast('0.1.0', MIN_ENGINE_VERSION)).toBe(false)
   })
 
-  it('admits 0.2.0 and newer engines', () => {
-    expect(versionAtLeast('0.2.0', MIN_ENGINE_VERSION)).toBe(true)
-    expect(versionAtLeast('0.2.1', MIN_ENGINE_VERSION)).toBe(true)
+  it('puts a 0.2.0 engine (lacking the /v1/packs surface) below the floor', () => {
+    expect(versionAtLeast('0.2.0', MIN_ENGINE_VERSION)).toBe(false)
+  })
+
+  it('admits 0.3.0 and newer engines', () => {
+    expect(versionAtLeast('0.3.0', MIN_ENGINE_VERSION)).toBe(true)
+    expect(versionAtLeast('0.3.1', MIN_ENGINE_VERSION)).toBe(true)
     expect(versionAtLeast('1.0.0', MIN_ENGINE_VERSION)).toBe(true)
   })
 })

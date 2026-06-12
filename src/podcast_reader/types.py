@@ -8,8 +8,21 @@ from typing import Any, Literal
 # Python < 3.12; typing.TypedDict raises PydanticUserError there.
 from typing_extensions import TypedDict
 
-StepName = Literal["resolve", "captions", "download", "transcribe", "chapters", "render"]
-EventKind = Literal["step_started", "step_finished", "warning", "job_done", "job_failed"]
+StepName = Literal["resolve", "captions", "download", "transcribe", "diarize", "chapters", "render"]
+# step_progress: incremental in-step progress (whisper worker, group 3).
+# pack_state / pack_progress: pack installer events on the shared SSE stream
+# (per S6); they carry data.pack_id and MUST NOT carry job_id (per Q5 —
+# job_id presence is the renderer's job/pack discriminator).
+EventKind = Literal[
+    "step_started",
+    "step_progress",
+    "step_finished",
+    "warning",
+    "job_done",
+    "job_failed",
+    "pack_state",
+    "pack_progress",
+]
 JobState = Literal["queued", "awaiting-confirmation", "running", "done", "failed", "interrupted"]
 
 JOB_STATES: tuple[JobState, ...] = (
@@ -27,6 +40,23 @@ class PipelineEvent(TypedDict):
     step: StepName | None
     message: str
     data: dict[str, Any]
+
+
+class PipelineError(Exception):
+    """Unrecoverable pipeline failure with a structured code/message/hint.
+
+    The exception twin of :class:`JobError`. Lives here (bottom of the import
+    graph) so step modules below ``pipeline.py`` — ``ytdlp.py``
+    (``download_failed``, per S7) and ``transcribe.py`` (``model_missing``) —
+    can raise it without an import cycle; ``pipeline.py`` re-exports it for
+    its existing consumers (CLI, engine job store).
+    """
+
+    def __init__(self, code: str, message: str, hint: str = "") -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
+        self.hint = hint
 
 
 class JobError(TypedDict):
@@ -49,6 +79,7 @@ class PipelineRequest(TypedDict):
     chapter_provider: str  # a podcast_reader.providers.PROVIDERS key
     chapter_api_key: str | None  # None: skip chapter generation
     custom_provider_url: str  # base URL for the "custom" provider ("" otherwise)
+    diarize: bool  # run the diarization pack's worker after transcription
 
 
 class PipelineResult(TypedDict):
@@ -87,6 +118,7 @@ class EngineSettings(TypedDict):
     chapter_model: str  # "" means: the chapter provider's default model
     chapter_provider: str  # a podcast_reader.providers.PROVIDERS key
     custom_provider_url: str  # base URL for the "custom" provider ("" otherwise)
+    diarize: bool  # default false; warn-and-skip when the pack is absent
 
 
 def new_job_record(*, job_id: str, source: str, title: str | None) -> JobRecord:

@@ -24,6 +24,15 @@ from pydantic import BaseModel
 from podcast_reader.chapters import verify_key
 from podcast_reader.engine.jobs import JobStateError
 from podcast_reader.engine.library import get_entry, list_entries
+from podcast_reader.engine.pack_manager import (
+    PackInstallingError,
+    PackUnavailableError,
+    UnknownPackError,
+)
+
+# PacksResponse backs a FastAPI response model, so it must be importable at
+# runtime (a TYPE_CHECKING import leaves unresolvable ForwardRefs).
+from podcast_reader.engine.packs import PacksResponse  # noqa: TC001 — runtime response model
 from podcast_reader.engine.settings import (
     engine_version,
     load_engine_state,
@@ -45,6 +54,7 @@ if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Iterator
 
     from podcast_reader.engine.jobs import JobStore
+    from podcast_reader.engine.pack_manager import PackManager
 
 
 class JobSubmission(BaseModel):
@@ -112,6 +122,7 @@ class SettingsBody(BaseModel):
     chapter_model: str
     chapter_provider: str | None = None
     custom_provider_url: str | None = None
+    diarize: bool | None = None
 
     def to_settings(self, current: EngineSettings) -> EngineSettings:
         return EngineSettings(
@@ -131,6 +142,7 @@ class SettingsBody(BaseModel):
                 if self.custom_provider_url is not None
                 else current["custom_provider_url"]
             ),
+            diarize=self.diarize if self.diarize is not None else current["diarize"],
         )
 
 
@@ -149,6 +161,7 @@ def create_app(
     heartbeat_s: float = 15.0,
     on_shutdown: Callable[[], None] | None = None,
     key_test_transport: httpx.BaseTransport | None = None,
+    pack_manager: PackManager | None = None,
 ) -> FastAPI:
     """Build the engine's FastAPI app bound to *store* and *data_dir*.
 
@@ -162,6 +175,11 @@ def create_app(
 
     *key_test_transport* lets tests route ``POST /v1/keys/test`` traffic
     through an ``httpx.MockTransport``; production uses the default transport.
+
+    *pack_manager* backs the ``/v1/packs`` routes; ``serve_engine`` constructs
+    one sharing the store's :class:`EventBus` so pack events ride the same
+    SSE stream (per S6). Without one, the routes answer 503 (the shutdown-hook
+    pattern) — never a silent no-op.
     """
     app = FastAPI(title="podcast-reader engine", version=engine_version())
     expected_token = load_engine_state(data_dir)["token"].encode()
@@ -258,6 +276,46 @@ def create_app(
                 store.unsubscribe(client_queue)
 
         return StreamingResponse(stream(), media_type="text/event-stream")
+
+    def _require_pack_manager() -> PackManager:
+        if pack_manager is None:
+            raise HTTPException(status_code=503, detail="pack manager not configured")
+        return pack_manager
+
+    @app.get("/v1/packs")
+    def list_packs() -> PacksResponse:
+        """Hardware block + per-pack status — the hydration source of truth
+        for clients that missed pack events (the job-record pattern)."""
+        return _require_pack_manager().packs_response()
+
+    @app.post("/v1/packs/{pack_id}/install", status_code=status.HTTP_202_ACCEPTED)
+    def install_pack(pack_id: str) -> None:
+        """Start (or idempotently re-request) an async pack install.
+
+        202 always when the pack is installable — including while it is
+        already installing or installed (no duplicate work). 404 for unknown
+        ids; 409 for unpublished (per S5) or platform-gated packs.
+        """
+        try:
+            _require_pack_manager().request_install(pack_id)
+        except UnknownPackError as exc:
+            raise HTTPException(status_code=404, detail="pack not found") from exc
+        except PackUnavailableError as exc:  # self-authored message, safe to echo
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.delete("/v1/packs/{pack_id}", status_code=status.HTTP_204_NO_CONTENT)
+    def uninstall_pack(pack_id: str) -> None:
+        """Uninstall a pack (manifest first, per S1).
+
+        A running job is no reason to refuse (the pipeline validates pack
+        manifests at step start); 409 only while that pack is installing.
+        """
+        try:
+            _require_pack_manager().uninstall(pack_id)
+        except UnknownPackError as exc:
+            raise HTTPException(status_code=404, detail="pack not found") from exc
+        except PackInstallingError as exc:  # self-authored message, safe to echo
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     @app.get("/v1/library")
     def library() -> list[LibraryEntry]:

@@ -4,6 +4,9 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Manual trigger for the cuda-pack-smoke job (S9 follow-up); the regular
+  # jobs run too, which is harmless.
+  workflow_dispatch:
 
 jobs:
   quality:
@@ -25,36 +28,88 @@ jobs:
         run: uv run ruff format --check src/ tests/
 
   frozen-smoke:
-    # Proves the PyInstaller onedir mechanism keeps working (spike evidence).
-    # Boot-only: no model download; transcription parity was validated in the spike.
-    runs-on: ubuntu-latest
+    # Builds the REAL frozen engine (task 7.2 — the spike stub is retired;
+    # spike/ stays as evidence) and proves it end-to-end: boot with a temp
+    # data dir -> authed handshake (token from engine-state.json, ready
+    # sentinel, discovery file, /v1/health) -> health version == pyproject
+    # version (per S3) -> POST /v1/packs/model-tiny/install -> 5 s fixture
+    # WAV job on CPU -> done + non-empty HTML.
+    #
+    # Full e2e on BOTH legs (per Q1). If demonstrated flake ever forces a
+    # downgrade, the ubuntu leg MAY drop to boot-only (--boot-only); the
+    # windows leg keeps the full e2e — Windows is where the frozen path
+    # actually ships.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
-      - name: Build frozen spike engine
+        with:
+          python-version: "3.10"
+      - name: Cache tool seed downloads
+        # Keyed on the build script (same pattern as the model pack cache
+        # below): fetch_tool_sources reuses any cached file by name, so a
+        # URL/asset change must invalidate the cache or CI would keep
+        # seeding stale binaries.
+        uses: actions/cache@v4
+        with:
+          path: packaging/.tool-cache
+          key: tool-seeds-${{ runner.os }}-v1-${{ hashFiles('packaging/build_engine.py') }}
+      - name: Cache installed tiny model pack
+        # Keyed on the registry (any pin bump re-downloads). The data dir is
+        # reused, so a cache hit makes the install POST an idempotent no-op
+        # while a miss exercises the full download path.
+        uses: actions/cache@v4
+        with:
+          path: smoke-data/models
+          key: model-tiny-${{ runner.os }}-${{ hashFiles('src/podcast_reader/engine/packs.py') }}
+      - name: Build frozen engine (worker extra + PyInstaller)
         run: |
-          cd spike
-          uv venv .venv --python 3.10
-          uv pip install --python .venv/bin/python fastapi uvicorn faster-whisper pyinstaller typing_extensions
-          ./build.sh
-      - name: Boot frozen engine and probe /health
+          uv venv packaging/.venv-engine --python 3.10
+          VENV_PY=packaging/.venv-engine/bin/python
+          [ -e packaging/.venv-engine/Scripts/python.exe ] && VENV_PY=packaging/.venv-engine/Scripts/python.exe
+          uv pip install --python "$VENV_PY" '.[worker]' pyinstaller
+          "$VENV_PY" packaging/build_engine.py
+      - name: Frozen smoke (boot, handshake, tiny pack install, transcribe)
         run: |
-          cd spike
-          ./dist/spike-engine/spike-engine > engine.out &
-          ENGINE_PID=$!
-          for i in $(seq 1 30); do
-            grep -q '^ENGINE_READY port=' engine.out && break
-            sleep 1
-          done
-          PORT=$(sed -n 's/^ENGINE_READY port=//p' engine.out | head -1)
-          test -n "${PORT:-}" || { echo "ready sentinel never appeared"; cat engine.out; kill $ENGINE_PID; exit 1; }
-          HEALTH=""
-          for i in $(seq 1 10); do
-            HEALTH=$(curl -fsS "http://127.0.0.1:${PORT}/health") && break
-            sleep 1
-          done
-          echo "$HEALTH" | grep -q '"frozen":true' || { echo "health probe failed: $HEALTH"; cat engine.out; kill $ENGINE_PID; exit 1; }
-          kill $ENGINE_PID
+          ENGINE=packaging/dist/engine/podcast-reader-engine
+          [ -e "$ENGINE.exe" ] && ENGINE="$ENGINE.exe"
+          uv run python packaging/frozen_smoke.py "$ENGINE" --data-dir smoke-data
+
+  cuda-pack-smoke:
+    # S9 follow-up (workflow_dispatch only, not v1-blocking): install the
+    # CUDA pack through POST /v1/packs/cuda-runtime/install on a stock
+    # Windows runner — no GPU needed — and verify wheel extraction produced
+    # the complete cuBLAS + cuDNN 9 DLL set with an intact manifest. This
+    # exercises the largest download/extraction path on the platform that
+    # ships it (~1.2 GB from PyPI).
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.10"
+      - name: Build frozen engine (no tool seeds — not needed for this smoke)
+        run: |
+          uv venv packaging/.venv-engine --python 3.10
+          VENV_PY=packaging/.venv-engine/Scripts/python.exe
+          uv pip install --python "$VENV_PY" '.[worker]' pyinstaller
+          "$VENV_PY" packaging/build_engine.py --skip-tools
+      - name: Install the CUDA pack and verify extraction + manifest
+        run: |
+          uv run python packaging/frozen_smoke.py \
+            packaging/dist/engine/podcast-reader-engine.exe \
+            --pack cuda-runtime --no-transcribe --timeout 1800
 
   node:
     # Desktop app (app/): typecheck, lint, unit tests, production build.

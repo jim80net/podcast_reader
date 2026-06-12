@@ -21,10 +21,16 @@ from podcast_reader.chapters import (
     generate_chapters,
     snap_chapters_to_segments,
 )
+from podcast_reader.diarize import diarize_step
 from podcast_reader.html import build_html
 from podcast_reader.providers import PROVIDERS, resolve_provider
 from podcast_reader.tools import run_child
-from podcast_reader.transcribe import transcribe
+from podcast_reader.transcribe import transcribe, transcription_engine
+
+# PipelineError is re-imported under its own name: an explicit re-export
+# (mypy strict) for the existing `from podcast_reader.pipeline import
+# PipelineError` consumers (CLI, engine job store).
+from podcast_reader.types import PipelineError as PipelineError
 from podcast_reader.types import PipelineEvent, PipelineResult
 from podcast_reader.youtube import (
     NoTranscriptError,
@@ -47,16 +53,6 @@ class InputType(Enum):
     YOUTUBE = "youtube"
     URL = "url"
     LOCAL_FILE = "local_file"
-
-
-class PipelineError(Exception):
-    """Unrecoverable pipeline failure with a structured code/message/hint."""
-
-    def __init__(self, code: str, message: str, hint: str = "") -> None:
-        super().__init__(message)
-        self.code = code
-        self.message = message
-        self.hint = hint
 
 
 _YT_URL_RE = re.compile(r"youtube\.com/|youtu\.be/")
@@ -142,6 +138,17 @@ def run_pipeline(
                 {},
             )
 
+        if request["diarize"]:
+            # Captions are fetched text — there is no audio to diarize. Say
+            # so instead of silently ignoring the enabled setting.
+            _emit(
+                on_event,
+                "warning",
+                "diarize",
+                "Diarization skipped: YouTube captions provide no audio to diarize",
+                {"code": "diarization_skipped"},
+            )
+
     elif input_type == InputType.URL:
         if title is None:
             try:
@@ -168,11 +175,11 @@ def run_pipeline(
             _emit(on_event, "step_finished", "download", "", {"cached": True})
         else:
             _emit(on_event, "step_started", "download", "Downloading with yt-dlp...", {})
-            audio_path = download_audio(source, output_dir, cookies=cookies)
+            audio_path = download_audio(source, output_dir, cookies=cookies, on_event=on_event)
             _emit(on_event, "step_finished", "download", "", {})
         stem = audio_path.stem
         json_path = output_dir / f"{stem}.json"
-        transcript_source = "whisper-ctranslate2"
+        transcript_source = transcription_engine()
 
         _transcribe_if_needed(
             audio_path=audio_path,
@@ -184,6 +191,8 @@ def run_pipeline(
             hf_token=request["hf_token"],
             on_event=on_event,
         )
+        if request["diarize"]:
+            diarize_step(audio_path=audio_path, json_path=json_path, on_event=on_event)
 
     else:
         audio_path = Path(source).resolve()
@@ -198,7 +207,7 @@ def run_pipeline(
 
         stem = audio_path.stem
         json_path = output_dir / f"{stem}.json"
-        transcript_source = "whisper-ctranslate2"
+        transcript_source = transcription_engine()
 
         _transcribe_if_needed(
             audio_path=audio_path,
@@ -210,6 +219,8 @@ def run_pipeline(
             hf_token=request["hf_token"],
             on_event=on_event,
         )
+        if request["diarize"]:
+            diarize_step(audio_path=audio_path, json_path=json_path, on_event=on_event)
 
     # --- Generate chapters (optional; never fatal — spec: chapters fault isolation) ---
     chapters_path = output_dir / f"{stem}_chapters.json"
@@ -411,7 +422,7 @@ def _transcribe_if_needed(
         on_event,
         "step_started",
         "transcribe",
-        f"Transcribing with whisper-ctranslate2 "
+        f"Transcribing with {transcription_engine()} "
         f"(model={whisper_model}, lang={whisper_lang}, device={whisper_device})...",
         {},
     )
@@ -422,5 +433,6 @@ def _transcribe_if_needed(
         lang=whisper_lang,
         device=whisper_device,
         hf_token=hf_token,
+        on_event=on_event,
     )
     _emit(on_event, "step_finished", "transcribe", "", {})

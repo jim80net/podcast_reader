@@ -1,7 +1,8 @@
 /**
- * Hash-based routing for the four views (design decision 1: vanilla TS, no
- * framework). Routes are plain `#/view` fragments so `<a href>` navigation is
- * native and keyboard-accessible; anything unparseable lands on Library.
+ * Hash-based routing for the five views — Library, Reader, New, Settings,
+ * Setup (design decision 1: vanilla TS, no framework). Routes are plain
+ * `#/view` fragments so `<a href>` navigation is native and
+ * keyboard-accessible; anything unparseable lands on Library.
  */
 
 export type Route =
@@ -9,11 +10,13 @@ export type Route =
   | { view: 'reader'; sourceId: string }
   | { view: 'new' }
   | { view: 'settings' }
+  | { view: 'setup' }
 
 export function parseHash(hash: string): Route {
   const path = hash.replace(/^#\/?/, '')
   if (path === 'new') return { view: 'new' }
   if (path === 'settings') return { view: 'settings' }
+  if (path === 'setup') return { view: 'setup' }
   const readerMatch = /^reader\/(.+)$/.exec(path)
   if (readerMatch !== null && readerMatch[1] !== undefined) {
     try {
@@ -33,6 +36,8 @@ export function hrefFor(route: Route): string {
       return '#/new'
     case 'settings':
       return '#/settings'
+    case 'setup':
+      return '#/setup'
     case 'reader':
       return `#/reader/${encodeURIComponent(route.sourceId)}`
   }

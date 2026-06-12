@@ -23,10 +23,17 @@ export interface UpdaterAccess {
   installNow(): Promise<void>
 }
 
+/** The renderer-facing slice of the app config (AppConfigStore). */
+export interface AppConfigAccess {
+  isFirstRunComplete(): boolean
+  markFirstRunComplete(): void
+}
+
 export function registerIpcHandlers(
   ipcMain: IpcMainLike,
   manager: EngineManager,
-  updates: UpdaterAccess
+  updates: UpdaterAccess,
+  config: AppConfigAccess
 ): void {
   const client = () => {
     const c = manager.client
@@ -67,6 +74,14 @@ export function registerIpcHandlers(
     client().testKey(provider, apiKey)
   )
   ipcMain.handle(CHANNELS.providersList, () => client().listProviders())
+
+  ipcMain.handle(CHANNELS.packsList, () => client().listPacks())
+  ipcMain.handle(CHANNELS.packsInstall, (_e, packId: string) => client().installPack(packId))
+  ipcMain.handle(CHANNELS.packsUninstall, (_e, packId: string) => client().uninstallPack(packId))
+
+  // First-run flag (setup wizard gate) — app-side state, no engine involved.
+  ipcMain.handle(CHANNELS.firstRunGet, () => config.isFirstRunComplete())
+  ipcMain.handle(CHANNELS.firstRunComplete, () => config.markFirstRunComplete())
 
   ipcMain.handle(CHANNELS.updateGetStatus, () => updates.status())
   ipcMain.handle(CHANNELS.updateInstall, () => updates.installNow())

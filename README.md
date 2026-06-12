@@ -77,18 +77,64 @@ npm install
 npm run dev          # dev posture: spawns `uv run podcast-reader serve` for you
 ```
 
-**Dev posture (pre-Phase 4):** until a frozen engine ships inside the
-installer, the app finds its engine via, in order: a packaged
-`resources/engine/` payload, the `PODCAST_READER_ENGINE_CMD` env override
-(plain whitespace split — no paths with spaces), or `uv run podcast-reader
-serve` from the repo root — so the repo's Python toolchain
-(`uv sync --extra dev`) is assumed for development.
+**Engine posture:** the app finds its engine via, in order: a packaged
+`resources/engine/` payload (built with `packaging/build_engine.py`, see
+below), the `PODCAST_READER_ENGINE_CMD` env override (plain whitespace
+split — no paths with spaces), or `uv run podcast-reader serve` from the
+repo root — so the repo's Python toolchain (`uv sync --extra dev`) is
+assumed for development.
+
+**First run & packs:** a packaged app cannot acquire Python packages after
+install, so heavyweight runtime pieces are downloadable *packs* managed by
+the engine (`GET/POST/DELETE /v1/packs`). On first run a setup wizard
+detects hardware, pre-checks the recommended packs, and downloads them with
+live progress (resumable; re-runnable from Settings → "Run setup again").
+Settings → Packs installs/uninstalls each pack and shows license
+attributions. Approximate download sizes:
+
+| Pack | Download | Notes |
+|------|----------|-------|
+| Whisper model `tiny` | 78 MB | CI / low-end |
+| Whisper model `small` | 486 MB | CPU default |
+| Whisper model `medium` | 1.5 GB | |
+| Whisper model `large-v3` | 3.1 GB | recommended with an NVIDIA GPU |
+| NVIDIA CUDA runtime (cuBLAS + cuDNN 9) | 1.2 GB | Windows + NVIDIA only; from NVIDIA's official PyPI wheels |
+| Speaker diarization worker | ~340 MB | not yet published — shows `unavailable` |
 
 **Unsigned builds:** installers built today are unsigned dev artifacts
 (`npm run dist -- --win` / `-- --mac`): Windows SmartScreen needs
 "Run anyway", macOS needs right-click → Open (and macOS auto-update does
 not work unsigned). Signed/notarized release pipelines are gated on
 code-signing credentials. Details in [`app/README.md`](app/README.md).
+
+### Frozen engine builds (`packaging/`)
+
+The production engine ships as a PyInstaller onedir (engine +
+`whisper-worker` sharing one `_internal/`, with yt-dlp/ffmpeg/ffprobe seeds
+baked into `_internal/tools/`):
+
+```bash
+# POSIX shell (Linux/macOS, or Git Bash on Windows)
+cd packaging
+uv venv .venv-engine --python 3.10
+uv pip install --python .venv-engine/bin/python '..[worker]' pyinstaller
+.venv-engine/bin/python build_engine.py            # → packaging/dist/engine/
+python3 frozen_smoke.py dist/engine/podcast-reader-engine   # e2e proof
+cd ../app && npm run dist -- --engine-dir ../packaging/dist/engine --win
+```
+
+On Windows without a POSIX shell, substitute `.venv-engine\Scripts\python.exe`
+for `.venv-engine/bin/python` (and for the bare `python3` on the
+`frozen_smoke.py` line — cmd/PowerShell have no `python3`), and
+`dist\engine\podcast-reader-engine.exe` for the engine path (the
+`frozen-smoke` job in `.github/workflows/ci.yml` shows the exact Windows
+invocations).
+
+CI (`frozen-smoke`) builds this engine on ubuntu + windows and proves it
+end-to-end: boot, authenticated handshake, `POST /v1/packs/model-tiny/install`,
+and a fixture-WAV transcription through the frozen worker. The diarization
+worker pack has its own build (`build_diarization_pack.py`, requires
+`HF_TOKEN` with accepted `pyannote/speaker-diarization-community-1` terms).
 
 ### Output
 

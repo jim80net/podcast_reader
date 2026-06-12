@@ -72,6 +72,41 @@ interface EngineSettings {
   chapter_model: string
   chapter_provider: string
   custom_provider_url: string
+  diarize: boolean
+}
+
+interface PackProgress {
+  bytes: number
+  total: number
+}
+
+interface PackInstallError {
+  code: string
+  message: string
+}
+
+interface HardwareInfo {
+  platform: string
+  nvidia_gpu: boolean
+  gpu_names: string[]
+}
+
+interface LicenseNotice {
+  name: string
+  text: string
+}
+
+interface PackStatus {
+  id: string
+  kind: string
+  display_name: string
+  size: number
+  state: string
+  recommended: boolean
+  installed_version: string | null
+  progress: PackProgress | null
+  error: PackInstallError | null
+  licenses: LicenseNotice[]
 }
 
 // ---- state ------------------------------------------------------------------
@@ -96,10 +131,76 @@ let settings: EngineSettings = {
   library_dir: '/tmp/mock-library',
   chapter_model: '',
   chapter_provider: 'anthropic',
-  custom_provider_url: ''
+  custom_provider_url: '',
+  diarize: false
 }
 let keyTestResult: { ok: boolean; detail: string | null } = { ok: true, detail: null }
 const pushedKeys = new Set<string>()
+
+// Pack surface defaults: recommended packs ALREADY installed, so the setup
+// wizard's first-run trigger ("recommended packs missing") stays quiet in
+// every test that doesn't seed pack state explicitly. Wizard/pack tests seed
+// not-installed states (and hardware) through /__mock/seed before launch.
+let hardware: HardwareInfo = {
+  platform: 'win32',
+  nvidia_gpu: true,
+  gpu_names: ['Mock GeForce RTX']
+}
+
+function makePack(partial: Partial<PackStatus> & { id: string }): PackStatus {
+  return {
+    kind: 'model',
+    display_name: partial.id,
+    size: 0,
+    state: 'not-installed',
+    recommended: false,
+    installed_version: null,
+    progress: null,
+    error: null,
+    licenses: [],
+    ...partial
+  }
+}
+
+/** Mirrors the engine registry's ids/kinds/sizes (engine/packs.py REGISTRY). */
+function defaultPacks(): Map<string, PackStatus> {
+  const entries: PackStatus[] = [
+    makePack({
+      id: 'cuda-runtime',
+      kind: 'runtime',
+      display_name: 'NVIDIA CUDA runtime (cuBLAS + cuDNN 9)',
+      size: 1_243_159_663,
+      state: 'installed',
+      recommended: true,
+      installed_version: '1',
+      licenses: [
+        { name: 'NVIDIA cuBLAS', text: 'Mock cuBLAS attribution notice.' },
+        { name: 'NVIDIA cuDNN', text: 'Mock cuDNN attribution notice.' }
+      ]
+    }),
+    makePack({ id: 'model-tiny', display_name: 'Whisper tiny model', size: 78_203_619 }),
+    makePack({ id: 'model-small', display_name: 'Whisper small model', size: 486_212_372 }),
+    makePack({ id: 'model-medium', display_name: 'Whisper medium model', size: 1_530_571_735 }),
+    makePack({
+      id: 'model-large-v3',
+      display_name: 'Whisper large-v3 model',
+      size: 3_090_835_702,
+      state: 'installed',
+      recommended: true,
+      installed_version: 'mock-rev',
+      licenses: [{ name: 'MIT (Systran faster-whisper)', text: 'Mock model attribution notice.' }]
+    }),
+    makePack({
+      id: 'diarization',
+      kind: 'worker',
+      display_name: 'Speaker diarization worker',
+      state: 'unavailable'
+    })
+  ]
+  return new Map(entries.map((pack) => [pack.id, pack]))
+}
+
+const packs = defaultPacks()
 let jobCounter = 0
 const sseClients = new Set<ServerResponse>()
 
@@ -209,7 +310,25 @@ async function handleControl(
     if (body.keyTestResult !== undefined) {
       keyTestResult = body.keyTestResult as { ok: boolean; detail: string | null }
     }
+    if (body.hardware !== undefined) {
+      hardware = body.hardware as HardwareInfo
+    }
+    for (const pack of (body.packs as PackStatus[] | undefined) ?? []) {
+      packs.set(pack.id, { ...(packs.get(pack.id) ?? makePack({ id: pack.id })), ...pack })
+    }
     res.writeHead(204).end()
+    return
+  }
+  if (req.method === 'POST' && path === '/__mock/pack') {
+    // Upsert a pack status and optionally broadcast SSE events — the seam for
+    // scripting install progress (pack_progress) and state changes
+    // (pack_state). Events MUST NOT carry job_id (per Q5).
+    const body = await readBody(req)
+    const patch = body.pack as Partial<PackStatus> & { id: string }
+    const merged = { ...(packs.get(patch.id) ?? makePack({ id: patch.id })), ...patch }
+    packs.set(merged.id, merged)
+    for (const event of (body.events as PipelineEvent[] | undefined) ?? []) broadcast(event)
+    sendJson(res, 200, merged)
     return
   }
   if (req.method === 'POST' && path === '/__mock/job') {
@@ -253,7 +372,7 @@ async function handleV1(req: IncomingMessage, res: ServerResponse, path: string)
   record('request', `${req.method} ${path}`)
 
   if (req.method === 'GET' && path === '/v1/health') {
-    sendJson(res, 200, { version: '0.2.0', token_fingerprint: fingerprint(token) })
+    sendJson(res, 200, { version: '0.3.0', token_fingerprint: fingerprint(token) })
     return
   }
   if (req.method === 'POST' && path === '/v1/shutdown') {
@@ -322,6 +441,54 @@ async function handleV1(req: IncomingMessage, res: ServerResponse, path: string)
       sseClients.delete(res)
       record('events-close')
     })
+    return
+  }
+  if (req.method === 'GET' && path === '/v1/packs') {
+    sendJson(res, 200, { hardware, packs: [...packs.values()] })
+    return
+  }
+  const installMatch = /^\/v1\/packs\/([^/]+)\/install$/.exec(path)
+  if (req.method === 'POST' && installMatch !== null) {
+    const pack = packs.get(decodeURIComponent(installMatch[1] ?? ''))
+    if (pack === undefined) return detail(res, 404, 'pack not found')
+    if (pack.state === 'unavailable') {
+      return detail(res, 409, `pack '${pack.id}' has no published artifact yet and cannot be installed`)
+    }
+    record('pack-install', pack.id)
+    // Idempotent like the real engine: installed/installing requests no-op.
+    if (pack.state !== 'installed' && pack.state !== 'installing') {
+      pack.state = 'installing'
+      pack.progress = { bytes: 0, total: pack.size }
+      pack.error = null
+      broadcast({
+        kind: 'pack_state',
+        step: null,
+        message: `Installing ${pack.display_name}`,
+        data: { pack_id: pack.id, state: 'installing' }
+      })
+    }
+    res.writeHead(202).end()
+    return
+  }
+  const packMatch = /^\/v1\/packs\/([^/]+)$/.exec(path)
+  if (req.method === 'DELETE' && packMatch !== null) {
+    const pack = packs.get(decodeURIComponent(packMatch[1] ?? ''))
+    if (pack === undefined) return detail(res, 404, 'pack not found')
+    if (pack.state === 'installing') {
+      return detail(res, 409, `pack '${pack.id}' is currently installing; uninstall is refused`)
+    }
+    record('pack-uninstall', pack.id)
+    pack.state = 'not-installed'
+    pack.installed_version = null
+    pack.progress = null
+    pack.error = null
+    broadcast({
+      kind: 'pack_state',
+      step: null,
+      message: `${pack.display_name} uninstalled`,
+      data: { pack_id: pack.id, state: 'not-installed' }
+    })
+    res.writeHead(204).end()
     return
   }
   if (req.method === 'GET' && path === '/v1/library') {

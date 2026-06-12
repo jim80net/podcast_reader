@@ -7,12 +7,30 @@
  */
 
 // -- src/podcast_reader/types.py:11 (StepName) --
-export type StepName = 'resolve' | 'captions' | 'download' | 'transcribe' | 'chapters' | 'render'
+export type StepName =
+  | 'resolve'
+  | 'captions'
+  | 'download'
+  | 'transcribe'
+  | 'diarize'
+  | 'chapters'
+  | 'render'
 
-// -- src/podcast_reader/types.py:12 (EventKind) --
-export type EventKind = 'step_started' | 'step_finished' | 'warning' | 'job_done' | 'job_failed'
+// -- src/podcast_reader/types.py:16 (EventKind) --
+// pack_state / pack_progress ride the same SSE stream as job events; they
+// carry data.pack_id and NEVER a job_id (per Q5 — job_id presence is the
+// renderer's job/pack discriminator).
+export type EventKind =
+  | 'step_started'
+  | 'step_progress'
+  | 'step_finished'
+  | 'warning'
+  | 'job_done'
+  | 'job_failed'
+  | 'pack_state'
+  | 'pack_progress'
 
-// -- src/podcast_reader/types.py:13 (JobState) --
+// -- src/podcast_reader/types.py:26 (JobState) --
 export type JobState =
   | 'queued'
   | 'awaiting-confirmation'
@@ -21,7 +39,7 @@ export type JobState =
   | 'failed'
   | 'interrupted'
 
-// -- src/podcast_reader/types.py:15 (JOB_STATES) --
+// -- src/podcast_reader/types.py:28 (JOB_STATES) --
 export const JOB_STATES: readonly JobState[] = [
   'queued',
   'awaiting-confirmation',
@@ -31,7 +49,7 @@ export const JOB_STATES: readonly JobState[] = [
   'interrupted'
 ] as const
 
-// -- src/podcast_reader/types.py:25 (PipelineEvent) --
+// -- src/podcast_reader/types.py:38 (PipelineEvent) --
 export interface PipelineEvent {
   kind: EventKind
   step: StepName | null
@@ -39,14 +57,14 @@ export interface PipelineEvent {
   data: Record<string, unknown>
 }
 
-// -- src/podcast_reader/types.py:32 (JobError) --
+// -- src/podcast_reader/types.py:62 (JobError) --
 export interface JobError {
   code: string
   message: string
   hint: string
 }
 
-// -- src/podcast_reader/types.py:54 (PipelineResult) --
+// -- src/podcast_reader/types.py:84 (PipelineResult) --
 export interface PipelineResult {
   json_path: string
   chapters_path: string | null
@@ -54,7 +72,7 @@ export interface PipelineResult {
   title: string
 }
 
-// -- src/podcast_reader/types.py:61 (JobRecord) --
+// -- src/podcast_reader/types.py:91 (JobRecord) --
 export interface JobRecord {
   id: string
   source: string
@@ -67,7 +85,7 @@ export interface JobRecord {
   updated_at: number
 }
 
-// -- src/podcast_reader/types.py:73 (LibraryEntry) --
+// -- src/podcast_reader/types.py:103 (LibraryEntry) --
 export interface LibraryEntry {
   source_id: string
   source: string
@@ -76,7 +94,7 @@ export interface LibraryEntry {
   created_at: number
 }
 
-// -- src/podcast_reader/types.py:81 (EngineSettings) --
+// -- src/podcast_reader/types.py:111 (EngineSettings) --
 export interface EngineSettings {
   whisper_model: string
   whisper_lang: string
@@ -86,6 +104,7 @@ export interface EngineSettings {
   chapter_model: string // "" means: the chapter provider's default model
   chapter_provider: string // a podcast_reader.providers.PROVIDERS key
   custom_provider_url: string // base URL for the "custom" provider ("" otherwise)
+  diarize: boolean // default false; engine warns-and-skips when the pack is absent
 }
 
 // -- src/podcast_reader/engine/app.py:100 (SettingsBody) --
@@ -99,6 +118,7 @@ export interface SettingsUpdate {
   chapter_model: string
   chapter_provider?: string
   custom_provider_url?: string
+  diarize?: boolean
 }
 
 // -- src/podcast_reader/engine/app.py:50 (JobSubmission) --
@@ -119,6 +139,66 @@ export interface ProviderInfo {
   id: string
   default_model: string
   key_available: boolean
+}
+
+// -- src/podcast_reader/engine/packs.py:41 (PackKind) --
+export type PackKind = 'runtime' | 'model' | 'worker'
+
+// -- src/podcast_reader/engine/packs.py:42 (PackState) --
+export type PackState =
+  | 'not-installed'
+  | 'resumable'
+  | 'installing'
+  | 'installed'
+  | 'incompatible'
+  | 'failed'
+  | 'unavailable'
+
+// -- src/podcast_reader/engine/packs.py:112 (PackProgress) --
+export interface PackProgress {
+  bytes: number
+  total: number
+}
+
+// -- src/podcast_reader/engine/packs.py:119 (HardwareInfo) --
+export interface HardwareInfo {
+  platform: string // a Python sys.platform value ("win32", "darwin", "linux")
+  nvidia_gpu: boolean
+  gpu_names: string[]
+}
+
+// -- src/podcast_reader/engine/packs.py:141 (PackInstallError) --
+export interface PackInstallError {
+  code: string
+  message: string
+}
+
+// -- src/podcast_reader/engine/packs.py:62 (LicenseNotice) --
+export interface LicenseNotice {
+  name: string
+  text: string
+}
+
+// -- src/podcast_reader/engine/packs.py:127 (PackStatus) --
+export interface PackStatus {
+  id: string
+  kind: PackKind
+  display_name: string
+  size: number // total download size in bytes (0 for unpublished entries)
+  state: PackState
+  recommended: boolean
+  installed_version: string | null
+  progress: PackProgress | null
+  error: PackInstallError | null
+  // Attribution notices Settings renders (manifest-recorded when installed,
+  // registry otherwise — engine-authoritative either way, task 8.1).
+  licenses: LicenseNotice[]
+}
+
+// -- src/podcast_reader/engine/packs.py:148 (PacksResponse) --
+export interface PacksResponse {
+  hardware: HardwareInfo
+  packs: PackStatus[]
 }
 
 // -- src/podcast_reader/engine/app.py:137 (HealthInfo) --

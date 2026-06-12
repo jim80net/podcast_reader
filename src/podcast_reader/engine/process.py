@@ -19,6 +19,7 @@ import logging
 import os
 import socket
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, TypedDict
@@ -27,7 +28,14 @@ import uvicorn
 
 from podcast_reader.engine import library
 from podcast_reader.engine.app import create_app
+from podcast_reader.engine.events import EventBus
 from podcast_reader.engine.jobs import JobStore
+from podcast_reader.engine.managed_tools import (
+    export_tools_dir,
+    maybe_self_update_ytdlp,
+    seed_tools,
+)
+from podcast_reader.engine.pack_manager import PackManager
 from podcast_reader.engine.settings import (
     atomic_write_json,
     data_dir,
@@ -183,6 +191,7 @@ def make_pipeline_runner(base: Path, key_store: dict[str, str] | None = None) ->
             chapter_provider=provider,
             chapter_api_key=_resolve_chapter_key(provider, keys),
             custom_provider_url=settings["custom_provider_url"],
+            diarize=settings["diarize"],
         )
         staged = run_pipeline(request, on_event)
         result = _commit_artifacts(staged, library.entry_dir(library_dir, source_id))
@@ -251,6 +260,12 @@ def serve_engine(
     trigger a clean shutdown via ``server.should_exit``).
     """
     base = data_dir()
+    # Reconcile bundle tool seeds into <data_dir>/tools (newer wins) and make
+    # that dir the effective default for every resolve_tool call site — both
+    # before anything can spawn a tool (tools-seeding spec). Seeding failures
+    # log and continue: the engine serves regardless.
+    seed_tools(base)
+    export_tools_dir(base)
     state = load_engine_state(base)
     sock = bind_engine_socket(base, state)
     if sys.platform == "win32":
@@ -258,7 +273,14 @@ def serve_engine(
     # One process-memory key store shared by the job runner and the app
     # (the runner closure is built before the app, so app state can't host it).
     key_store: dict[str, str] = {}
-    store = JobStore(base, make_pipeline_runner(base, key_store))
+    # One EventBus shared by the job store and the pack manager (the public
+    # publish seam, per S6): job and pack events ride the same SSE stream.
+    bus = EventBus()
+    store = JobStore(base, make_pipeline_runner(base, key_store), bus=bus)
+    pack_manager = PackManager(base, bus=bus)
+    # Startup pack validation (per S8/F13): flag incompatible or damaged
+    # installed packs before serving; the same checks back every GET /v1/packs.
+    pack_manager.validate_installed()
 
     # POST /v1/shutdown hook: the server object is created after the app, so
     # the hook reaches it through this list (filled before any request runs).
@@ -268,7 +290,13 @@ def serve_engine(
         for srv in servers:
             srv.should_exit = True
 
-    app = create_app(base, store, key_store=key_store, on_shutdown=request_shutdown)
+    app = create_app(
+        base,
+        store,
+        key_store=key_store,
+        on_shutdown=request_shutdown,
+        pack_manager=pack_manager,
+    )
     # timeout_graceful_shutdown bounds exit even when a client leaves an SSE
     # stream open — an open /v1/events response would otherwise hold graceful
     # shutdown forever (per P1).
@@ -279,6 +307,13 @@ def serve_engine(
     path = discovery_file if discovery_file is not None else base / DISCOVERY_FILE
     try:
         store.start_worker()
+        pack_manager.start_worker()
+        # Scheduled yt-dlp self-update (design decision 8): background thread,
+        # gated inside on the 24 h cadence and the user-data residence of the
+        # resolved binary; never touches PATH/pip copies, never raises.
+        threading.Thread(
+            target=maybe_self_update_ytdlp, args=(base,), name="ytdlp-self-update", daemon=True
+        ).start()
         write_discovery(path, state, sock)
         server.run(sockets=[sock])
     finally:
@@ -289,6 +324,9 @@ def serve_engine(
         store.begin_shutdown()
         kill_children()  # unblock the worker so store.shutdown() can join it
         store.shutdown()
+        # An in-flight pack download aborts between chunks; its partial stays
+        # on disk, so the pack surfaces as resumable on the next start.
+        pack_manager.shutdown()
         sock.close()
 
 

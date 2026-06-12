@@ -50,13 +50,21 @@ class EngineState(TypedDict):
     token: str
 
 
-def data_dir() -> Path:
-    """Resolve (and create) the engine data directory.
+def data_dir_path() -> Path:
+    """Resolve the engine data directory path without creating it.
 
-    Default is ``~/PodcastReader``; ``PODCAST_READER_DATA_DIR`` overrides.
+    For read-only consumers (the whisper worker's DLL-path prep, ytdlp's
+    managed-copy residence gate) that must not leave a ``~/PodcastReader``
+    behind as a side effect. Default is ``~/PodcastReader``;
+    ``PODCAST_READER_DATA_DIR`` overrides.
     """
     env = os.environ.get("PODCAST_READER_DATA_DIR")
-    base = Path(env).expanduser() if env else Path.home() / "PodcastReader"
+    return Path(env).expanduser() if env else Path.home() / "PodcastReader"
+
+
+def data_dir() -> Path:
+    """Resolve (and create) the engine data directory."""
+    base = data_dir_path()
     base.mkdir(parents=True, exist_ok=True)
     return base
 
@@ -131,6 +139,7 @@ def default_settings(base: Path) -> EngineSettings:
         chapter_model="",  # "" means: the chapter provider's default model
         chapter_provider="anthropic",
         custom_provider_url="",
+        diarize=False,
     )
 
 

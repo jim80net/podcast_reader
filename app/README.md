@@ -64,15 +64,44 @@ config.
 npm run dist -- --win                            # unsigned NSIS installer
 npm run dist -- --mac                            # unsigned dmg + zip
 npm run dist -- --linux dir                      # pipeline proof, not a ship target
-npm run dist -- --engine-dir /path/to/onedir --win   # with a frozen engine payload
+npm run dist -- --engine-dir ../packaging/dist/engine --win   # with the frozen engine
 ```
 
-`--engine-dir` (handled by `scripts/dist.mjs`) maps a frozen engine onedir
-(spike layout: `podcast-reader-engine[.exe]`, sibling `whisper-worker`,
-shared `_internal/`) UNCOMPRESSED into `<resources>/engine/` as
-extraResources — executables cannot run from inside the asar archive.
-Builds without it are valid: the app falls back to the spawn chain above.
-Producing the release-grade engine payload is Phase 4.
+`--engine-dir` (handled by `scripts/dist.mjs`) maps the frozen engine onedir
+(`podcast-reader-engine[.exe]`, sibling `whisper-worker`, shared
+`_internal/` incl. the tool seeds) UNCOMPRESSED into `<resources>/engine/`
+as extraResources — executables cannot run from inside the asar archive.
+The payload is real now: build it with `packaging/build_engine.py` (see
+`packaging/engine.spec`; the CI `frozen-smoke` job proves the same build
+end-to-end on ubuntu + windows). Builds without `--engine-dir` are valid:
+the app falls back to the spawn chain above.
+
+## First run: setup wizard & packs
+
+The packaged engine downloads its heavyweight runtime pieces as *packs*
+(whisper model weights, the Windows CUDA runtime, the diarization worker)
+through `GET/POST/DELETE /v1/packs`, with progress riding the same SSE
+stream as job events. App-side:
+
+- **Setup wizard** (`src/renderer/src/views/setup.ts`): auto-opens on first
+  run (app-side flag in `app-config.json` under userData; set on completion
+  or skip) when the engine is ready and recommended packs are missing. Shows
+  detected hardware, pre-checks recommended packs with sizes, sets
+  `whisper_device` from detected hardware (cuda iff Windows + NVIDIA with
+  the CUDA pack available), installs with live progress, resumes interrupted
+  downloads, and is re-runnable from Settings → "Run setup again".
+- **Settings → Packs** (`src/renderer/src/views/packs-section.ts`): per-pack
+  state/version/size/progress, install/uninstall (engine 409 reasons
+  surfaced inline), re-download for `incompatible`/`failed` packs, license
+  attributions from the engine-sent notices, and an advisory when
+  `whisper_device=cuda` with no usable CUDA pack (uninstall never mutates
+  the device setting).
+
+E2e note: tests that launch with a fresh userData against an engine with
+missing recommended packs must either pre-write
+`{"first_run_complete": true}` to `<userData>/app-config.json` or assert the
+wizard deliberately — otherwise the wizard replaces the Library view
+(`tests/e2e/packs.spec.ts` covers the wizard flows).
 
 **Unsigned-build caveats** (signing is user-blocking, tasks 6.4/6.5):
 
@@ -97,13 +126,14 @@ unsigned builds (`updaterGate` in `src/main/updater.ts`; `BUILD_SIGNED`
 flips in task 6.6). `PODCAST_READER_FORCE_UPDATES=1` re-enables them on a
 packaged build for manually verifying the unsigned NSIS update path.
 
-## Engine spawn resolution (pre-Phase 4 dev posture)
+## Engine spawn resolution
 
 When no live engine is adoptable, the app spawns one, resolving the command
 in this order (design decision 2):
 
 1. **Packaged engine** — `<resourcesPath>/engine/podcast-reader-engine serve`
-   when it exists (installed builds; the payload lands in Phase 4).
+   when it exists (installed builds; the payload comes from
+   `packaging/build_engine.py` via `npm run dist -- --engine-dir`).
 2. **`PODCAST_READER_ENGINE_CMD`** — an env override parsed by a **plain
    whitespace split** (per P6): no quoting, no escaping, so paths containing
    spaces are unsupported here — use posture 1 or 3 for those.

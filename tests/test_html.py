@@ -107,7 +107,148 @@ class TestSegmentsToParapraphs:
         assert len(paras) > 1
 
 
+class TestSpeakerParagraphs:
+    """Speaker-aware paragraph grouping (diarization-worker spec)."""
+
+    def test_breaks_paragraph_at_speaker_change(self) -> None:
+        segments = [
+            {"start": 0.0, "end": 2.0, "text": "Hello there", "speaker": "SPEAKER_00"},
+            {"start": 2.0, "end": 4.0, "text": "and welcome.", "speaker": "SPEAKER_00"},
+            {"start": 4.0, "end": 6.0, "text": "Thanks for having me.", "speaker": "SPEAKER_01"},
+        ]
+        paras = segments_to_paragraphs(segments, sentences_per_para=5)
+        assert len(paras) == 2
+        assert paras[0]["speaker"] == "SPEAKER_00"
+        assert paras[0]["text"] == "Hello there and welcome."
+        assert paras[1]["speaker"] == "SPEAKER_01"
+
+    def test_speakerless_segments_produce_no_speaker_keys(self) -> None:
+        """The field is optional end to end: no speakers in, no keys out."""
+        segments = [
+            {"start": 0.0, "end": 2.0, "text": "Hello there."},
+            {"start": 2.0, "end": 4.0, "text": "More text."},
+        ]
+        paras = segments_to_paragraphs(segments, sentences_per_para=5)
+        assert all("speaker" not in p for p in paras)
+
+    def test_partial_speakers_break_against_unlabeled_segments(self) -> None:
+        """A labeled→unlabeled transition is a speaker change too."""
+        segments = [
+            {"start": 0.0, "end": 2.0, "text": "Labeled.", "speaker": "SPEAKER_00"},
+            {"start": 2.0, "end": 4.0, "text": "Unlabeled."},
+        ]
+        paras = segments_to_paragraphs(segments, sentences_per_para=5)
+        assert len(paras) == 2
+        assert paras[0]["speaker"] == "SPEAKER_00"
+        assert "speaker" not in paras[1]
+
+    def test_carry_after_split_stays_with_its_speaker(self) -> None:
+        """A sentence-boundary split's leftover fragment must never leak into
+        the next speaker's paragraph (OCR review on PR #11)."""
+        segments = [
+            {"start": 0.0, "end": 2.0, "text": "First sentence.", "speaker": "SPEAKER_00"},
+            {
+                "start": 2.0,
+                "end": 4.0,
+                "text": "Second sentence. And a trailing fragment",
+                "speaker": "SPEAKER_00",
+            },
+            {"start": 4.0, "end": 6.0, "text": "Hello from the guest.", "speaker": "SPEAKER_01"},
+        ]
+        paras = segments_to_paragraphs(segments, sentences_per_para=2)
+        assert len(paras) == 2
+        assert paras[0]["speaker"] == "SPEAKER_00"
+        assert paras[0]["text"] == "First sentence. Second sentence. And a trailing fragment"
+        assert paras[1]["speaker"] == "SPEAKER_01"
+        assert paras[1]["text"] == "Hello from the guest."
+
+    def test_carry_after_split_still_prepends_for_same_speaker(self) -> None:
+        """Same-speaker continuation keeps the original carry behavior."""
+        segments = [
+            {"start": 0.0, "end": 2.0, "text": "First sentence.", "speaker": "SPEAKER_00"},
+            {
+                "start": 2.0,
+                "end": 4.0,
+                "text": "Second sentence. And a trailing fragment",
+                "speaker": "SPEAKER_00",
+            },
+            {"start": 4.0, "end": 6.0, "text": "that continues here.", "speaker": "SPEAKER_00"},
+        ]
+        paras = segments_to_paragraphs(segments, sentences_per_para=2)
+        assert len(paras) == 2
+        assert paras[0]["text"] == "First sentence. Second sentence."
+        assert paras[1]["text"] == "And a trailing fragment that continues here."
+        assert paras[1]["speaker"] == "SPEAKER_00"
+
+
+class TestSpeakerRendering:
+    _SEGMENTS = [
+        {"start": 0.0, "end": 2.0, "text": "Hello and welcome.", "speaker": "SPEAKER_00"},
+        {"start": 2.0, "end": 4.0, "text": "Glad to be here.", "speaker": "SPEAKER_01"},
+        {"start": 4.0, "end": 6.0, "text": "Continuing that thought.", "speaker": "SPEAKER_01"},
+        {"start": 6.0, "end": 8.0, "text": "Back to you.", "speaker": "SPEAKER_00"},
+    ]
+
+    def test_speaker_labels_visible_at_changes(self) -> None:
+        """Spec scenario: rendered transcript displays attribution at
+        speaker changes."""
+        from podcast_reader.html import build_html
+
+        result = build_html(list(self._SEGMENTS), title="T", sentences_per_para=1)
+
+        assert '<span class="speaker">Speaker 1</span>' in result
+        assert '<span class="speaker">Speaker 2</span>' in result
+        # consecutive same-speaker paragraphs are labeled once: SPEAKER_01
+        # speaks two paragraphs but gets one label
+        assert result.count('<span class="speaker">Speaker 2</span>') == 1
+
+    def test_speaker_css_present_only_with_speakers(self) -> None:
+        from podcast_reader.html import build_html
+
+        with_speakers = build_html(list(self._SEGMENTS), title="T", sentences_per_para=1)
+        without = build_html(
+            [{k: v for k, v in s.items() if k != "speaker"} for s in self._SEGMENTS],
+            title="T",
+            sentences_per_para=1,
+        )
+        assert ".speaker {" in with_speakers
+        assert ".speaker {" not in without
+        assert "speaker" not in without
+
+    def test_chapters_path_renders_speaker_labels(self) -> None:
+        from podcast_reader.html import build_html
+
+        chapters = [
+            {
+                "title": "Only Chapter",
+                "start": 0.0,
+                "end": 8.0,
+                "abstract": "All of it.",
+                "type": "content",
+                "key_points": [],
+            }
+        ]
+        result = build_html(
+            list(self._SEGMENTS), title="T", chapters=chapters, sentences_per_para=1
+        )
+        assert '<span class="speaker">Speaker 1</span>' in result
+        assert '<span class="speaker">Speaker 2</span>' in result
+
+
 class TestBuildHtmlIntegration:
+    def test_speakerless_output_byte_identical_no_chapters(self) -> None:
+        """Spec scenario: speakerless transcripts unchanged — golden file
+        generated before speaker rendering existed."""
+        from podcast_reader.html import build_html
+
+        whisper_data = json.loads((FIXTURES / "sample_whisper.json").read_text())
+        segments = [s for s in whisper_data["segments"] if s.get("text", "").strip()]
+
+        result = build_html(segments, title="Test Episode", sentences_per_para=5, source="test")
+
+        expected = (FIXTURES / "sample_expected_nochapters.html").read_text()
+        assert result == expected
+
     def test_full_pipeline_with_chapters(self) -> None:
         """Integration test: whisper JSON + chapters JSON -> HTML matches expected output."""
         from podcast_reader.html import build_html
