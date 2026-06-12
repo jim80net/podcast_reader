@@ -76,6 +76,7 @@ def _request(
     title: str | None = "Test Title",
     chapter_provider: str = "anthropic",
     chapter_api_key: str | None = None,
+    diarize: bool = False,
 ) -> PipelineRequest:
     """Build a PipelineRequest with test defaults."""
     return PipelineRequest(
@@ -92,6 +93,7 @@ def _request(
         chapter_provider=chapter_provider,
         chapter_api_key=chapter_api_key,
         custom_provider_url="",
+        diarize=diarize,
     )
 
 
@@ -556,6 +558,91 @@ class TestRunPipelineLocalFile:
 
         mock_transcribe.assert_not_called()
         mock_build_html.assert_called_once()
+
+
+class TestRunPipelineDiarize:
+    """Gating of the diarize step inside run_pipeline (diarization-worker spec)."""
+
+    @patch("podcast_reader.pipeline.diarize_step")
+    @patch("podcast_reader.pipeline.transcribe")
+    def test_disabled_by_default(
+        self, mock_transcribe: MagicMock, mock_diarize: MagicMock, tmp_path: Path
+    ) -> None:
+        """Spec scenario: with default settings no diarization step executes."""
+        audio_path = tmp_path / "episode.mp3"
+        audio_path.write_text("fake audio")
+        (tmp_path / "episode.json").write_text(json.dumps(_SAMPLE_SEGMENTS))
+
+        run_pipeline(
+            _request(input_arg=str(audio_path), output_dir=tmp_path),
+            on_event=lambda e: None,
+        )
+
+        mock_diarize.assert_not_called()
+
+    @patch("podcast_reader.pipeline.diarize_step")
+    @patch("podcast_reader.pipeline.transcribe")
+    def test_enabled_runs_step_after_transcribe(
+        self, mock_transcribe: MagicMock, mock_diarize: MagicMock, tmp_path: Path
+    ) -> None:
+        audio_path = tmp_path / "episode.mp3"
+        audio_path.write_text("fake audio")
+        json_path = tmp_path / "episode.json"
+        json_path.write_text(json.dumps(_SAMPLE_SEGMENTS))
+        events: list[PipelineEvent] = []
+
+        run_pipeline(
+            _request(input_arg=str(audio_path), output_dir=tmp_path, diarize=True),
+            on_event=events.append,
+        )
+
+        mock_diarize.assert_called_once_with(
+            audio_path=audio_path.resolve(), json_path=json_path, on_event=events.append
+        )
+
+    @patch("podcast_reader.pipeline.transcribe")
+    def test_enabled_without_pack_warns_and_completes(
+        self, mock_transcribe: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Spec scenario: enabled without the pack — the job completes with a
+        warning naming the pack."""
+        monkeypatch.setenv("PODCAST_READER_DATA_DIR", str(tmp_path / "data"))
+        audio_path = tmp_path / "episode.mp3"
+        audio_path.write_text("fake audio")
+        (tmp_path / "episode.json").write_text(json.dumps(_SAMPLE_SEGMENTS))
+        events: list[PipelineEvent] = []
+
+        result = run_pipeline(
+            _request(input_arg=str(audio_path), output_dir=tmp_path, diarize=True),
+            on_event=events.append,
+        )
+
+        warnings = [e for e in events if e["kind"] == "warning" and e["step"] == "diarize"]
+        assert len(warnings) == 1
+        assert warnings[0]["data"]["code"] == "diarization_skipped"
+        assert "diarization pack is not installed" in warnings[0]["message"]
+        assert result["html_path"].endswith("episode.html")
+
+    @patch("podcast_reader.pipeline.fetch_transcript")
+    def test_youtube_captions_source_warns_no_audio(
+        self, mock_fetch: MagicMock, tmp_path: Path
+    ) -> None:
+        """Captions are fetched text: an enabled diarize setting is reported,
+        not silently ignored."""
+        mock_fetch.return_value = [
+            {"text": "Hello world.", "start": 0.0, "duration": 5.0},
+        ]
+        events: list[PipelineEvent] = []
+
+        run_pipeline(
+            _request(input_arg=_YT_URL, output_dir=tmp_path, diarize=True),
+            on_event=events.append,
+        )
+
+        warnings = [e for e in events if e["kind"] == "warning" and e["step"] == "diarize"]
+        assert len(warnings) == 1
+        assert warnings[0]["data"]["code"] == "diarization_skipped"
+        assert "no audio" in warnings[0]["message"]
 
 
 class TestRunPipelineChapters:

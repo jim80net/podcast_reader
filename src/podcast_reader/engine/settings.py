@@ -139,6 +139,7 @@ def default_settings(base: Path) -> EngineSettings:
         chapter_model="",  # "" means: the chapter provider's default model
         chapter_provider="anthropic",
         custom_provider_url="",
+        diarize=False,
     )
 
 

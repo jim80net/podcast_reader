@@ -79,6 +79,7 @@ class PipelineRequest(TypedDict):
     chapter_provider: str  # a podcast_reader.providers.PROVIDERS key
     chapter_api_key: str | None  # None: skip chapter generation
     custom_provider_url: str  # base URL for the "custom" provider ("" otherwise)
+    diarize: bool  # run the diarization pack's worker after transcription
 
 
 class PipelineResult(TypedDict):
@@ -117,6 +118,7 @@ class EngineSettings(TypedDict):
     chapter_model: str  # "" means: the chapter provider's default model
     chapter_provider: str  # a podcast_reader.providers.PROVIDERS key
     custom_provider_url: str  # base URL for the "custom" provider ("" otherwise)
+    diarize: bool  # default false; warn-and-skip when the pack is absent
 
 
 def new_job_record(*, job_id: str, source: str, title: str | None) -> JobRecord:
