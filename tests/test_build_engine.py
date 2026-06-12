@@ -13,11 +13,14 @@ import os
 import stat
 import sys
 from pathlib import Path
-from types import ModuleType
+from typing import TYPE_CHECKING
 
 import pytest
 
 from podcast_reader.engine.managed_tools import seed_tools, tools_dir
+
+if TYPE_CHECKING:
+    from types import ModuleType
 
 _SCRIPT = Path(__file__).resolve().parent.parent / "packaging" / "build_engine.py"
 
@@ -39,8 +42,7 @@ class TestParseToolVersion:
 
     def test_ffmpeg_version_is_third_token_of_first_line(self) -> None:
         output = (
-            "ffmpeg version N-118500-g123abc-20260601 Copyright (c) 2000-2026\n"
-            "built with gcc 13\n"
+            "ffmpeg version N-118500-g123abc-20260601 Copyright (c) 2000-2026\nbuilt with gcc 13\n"
         )
         assert build_engine.parse_tool_version("ffmpeg", output) == "N-118500-g123abc-20260601"
 
