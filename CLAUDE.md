@@ -72,8 +72,12 @@ For speaker diarization, set `HF_TOKEN` and accept model terms at:
 | `src/podcast_reader/pipeline.py` | Shared step runner with progress events (used by CLI and engine) |
 | `src/podcast_reader/engine/settings.py` | Data dir, engine state (port/token), user settings persistence |
 | `src/podcast_reader/engine/library.py` | Managed transcript library: source-identity keys, atomic index, staged writes |
-| `src/podcast_reader/engine/jobs.py` | Persistent job journal, FIFO single-worker execution, SSE fan-out |
-| `src/podcast_reader/engine/app.py` | FastAPI app: bearer auth, jobs (incl. confirm/dismiss of awaiting-confirmation), events, library, settings, keys (push + test), providers, health, shutdown routes |
+| `src/podcast_reader/engine/jobs.py` | Persistent job journal, FIFO single-worker execution; publishes into the shared EventBus |
+| `src/podcast_reader/engine/events.py` | `EventBus` — public event-publish seam (SSE fan-out) shared by the job store and pack manager |
+| `src/podcast_reader/engine/packs.py` | Built-in pack registry (pinned CUDA wheels, HF model snapshots, unpublished diarization), manifest types, compat/integrity pure functions |
+| `src/podcast_reader/engine/pack_manager.py` | Pack downloads (Range resume, sha256-named staging, fail-closed verify) + `PackManager` installer thread (atomic install, manifest-first uninstall) |
+| `src/podcast_reader/engine/hardware.py` | `nvidia-smi` GPU probe (cached) + hardware-derived pack recommendations |
+| `src/podcast_reader/engine/app.py` | FastAPI app: bearer auth, jobs (incl. confirm/dismiss of awaiting-confirmation), events, library, settings, keys (push + test), providers, packs (list/install/uninstall), health, shutdown routes |
 | `src/podcast_reader/engine/process.py` | Pre-bound socket handshake, discovery file, child reaping, `serve` |
 | `spike/` | Packaging spike evidence (PyInstaller onedir prototype, SPIKE_REPORT.md) |
 | `src/podcast_reader/providers.py` | Chapter LLM provider registry (base URL, default model, key env, max_tokens) + custom-URL validation |
@@ -98,8 +102,10 @@ For speaker diarization, set `HF_TOKEN` and accept model terms at:
 | `app/electron-builder.config.cjs` + `app/scripts/dist.mjs` | Packaging: NSIS/dmg+zip, protocol registration, `--engine-dir` extraResources input |
 
 Engine `/v1` surface the app consumes: `health`, `shutdown`, `jobs` (+
-`{id}`, `{id}/confirm`, `DELETE {id}`), `events` (SSE), `library`,
-`transcripts/{id}.html`, `settings`, `keys`, `keys/test`, `providers`.
+`{id}`, `{id}/confirm`, `DELETE {id}`), `events` (SSE; job events carry
+`data.job_id`, pack events carry `data.pack_id` and never `job_id`),
+`library`, `transcripts/{id}.html`, `settings`, `keys`, `keys/test`,
+`providers`, `packs` (+ `POST {id}/install`, `DELETE {id}`).
 
 ## Pipeline
 
