@@ -29,6 +29,7 @@ export function packProgressBar(pack: PackStatus): HTMLElement | null {
       class: 'progress',
       attrs: {
         role: 'progressbar',
+        'aria-label': `Downloading ${pack.display_name}`,
         'aria-valuemin': '0',
         'aria-valuemax': '100',
         'aria-valuenow': String(percent)

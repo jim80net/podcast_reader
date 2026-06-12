@@ -37,7 +37,11 @@ export class AppConfigStore {
     }
     try {
       const parsed: unknown = JSON.parse(text)
-      if (typeof parsed === 'object' && parsed !== null) return parsed as AppConfig
+      // Arrays are objects to typeof; spreading one in write() would persist
+      // its indices as keys, so only a plain object passes the guard.
+      if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+        return parsed as AppConfig
+      }
     } catch (err) {
       this.log(`app config at ${this.path} is unreadable, treating as empty: ${String(err)}`)
     }

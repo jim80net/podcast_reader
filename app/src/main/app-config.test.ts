@@ -46,6 +46,16 @@ describe('AppConfigStore', () => {
     expect(store.isFirstRunComplete()).toBe(true)
   })
 
+  it('treats an array config as empty instead of spreading its indices', () => {
+    const path = join(dir, 'app-config.json')
+    writeFileSync(path, JSON.stringify(['not', 'a', 'config']))
+    const store = storeAt(path)
+    expect(store.isFirstRunComplete()).toBe(false)
+    store.markFirstRunComplete()
+    // The array must not leak into the rewritten config as index keys.
+    expect(JSON.parse(readFileSync(path, 'utf8'))).toEqual({ first_run_complete: true })
+  })
+
   it('preserves unknown keys written by a newer app version', () => {
     const path = join(dir, 'app-config.json')
     writeFileSync(path, JSON.stringify({ future_knob: 'keep-me' }))

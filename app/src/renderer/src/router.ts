@@ -1,7 +1,8 @@
 /**
- * Hash-based routing for the four views (design decision 1: vanilla TS, no
- * framework). Routes are plain `#/view` fragments so `<a href>` navigation is
- * native and keyboard-accessible; anything unparseable lands on Library.
+ * Hash-based routing for the five views — Library, Reader, New, Settings,
+ * Setup (design decision 1: vanilla TS, no framework). Routes are plain
+ * `#/view` fragments so `<a href>` navigation is native and
+ * keyboard-accessible; anything unparseable lands on Library.
  */
 
 export type Route =
