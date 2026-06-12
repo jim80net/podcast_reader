@@ -237,6 +237,31 @@ class TestDiarizeStep:
         assert events[1]["data"]["code"] == "diarization_failed"
         assert "boom" in events[1]["message"]
 
+    @pytest.mark.parametrize(
+        "bad_turns",
+        [
+            ["not-a-dict"],
+            [{"start": 0.0, "speaker": "SPEAKER_00"}],  # missing end
+            [{"start": "0", "end": 4.0, "speaker": "SPEAKER_00"}],  # non-numeric
+            [{"start": 0.0, "end": 4.0}],  # missing speaker
+        ],
+    )
+    def test_malformed_turns_warn_but_do_not_raise(
+        self, tmp_path: Path, _data_dir: Path, bad_turns: list[Any]
+    ) -> None:
+        """The never-raises contract holds for malformed worker output:
+        turn items the merge cannot consume degrade to the unreadable-output
+        warning instead of a KeyError/TypeError killing the job."""
+        _install_pack(_data_dir)
+
+        json_path, events = self._run(tmp_path, run_child=_fake_run_child(bad_turns))
+
+        data = json.loads(json_path.read_text())
+        assert all("speaker" not in s for s in data["segments"])
+        assert [e["kind"] for e in events] == ["step_started", "warning"]
+        assert events[1]["data"]["code"] == "diarization_failed"
+        assert "unreadable output" in events[1]["message"]
+
     def test_ffmpeg_failure_warns_but_does_not_raise(self, tmp_path: Path, _data_dir: Path) -> None:
         _install_pack(_data_dir)
 

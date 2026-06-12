@@ -146,10 +146,26 @@ def _run_worker(
         except (OSError, ValueError, KeyError):
             _warn_failed(on_event, "the diarization worker produced unreadable output", "")
             return None
-    if not isinstance(turns, list):
+    if not isinstance(turns, list) or not all(_turn_shape_ok(turn) for turn in turns):
         _warn_failed(on_event, "the diarization worker produced unreadable output", "")
         return None
     return turns
+
+
+def _turn_shape_ok(turn: object) -> bool:
+    """True when a worker-emitted turn has everything the merge dereferences.
+
+    :func:`assign_speakers` reads numeric ``start``/``end`` and ``speaker``
+    from every turn; a malformed item would raise KeyError/TypeError there,
+    breaking the step's never-raises contract — so it must read as
+    unreadable output instead.
+    """
+    return (
+        isinstance(turn, dict)
+        and isinstance(turn.get("start"), (int, float))
+        and isinstance(turn.get("end"), (int, float))
+        and "speaker" in turn
+    )
 
 
 def _resolve_worker(base: Path) -> tuple[str | None, str]:
