@@ -84,6 +84,23 @@ class TestProbe:
         monkeypatch.setattr(hardware.subprocess, "run", lambda *args, **kwargs: _completed(0, "\n"))
         assert detect_hardware("linux")["nvidia_gpu"] is False
 
+    def test_probe_decodes_with_replacement_never_raising(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Failure of any kind must degrade (module contract): the probe pins
+        utf-8 with errors=replace so undecodable driver output can never
+        raise UnicodeDecodeError out of the locale-default strict decode."""
+        seen: dict[str, object] = {}
+
+        def recording(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+            seen.update(kwargs)
+            return _completed(0, "RTX 4090\n")
+
+        monkeypatch.setattr(hardware.subprocess, "run", recording)
+        assert detect_hardware("linux")["nvidia_gpu"] is True
+        assert seen["encoding"] == "utf-8"
+        assert seen["errors"] == "replace"
+
     def test_result_is_cached_for_process_lifetime(self, monkeypatch: pytest.MonkeyPatch) -> None:
         calls = {"n": 0}
 

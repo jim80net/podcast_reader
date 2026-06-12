@@ -88,7 +88,12 @@ def _probe_gpu_names(platform: str) -> list[str]:
             probe = subprocess.run(
                 [candidate, "--query-gpu=name", "--format=csv,noheader"],
                 capture_output=True,
-                text=True,
+                # Pinned encoding with replacement: the locale-default strict
+                # decode could raise UnicodeDecodeError on odd driver output,
+                # escaping the OSError/TimeoutExpired net below — and failure
+                # of any kind must degrade to "no GPU" (module contract).
+                encoding="utf-8",
+                errors="replace",
                 timeout=_PROBE_TIMEOUT_S,
                 check=False,
             )
