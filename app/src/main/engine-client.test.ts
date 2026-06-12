@@ -114,6 +114,17 @@ describe('EngineClient', () => {
     expect(calls[0]?.url).toContain('/v1/shutdown')
     expect(calls[0]?.method).toBe('POST')
   })
+
+  it('aborts a hung shutdown POST so quit never stalls before the bounded wait', async () => {
+    const hangingFetch = ((_input: Parameters<typeof fetch>[0], init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () =>
+          reject(init.signal?.reason ?? new Error('aborted'))
+        )
+      })) as typeof fetch
+    const c = new EngineClient(51234, 'tok-123', hangingFetch)
+    await expect(c.shutdown({ timeoutMs: 20 })).rejects.toThrow()
+  })
 })
 
 function sseResponse(chunks: string[]): Response {

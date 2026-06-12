@@ -17,6 +17,9 @@ import type {
  * reaches the renderer (design decision 4). The engine binds 127.0.0.1 only.
  */
 
+/** Bound on the shutdown POST — small, so quit falls through to wait/force-kill fast. */
+const SHUTDOWN_TIMEOUT_MS = 2000
+
 export class EngineRequestError extends Error {
   constructor(
     readonly status: number,
@@ -42,9 +45,12 @@ export class EngineClient {
     return this.json('GET', '/v1/health')
   }
 
-  // engine/app.py:196 (POST /v1/shutdown — 202 then exit)
-  async shutdown(): Promise<void> {
-    await this.request('POST', '/v1/shutdown')
+  // engine/app.py:196 (POST /v1/shutdown — 202 then exit). Tightly bounded:
+  // quit awaits this POST before its bounded exit-wait, so a hung request
+  // must abort rather than stall the whole quit sequence.
+  async shutdown(opts: { timeoutMs?: number } = {}): Promise<void> {
+    const timeoutMs = opts.timeoutMs ?? SHUTDOWN_TIMEOUT_MS
+    await this.request('POST', '/v1/shutdown', undefined, AbortSignal.timeout(timeoutMs))
   }
 
   // engine/app.py:207 (POST /v1/jobs)
