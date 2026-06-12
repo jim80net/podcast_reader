@@ -9,9 +9,18 @@ import type { JobRecord, PipelineEvent } from '../../shared/types'
  * pure reducers in jobs-store.ts (where the logic is unit-tested).
  */
 export class AppStore {
-  engine: EngineStatus = { state: 'starting' }
-  jobs: JobsMap = new Map()
+  private engineStatus: EngineStatus = { state: 'starting' }
+  private jobsMap: JobsMap = new Map()
   private readonly listeners = new Set<() => void>()
+
+  /** Read-only views: every mutation goes through a mutator so notify() always fires. */
+  get engine(): EngineStatus {
+    return this.engineStatus
+  }
+
+  get jobs(): JobsMap {
+    return this.jobsMap
+  }
 
   subscribe(listener: () => void): () => void {
     this.listeners.add(listener)
@@ -19,32 +28,32 @@ export class AppStore {
   }
 
   setEngine(status: EngineStatus): void {
-    this.engine = status
+    this.engineStatus = status
     this.notify()
   }
 
   hydrate(records: readonly JobRecord[]): void {
-    this.jobs = hydrateJobs(records)
+    this.jobsMap = hydrateJobs(records)
     this.notify()
   }
 
   /** Returns true when the event referenced a job we don't know → re-hydrate. */
   applyEvent(event: PipelineEvent): boolean {
-    const result = applyPipelineEvent(this.jobs, event)
+    const result = applyPipelineEvent(this.jobsMap, event)
     if (result.known) {
-      this.jobs = result.jobs
+      this.jobsMap = result.jobs
       this.notify()
     }
     return result.jobId !== null && !result.known
   }
 
   upsert(record: JobRecord): void {
-    this.jobs = upsertJob(this.jobs, record)
+    this.jobsMap = upsertJob(this.jobsMap, record)
     this.notify()
   }
 
   remove(jobId: string): void {
-    this.jobs = removeJob(this.jobs, jobId)
+    this.jobsMap = removeJob(this.jobsMap, jobId)
     this.notify()
   }
 
