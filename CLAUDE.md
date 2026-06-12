@@ -58,6 +58,8 @@ For speaker diarization, set `HF_TOKEN` and accept model terms at:
 | `PODCAST_READER_CUSTOM_PROVIDER_KEY` | _(none)_ | API key for `--provider custom` |
 | `SENTENCES` | `5` | Sentences per paragraph in HTML |
 | `YT_DLP_COOKIES` | _(none)_ | Path to cookies file for authenticated yt-dlp downloads |
+| `PODCAST_READER_DATA_DIR` | `~/PodcastReader` | Engine data dir (library, journal, settings, packs: `models/`, `runtime/`, `workers/`, `tools/`) |
+| `PODCAST_READER_TOOLS_DIR` | _(none)_ | Preferred directory for external tools; the engine exports it to `<data_dir>/tools` when unset |
 
 ## Package Structure
 
@@ -84,7 +86,9 @@ For speaker diarization, set `HF_TOKEN` and accept model terms at:
 | `src/podcast_reader/engine/app.py` | FastAPI app: bearer auth, jobs (incl. confirm/dismiss of awaiting-confirmation), events, library, settings, keys (push + test), providers, packs (list/install/uninstall), health, shutdown routes |
 | `src/podcast_reader/engine/process.py` | Pre-bound socket handshake, discovery file, child reaping, `serve` |
 | `spike/` | Packaging spike evidence (PyInstaller onedir prototype, SPIKE_REPORT.md) |
-| `packaging/` | Production freeze assets: `diarization.spec` + entry script + `DIARIZATION_SMOKE.md` (task 5.1 GO evidence; engine spec lands with group 7) |
+| `packaging/engine.spec` + `build_engine.py` | Production frozen engine onedir: engine + whisper-worker entry points, MERGE/COLLECT, `copy_metadata("podcast-reader")`, ctranslate2/faster_whisper hooks (`hooks/`), tool seeds + flat `tools-manifest.json` into `_internal/tools/` |
+| `packaging/frozen_smoke.py` | Shared stdlib-only frozen e2e smoke (boot → handshake → version assert → pack install → fixture transcription); CI and local proof both run it |
+| `packaging/diarization.spec` + `build_diarization_pack.py` | Diarization worker pack build (CPU-torch venv per `DIARIZATION_SMOKE.md`, offline community-1 cache, tar.gz + manifest); release job in `pack-diarization.yml` is HF_TOKEN-gated |
 | `src/podcast_reader/providers.py` | Chapter LLM provider registry (base URL, default model, key env, max_tokens) + custom-URL validation |
 | `src/podcast_reader/chapters.py` | Generate chapter markers via any registry provider's OpenAI-compatible `/chat/completions`; `verify_key` minimal round-trip backs `POST /v1/keys/test` |
 | `src/podcast_reader/html.py` | Convert whisper JSON to styled HTML with TOC, key points, pull quotes; optional speaker attribution (byte-identical without speakers) |
@@ -153,6 +157,14 @@ npm run build       # electron-vite production build into out/
 npm run e2e         # Playwright vs the mock engine (build first; xvfb-run -a on headless)
 npm run e2e:integration  # real-engine smoke (needs `uv sync --extra dev` at the root)
 npm run dist        # electron-builder installers (--engine-dir maps a frozen engine payload)
+```
+
+```bash
+# Frozen engine (run from packaging/; PyInstaller is a build tool, not a dep)
+uv venv .venv-engine --python 3.10
+uv pip install --python .venv-engine/bin/python '..[worker]' pyinstaller
+.venv-engine/bin/python build_engine.py                       # → dist/engine/
+python3 frozen_smoke.py dist/engine/podcast-reader-engine     # full e2e proof
 ```
 
 - **mypy**: strict mode, all functions fully typed
