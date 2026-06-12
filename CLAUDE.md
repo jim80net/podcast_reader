@@ -97,8 +97,9 @@ For speaker diarization, set `HF_TOKEN` and accept model terms at:
 | `app/src/main/vault.ts` | safeStorage-encrypted key vault (session-memory fallback when encryption unavailable) |
 | `app/src/main/ipc.ts` + `protocol.ts` | Typed IPC handlers; `podcast-reader://` URL validation (confirm-before-run) |
 | `app/src/main/updater.ts` | electron-updater orchestration: full-download GitHub Releases, consent, engine-quit-before-install; gated off in dev/unsigned |
+| `app/src/main/app-config.ts` | App-side config under userData (`first_run_complete` — the setup wizard's gate) |
 | `app/src/preload/index.ts` | contextBridge `window.api` — the credential-free renderer's only door |
-| `app/src/renderer/` | Vanilla-TS views (Library/Reader/New/Settings) + hash router + jobs store |
+| `app/src/renderer/` | Vanilla-TS views (Library/Reader/New/Settings + first-run Setup wizard) + hash router + jobs/packs stores |
 | `app/src/shared/types.ts` | TS mirrors of the Python boundary types (key-set parity enforced by the e2e integration smoke) |
 | `app/tests/mock-engine/` + `app/tests/e2e/` | Scriptable mock engine (separate process, real handshake) + Playwright suites |
 | `app/electron-builder.config.cjs` + `app/scripts/dist.mjs` | Packaging: NSIS/dmg+zip, protocol registration, `--engine-dir` extraResources input |
