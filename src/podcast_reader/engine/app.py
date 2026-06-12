@@ -193,6 +193,12 @@ class PairClaimResponse(BaseModel):
     token: str
 
 
+#: Cap on the unauthenticated claim body (per V4): a legitimate claim is a
+#: tiny JSON object, so anything declaring more — or declaring nothing
+#: (chunked) — is rejected before the body is read.
+MAX_CLAIM_BODY_BYTES = 4096
+
+
 def create_app(
     data_dir: Path,
     store: JobStore,
@@ -282,10 +288,13 @@ def create_app(
         type is rejected (a page-initiated JSON request is non-simple, so the
         browser preflights it and it never arrives), and an ``http``/``https``
         scheme ``Origin`` is rejected as the simple-request backstop —
-        ``chrome-extension://`` origins pass. Gate rejections never reach the
-        pairing state, so they cannot burn the attempt budget. Every rejection
-        is the same self-authored 403: no oracle distinguishes wrong, expired,
-        exhausted, or absent codes from gated requests.
+        ``chrome-extension://`` origins pass. A third gate (per V4) bounds
+        the unauthenticated body read: a missing (chunked) or oversized
+        ``Content-Length`` is rejected before the body is touched. Gate
+        rejections never reach the pairing state, so they cannot burn the
+        attempt budget. Every rejection is the same self-authored 403: no
+        oracle distinguishes wrong, expired, exhausted, or absent codes from
+        gated requests.
         """
         rejection = HTTPException(status_code=403, detail="pairing claim rejected")
         media_type = request.headers.get("content-type", "").partition(";")[0].strip().lower()
@@ -293,6 +302,9 @@ def create_app(
             raise rejection
         origin_scheme = request.headers.get("origin", "").partition(":")[0].strip().lower()
         if origin_scheme in ("http", "https"):
+            raise rejection
+        content_length = request.headers.get("content-length", "").strip()
+        if not content_length.isdigit() or int(content_length) > MAX_CLAIM_BODY_BYTES:
             raise rejection
         try:
             body = json.loads(await request.body())

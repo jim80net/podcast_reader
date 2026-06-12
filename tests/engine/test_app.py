@@ -1449,6 +1449,40 @@ class TestPairing:
             assert response.status_code == 403
         assert self._claim(engine, code).status_code == 200
 
+    def test_oversized_body_rejected_without_burning_the_budget(self, engine: _Engine) -> None:
+        """Per V4: a Content-Length above the 4096-byte cap is rejected with
+        the uniform 403 before the body is read — and, like the other gates,
+        without reaching the pairing state, so the correct code still claims
+        after six oversized attempts."""
+        code = self._mint(engine)
+        oversized = json.dumps({"code": code, "pad": "x" * 8192})
+        assert len(oversized.encode()) > 4096
+        for _ in range(6):
+            response = engine.client.post(
+                "/v1/pair/claim",
+                content=oversized,
+                headers={"Content-Type": "application/json"},
+            )
+            assert response.status_code == 403
+        assert self._claim(engine, code).status_code == 200
+
+    def test_missing_content_length_rejected_without_burning_the_budget(
+        self, engine: _Engine
+    ) -> None:
+        """Per V4: a chunked request (no Content-Length) gives the body read
+        no bound, so it is rejected with the uniform 403 — again without
+        burning the attempt budget."""
+        code = self._mint(engine)
+        payload = json.dumps({"code": code}).encode()
+        for _ in range(6):
+            response = engine.client.post(
+                "/v1/pair/claim",
+                content=iter([payload]),  # httpx sends chunked, no Content-Length
+                headers={"Content-Type": "application/json"},
+            )
+            assert response.status_code == 403
+        assert self._claim(engine, code).status_code == 200
+
     def test_chrome_extension_origin_passes(self, engine: _Engine) -> None:
         """Spec (per U3): a chrome-extension:// Origin is NOT rejected."""
         code = self._mint(engine)
