@@ -69,9 +69,16 @@ Chromium, hence xvfb in CI (the `extension` job in
 (`chrome-extension://<id>/popup.html`); Chrome offers no automatable path to
 the real toolbar popup window, and the page is identical either way.
 
-### Manual check: the optional-permission prompt
+### Manual checks
 
-Chrome renders the `chrome.permissions.request` prompt outside any
+**The toolbar-popup submit (activeTab grant path).** The e2e suite drives
+the popup as a tab, which never exercises the click-granted `activeTab`
+path: submit from a real https page via the toolbar popup (activeTab grant
+path — not automatable). Confirm the page URL appears in the popup and the
+submission queues in the desktop app.
+
+**The optional-permission prompt.** Chrome renders the
+`chrome.permissions.request` prompt outside any
 automatable surface, so the cookie-capture e2e stubs the API: the grant and
 decline branches are both exercised popup-level in
 `tests/e2e/cookies.spec.ts` (`permissions.request` stubbed to true/false).
