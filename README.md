@@ -114,6 +114,7 @@ The production engine ships as a PyInstaller onedir (engine +
 baked into `_internal/tools/`):
 
 ```bash
+# POSIX shell (Linux/macOS, or Git Bash on Windows)
 cd packaging
 uv venv .venv-engine --python 3.10
 uv pip install --python .venv-engine/bin/python '..[worker]' pyinstaller
@@ -121,6 +122,11 @@ uv pip install --python .venv-engine/bin/python '..[worker]' pyinstaller
 python3 frozen_smoke.py dist/engine/podcast-reader-engine   # e2e proof
 cd ../app && npm run dist -- --engine-dir ../packaging/dist/engine --win
 ```
+
+On Windows without a POSIX shell, substitute `.venv-engine\Scripts\python.exe`
+for `.venv-engine/bin/python` and `dist\engine\podcast-reader-engine.exe` for
+the engine path (the `frozen-smoke` job in `.github/workflows/ci.yml` shows the
+exact Windows invocations).
 
 CI (`frozen-smoke`) builds this engine on ubuntu + windows and proves it
 end-to-end: boot, authenticated handshake, `POST /v1/packs/model-tiny/install`,
