@@ -37,6 +37,7 @@
 # Test fixtures are committed source artifacts, not generated outputs
 !tests/fixtures/*.json
 !tests/fixtures/*.html
+!tests/fixtures/*.wav
 
 # The Electron app (app/) is source, not generated artifacts; its own
 # .gitignore covers node_modules/, dist/, out/
@@ -53,3 +54,4 @@ __pycache__/
 packaging/.venv-*/
 packaging/build/
 packaging/dist/
+packaging/.tool-cache/
