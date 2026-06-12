@@ -40,10 +40,12 @@ let quitting = false
 let updater: UpdaterController | null = null
 let updaterDisabled: UpdateStatus = { state: 'disabled', reason: 'updater not initialized' }
 
-// Test/portable seam: an explicit userData override keeps the vault and the
-// single-instance lock (which keys off userData) isolated per run.
+// Test seam: an explicit userData override keeps the vault and the
+// single-instance lock (which keys off userData) isolated per run. Gated to
+// unpackaged builds (the e2e harness launches unpackaged) so packaged
+// installs expose no env knob that relocates credential storage (R5).
 const userDataOverride = process.env['PODCAST_READER_USER_DATA_DIR']
-if (userDataOverride !== undefined && userDataOverride !== '') {
+if (!app.isPackaged && userDataOverride !== undefined && userDataOverride !== '') {
   app.setPath('userData', resolve(userDataOverride))
 }
 
