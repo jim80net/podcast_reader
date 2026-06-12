@@ -34,8 +34,14 @@ jobs:
 
 # ---- skeleton for task 6.6 (uncomment + finish once credentials exist) ------
 #
+# The engine-build steps (download-manager task 7.3) are real and proven by
+# the frozen-smoke CI job; only the signing/publish wiring stays gated.
+#
 #  windows-installer:
 #    runs-on: windows-latest
+#    defaults:
+#      run:
+#        shell: bash
 #    steps:
 #      - uses: actions/checkout@v4
 #      - uses: actions/setup-node@v4
@@ -43,11 +49,21 @@ jobs:
 #          node-version: 24
 #          cache: npm
 #          cache-dependency-path: app/package-lock.json
+#      - uses: astral-sh/setup-uv@v5
+#        with:
+#          python-version: "3.10"
+#      # Release-grade frozen engine onedir (download-manager task 7.1):
+#      # engine + whisper-worker entry points, tool seeds + manifest staged
+#      # into _internal/tools/. Same recipe as the frozen-smoke CI job.
+#      - name: Build frozen engine
+#        run: |
+#          uv venv packaging/.venv-engine --python 3.10
+#          VENV_PY=packaging/.venv-engine/Scripts/python.exe
+#          uv pip install --python "$VENV_PY" '.[worker]' pyinstaller
+#          "$VENV_PY" packaging/build_engine.py
 #      - run: npm ci
 #        working-directory: app
-#      # Phase 4 produces the release-grade frozen engine onedir; pass it via
-#      # --engine-dir so it ships under <resources>/engine/ (decision 9).
-#      - run: npm run dist -- --engine-dir <frozen-engine-dir> --win --publish always
+#      - run: npm run dist -- --engine-dir ../packaging/dist/engine --win --publish always
 #        working-directory: app
 #        env:
 #          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -62,9 +78,19 @@ jobs:
 #          node-version: 24
 #          cache: npm
 #          cache-dependency-path: app/package-lock.json
+#      - uses: astral-sh/setup-uv@v5
+#        with:
+#          python-version: "3.10"
+#      # macOS has no scripted ffmpeg seed source (see build_engine.py):
+#      # provide yt-dlp/ffmpeg/ffprobe binaries and pass --tools-dir.
+#      - name: Build frozen engine
+#        run: |
+#          uv venv packaging/.venv-engine --python 3.10
+#          uv pip install --python packaging/.venv-engine/bin/python '.[worker]' pyinstaller
+#          packaging/.venv-engine/bin/python packaging/build_engine.py --tools-dir <tool-binaries-dir>
 #      - run: npm ci
 #        working-directory: app
-#      - run: npm run dist -- --engine-dir <frozen-engine-dir> --mac --publish always
+#      - run: npm run dist -- --engine-dir ../packaging/dist/engine --mac --publish always
 #        working-directory: app
 #        env:
 #          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

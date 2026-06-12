@@ -1,0 +1,64 @@
+# Diarization pack release job (download-manager task 7.5).
+#
+# BLOCKED on task 7.4 [USER-BLOCKING]: the HF_TOKEN secret must belong to an
+# account that has accepted the pyannote/speaker-diarization-community-1
+# gated-model terms (the worker's shipping default — NOT just the 3.1-era
+# models; see packaging/DIARIZATION_SMOKE.md). Until then this job fails
+# fast with the reason (app-packaging spec: "Missing secret fails fast").
+#
+# Once the secret exists, publishing is one dispatch: build (CPU-torch venv,
+# frozen worker, pre-seeded offline pipeline cache, offline smoke with the
+# default model id), then `gh release create pack-diarization-v<N>` with the
+# archive + manifest. The registry pin flip in
+# src/podcast_reader/engine/packs.py stays a manual follow-up PR — it also
+# needs the worker-pack archive-extraction install step (see
+# packaging/build_diarization_pack.py docstring).
+name: Diarization pack
+
+on:
+  workflow_dispatch:
+    inputs:
+      pack_version:
+        description: "Pack version N (publishes tag pack-diarization-vN)"
+        required: true
+        default: "1"
+      publish:
+        description: "Publish the GitHub Release (otherwise build + upload artifact only)"
+        type: boolean
+        default: false
+
+jobs:
+  build-pack:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail fast without the HF token secret (task 7.4)
+        run: |
+          if [ -z "${{ secrets.HF_TOKEN }}" ]; then
+            echo "::error::HF_TOKEN secret is not provisioned (download-manager task 7.4). The diarization pack build downloads the gated pyannote/speaker-diarization-community-1 pipeline at build time; the token's account must have accepted that model's terms."
+            exit 1
+          fi
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.10"
+      - name: Build, seed cache, offline-smoke, compress
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          python3 packaging/build_diarization_pack.py --version "${{ inputs.pack_version }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: diarization-pack-v${{ inputs.pack_version }}
+          path: |
+            packaging/dist/diarization-pack-v${{ inputs.pack_version }}.tar.gz
+            packaging/dist/diarization-pack-v${{ inputs.pack_version }}.json
+      - name: Publish pack release
+        if: ${{ inputs.publish }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "pack-diarization-v${{ inputs.pack_version }}" \
+            "packaging/dist/diarization-pack-v${{ inputs.pack_version }}.tar.gz" \
+            "packaging/dist/diarization-pack-v${{ inputs.pack_version }}.json" \
+            --title "Diarization worker pack v${{ inputs.pack_version }}" \
+            --notes "Frozen diarization worker + offline pyannote pipeline cache. See the manifest asset for sha256/size; registry pin flip follows in a PR."
