@@ -2,12 +2,14 @@ import './style.css'
 
 import { el } from './dom'
 import { createJobsHydrator } from './jobs-hydrator'
+import { setupNeeded } from './packs-store'
 import { hrefFor, navigate, onRouteChange, parseHash } from './router'
 import { AppStore } from './store'
 import { mountLibrary } from './views/library'
 import { mountNew } from './views/new'
 import { mountReader } from './views/reader'
 import { mountSettings } from './views/settings'
+import { mountSetup } from './views/setup'
 import type { Route } from './router'
 import type { ViewCleanup } from './store'
 import type { EngineStatus, UpdateStatus } from '../../shared/ipc'
@@ -126,9 +128,29 @@ void window.api.getUpdateStatus().then(renderUpdateStatus)
 
 // ---- IPC push wiring (design decision 4) ----------------------------------------
 
+// ---- first-run setup wizard gate (app-setup-ui spec) ------------------------------
+// Auto-open once per session, when the engine is ready, the app-side flag is
+// unset, and recommended packs are missing. Failures never block the app —
+// the wizard stays reachable from Settings → "Run setup again".
+let setupOffered = false
+function maybeOfferSetup(status: EngineStatus): void {
+  if (status.state !== 'ready' || setupOffered) return
+  setupOffered = true
+  void (async () => {
+    try {
+      if (await window.api.isFirstRunComplete()) return
+      const { packs } = await window.api.listPacks()
+      if (setupNeeded(packs)) navigate({ view: 'setup' })
+    } catch {
+      // pack listing unavailable (older engine, transient failure): skip
+    }
+  })()
+}
+
 window.api.onEngineStatus((status) => {
   store.setEngine(status)
   renderEngineStatus(status)
+  maybeOfferSetup(status)
 })
 window.api.onJobsHydrated((jobs) => jobsHydrator.applyPush(jobs))
 window.api.onPipelineEvent((event) => {
@@ -147,6 +169,7 @@ window.api.onProtocolRequest((job) => {
 void window.api.getEngineStatus().then((status) => {
   store.setEngine(status)
   renderEngineStatus(status)
+  maybeOfferSetup(status)
 })
 void jobsHydrator.refresh() // engine not ready yet? the hydration push follows
 
@@ -173,6 +196,9 @@ function render(route: Route): void {
       break
     case 'settings':
       cleanup = mountSettings(viewContainer)
+      break
+    case 'setup':
+      cleanup = mountSetup(viewContainer)
       break
   }
 }

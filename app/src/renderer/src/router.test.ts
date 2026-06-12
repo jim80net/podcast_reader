@@ -9,9 +9,10 @@ describe('parseHash', () => {
     expect(parseHash('#/library')).toEqual({ view: 'library' })
   })
 
-  it('parses the four views', () => {
+  it('parses the five views', () => {
     expect(parseHash('#/new')).toEqual({ view: 'new' })
     expect(parseHash('#/settings')).toEqual({ view: 'settings' })
+    expect(parseHash('#/setup')).toEqual({ view: 'setup' })
     expect(parseHash('#/reader/abc123')).toEqual({ view: 'reader', sourceId: 'abc123' })
   })
 
@@ -33,6 +34,7 @@ describe('hrefFor', () => {
       { view: 'library' } as const,
       { view: 'new' } as const,
       { view: 'settings' } as const,
+      { view: 'setup' } as const,
       { view: 'reader', sourceId: 'a/b c' } as const
     ]) {
       expect(parseHash(hrefFor(route))).toEqual(route)
