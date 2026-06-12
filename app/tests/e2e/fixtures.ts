@@ -216,12 +216,24 @@ async function waitForWindow(app: ElectronApplication): Promise<Page> {
   return window
 }
 
-export const test = base.extend<{ harness: Harness }>({
-  harness: async ({}, use) => {
+export interface HarnessOptions {
+  /**
+   * Optional `/__mock/seed` payload applied BEFORE the app launches (and
+   * again after every relaunch, which boots a fresh mock). Needed for state
+   * the app reads at startup — e.g. pack states driving the setup wizard's
+   * first-run trigger. Set per-file/per-describe via `test.use({ mockSeed })`.
+   */
+  mockSeed: Record<string, unknown> | undefined
+}
+
+export const test = base.extend<HarnessOptions & { harness: Harness }>({
+  mockSeed: [undefined, { option: true }],
+  harness: async ({ mockSeed }, use) => {
     const dataDir = await mkdtemp(join(tmpdir(), 'pr-e2e-data-'))
     const userDataDir = await mkdtemp(join(tmpdir(), 'pr-e2e-user-'))
     const token = randomBytes(24).toString('base64url')
     let mock = await startMockEngine(dataDir, token)
+    if (mockSeed !== undefined) await mock.control('/seed', mockSeed)
     await writeDiscoveryFiles(dataDir, mock)
     let app = await launchApp({ dataDir, userDataDir })
     let window = await waitForWindow(app)
@@ -244,6 +256,7 @@ export const test = base.extend<{ harness: Harness }>({
         await exited
         mock.kill() // normally already dead via the app's shutdown POST
         mock = await startMockEngine(dataDir, token)
+        if (mockSeed !== undefined) await mock.control('/seed', mockSeed)
         await writeDiscoveryFiles(dataDir, mock)
         app = await launchApp({ dataDir, userDataDir })
         window = await waitForWindow(app)
