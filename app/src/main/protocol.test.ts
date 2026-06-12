@@ -34,6 +34,42 @@ describe('parseProtocolUrl', () => {
     expect(parseProtocolUrl('')).toBeNull()
     expect(parseProtocolUrl('::::')).toBeNull()
   })
+
+  it('rejects a spoofed host with transcribe in the path', () => {
+    expect(parseProtocolUrl('podcast-reader://evil.com/transcribe?url=https://e.com')).toBeNull()
+  })
+
+  it('rejects embedded credentials (userinfo)', () => {
+    expect(
+      parseProtocolUrl('podcast-reader://user:pass@transcribe?url=https://example.com')
+    ).toBeNull()
+    expect(parseProtocolUrl('podcast-reader://user@transcribe?url=https://example.com')).toBeNull()
+  })
+
+  it('rejects an explicit port', () => {
+    expect(parseProtocolUrl('podcast-reader://transcribe:8080?url=https://example.com')).toBeNull()
+  })
+
+  it('rejects extra path segments beyond the bare host', () => {
+    expect(
+      parseProtocolUrl('podcast-reader://transcribe/extra?url=https://example.com')
+    ).toBeNull()
+    expect(
+      parseProtocolUrl('podcast-reader://transcribe/../transcribe?url=https://example.com')
+    ).toBeNull()
+  })
+
+  it('still accepts a bare trailing slash', () => {
+    expect(parseProtocolUrl('podcast-reader://transcribe/?url=https://example.com')).toEqual({
+      url: 'https://example.com'
+    })
+  })
+
+  it('rejects a double-encoded url param (decodes to a non-URL)', () => {
+    expect(
+      parseProtocolUrl('podcast-reader://transcribe?url=https%253A%252F%252Fevil.com')
+    ).toBeNull()
+  })
 })
 
 describe('selectProtocolArgv', () => {

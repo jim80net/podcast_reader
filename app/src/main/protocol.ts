@@ -20,7 +20,12 @@ export function parseProtocolUrl(raw: string): TranscribeRequest | null {
     return null
   }
   if (parsed.protocol !== 'podcast-reader:') return null
+  // Exactly podcast-reader://transcribe?...: the host comparison already
+  // excludes spoofed hosts and explicit ports; additionally reject embedded
+  // credentials and any path beyond a bare trailing slash.
   if (parsed.host !== 'transcribe') return null
+  if (parsed.username !== '' || parsed.password !== '') return null
+  if (parsed.pathname !== '' && parsed.pathname !== '/') return null
   const target = parsed.searchParams.get('url')
   if (target === null || target === '') return null
   let targetUrl: URL
