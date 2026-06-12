@@ -1,6 +1,6 @@
 import { CHANNELS } from '../shared/ipc'
 import type { EngineManager } from './engine-manager'
-import type { UpdateStatus } from '../shared/ipc'
+import type { SubmitJobRequest, UpdateStatus } from '../shared/ipc'
 import type { SettingsUpdate } from '../shared/types'
 
 /**
@@ -37,14 +37,12 @@ export function registerIpcHandlers(
   ipcMain.handle(CHANNELS.engineGetStatus, () => manager.status)
   ipcMain.handle(CHANNELS.keysStorageMode, () => manager.keyStorageMode)
 
-  ipcMain.handle(
-    CHANNELS.jobsSubmit,
-    (_e, req: { source: string; title?: string | null; requiresConfirmation?: boolean }) =>
-      client().submitJob({
-        source: req.source,
-        title: req.title ?? null,
-        requires_confirmation: req.requiresConfirmation ?? false
-      })
+  ipcMain.handle(CHANNELS.jobsSubmit, (_e, req: SubmitJobRequest) =>
+    client().submitJob({
+      source: req.source,
+      title: req.title ?? null,
+      requires_confirmation: req.requiresConfirmation ?? false
+    })
   )
   ipcMain.handle(CHANNELS.jobsList, () => client().listJobs())
   ipcMain.handle(CHANNELS.jobsGet, (_e, jobId: string) => client().getJob(jobId))

@@ -70,14 +70,17 @@ export type UpdateStatus =
   | { state: 'installing'; version: string }
   | { state: 'error'; message: string }
 
+/** The `jobs:submit` request — one shared shape for the renderer call and the main handler. */
+export interface SubmitJobRequest {
+  source: string
+  title?: string | null
+  requiresConfirmation?: boolean
+}
+
 /** What the preload bridge exposes as `window.api`. */
 export interface PodcastReaderApi {
   getEngineStatus(): Promise<EngineStatus>
-  submitJob(req: {
-    source: string
-    title?: string | null
-    requiresConfirmation?: boolean
-  }): Promise<JobRecord>
+  submitJob(req: SubmitJobRequest): Promise<JobRecord>
   listJobs(): Promise<JobRecord[]>
   getJob(jobId: string): Promise<JobRecord>
   confirmJob(jobId: string): Promise<JobRecord>
