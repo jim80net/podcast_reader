@@ -30,6 +30,7 @@ export interface EngineChildLike {
   stderr: NodeJS.ReadableStream | null
   kill(signal?: NodeJS.Signals): boolean
   once(event: 'exit', listener: (code: number | null, signal: NodeJS.Signals | null) => void): unknown
+  once(event: 'error', listener: (err: Error) => void): unknown
 }
 
 export interface SupervisorDeps {
@@ -243,9 +244,15 @@ async function spawnEngine(deps: SupervisorDeps): Promise<EngineHandle> {
   const childExited = new Promise<void>((resolve) => {
     child.once('exit', () => resolve())
   })
+  // spawn(2) failure (ENOENT command, bad ENGINE_CMD, missing packaged
+  // binary) surfaces as an async 'error' event — with no listener it would
+  // crash the main process, and 'exit' never fires.
+  const spawnFailed = new Promise<Error>((resolve) => {
+    child.once('error', (err) => resolve(err))
+  })
   const stderr = captureStderr(child)
 
-  await awaitSentinel(deps, child, childExited, stderr)
+  await awaitSentinel(deps, child, childExited, spawnFailed, stderr)
 
   // Sentinel seen: the discovery file is complete on disk (write_discovery
   // prints it strictly after the atomic write). Read it; no port polling.
@@ -285,11 +292,12 @@ async function spawnEngine(deps: SupervisorDeps): Promise<EngineHandle> {
   }
 }
 
-/** Wait for the READY sentinel on stdout, racing child exit and the readiness timeout. */
+/** Wait for the READY sentinel on stdout, racing spawn failure, child exit, and the readiness timeout. */
 async function awaitSentinel(
   deps: SupervisorDeps,
   child: EngineChildLike,
   childExited: Promise<void>,
+  spawnFailed: Promise<Error>,
   stderr: () => string
 ): Promise<void> {
   const timeoutMs = deps.readinessTimeoutMs ?? DEFAULT_READINESS_TIMEOUT_MS
@@ -311,8 +319,15 @@ async function awaitSentinel(
     const outcome = await Promise.race([
       sentinel,
       childExited.then(() => 'exited' as const),
+      spawnFailed.then((err) => ({ spawnError: err })),
       timeout
     ])
+    if (typeof outcome === 'object') {
+      throw new EngineStartupError(
+        `engine process failed to spawn: ${outcome.spawnError.message}`,
+        stderr()
+      )
+    }
     if (outcome === 'exited') {
       throw new EngineStartupError('engine exited before signaling readiness', stderr())
     }

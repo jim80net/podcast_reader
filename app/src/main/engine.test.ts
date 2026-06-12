@@ -41,7 +41,7 @@ function makeWorld(opts: {
   discovery?: object | string
   pidAlive?: boolean
   staleHealthStatus?: number
-  childBehavior?: 'ready' | 'exit' | 'silent'
+  childBehavior?: 'ready' | 'exit' | 'silent' | 'spawn-error'
   pidDiesAfterShutdownPost?: boolean
   shutdownStatus?: number
 }): World {
@@ -99,6 +99,10 @@ function makeWorld(opts: {
         if (opts.childBehavior === 'exit') {
           child.stderr.write('Traceback: engine exploded\n')
           child.emit('exit', 1, null)
+        } else if (opts.childBehavior === 'spawn-error') {
+          // spawn(2) failure: child_process emits an async 'error' event and
+          // 'exit' never fires (there is no process to exit).
+          child.emit('error', Object.assign(new Error('spawn uv ENOENT'), { code: 'ENOENT' }))
         } else if (opts.childBehavior !== 'silent') {
           // the engine writes discovery (its own pid) strictly before the sentinel
           files.set(
@@ -265,6 +269,20 @@ describe('ensureEngine — spawn', () => {
     )
     expect(err).toBeInstanceOf(EngineStartupError)
     expect(err?.stderr).toContain('engine exploded')
+  })
+
+  it('rejects promptly with EngineStartupError when spawn itself fails (ENOENT)', async () => {
+    const world = makeWorld({ childBehavior: 'spawn-error' })
+    // A generous readiness timeout: if the rejection only came from the
+    // sentinel timeout, the message would say so (and arrive late).
+    world.deps.readinessTimeoutMs = 5000
+    const err = await ensureEngine(world.deps).then(
+      () => null,
+      (e: unknown) => e as EngineStartupError
+    )
+    expect(err).toBeInstanceOf(EngineStartupError)
+    expect(err?.message).toContain('ENOENT')
+    expect(err?.message).not.toMatch(/sentinel/i)
   })
 
   it('fails with a timeout error when no sentinel ever appears', async () => {
