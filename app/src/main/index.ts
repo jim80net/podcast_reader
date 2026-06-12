@@ -84,7 +84,18 @@ if (!isPrimaryInstance) {
 // ---- startup ----------------------------------------------------------------
 
 async function start(): Promise<void> {
-  const dataDir = resolveDataDir(process.env, homedir())
+  let dataDir: string
+  try {
+    dataDir = resolveDataDir(process.env, homedir())
+  } catch (err) {
+    // e.g. DataDirError for the unsupported ~user form: fail loudly at
+    // startup instead of supervising an engine against the wrong directory.
+    const message = err instanceof Error ? err.message : String(err)
+    log(`fatal: ${message}`)
+    dialog.showErrorBox('Podcast Reader cannot start', message)
+    app.quit()
+    return
+  }
   const vault = new KeyVault(join(app.getPath('userData'), 'vault.json'), safeStorage, log)
   if (vault.mode === 'session-memory') {
     log('safeStorage encryption unavailable: keys are held in memory for this session only')
