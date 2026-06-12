@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <!--
+      script-src includes 'unsafe-inline' deliberately: the Reader injects the
+      engine's self-contained transcript artifact via a sandboxed iframe
+      srcdoc (design decision 8), and srcdoc documents INHERIT this CSP — the
+      artifact's inline chapter scroll-sync script (html.py) would otherwise
+      be blocked. CSP cannot be scoped per-frame, so the app chrome
+      compensates by never using innerHTML (see dom.ts); the artifact itself
+      is contained by the iframe sandbox (allow-scripts only, opaque origin).
+      frame-src about: permits the srcdoc frame itself.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; frame-src 'self' about:"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Podcast Reader</title>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="./src/main.ts"></script>
+  </body>
+</html>

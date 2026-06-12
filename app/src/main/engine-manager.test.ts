@@ -1,0 +1,262 @@
+import { describe, expect, it } from 'vitest'
+
+import { EngineManager } from './engine-manager'
+import type { ManagerDeps } from './engine-manager'
+import type { EngineHandle } from './engine'
+import type { EventStreamHandlers } from './engine-client'
+
+const handleFixture: EngineHandle = {
+  port: 50000,
+  pid: 4242,
+  token: 'tok',
+  version: '0.2.0',
+  adopted: true,
+  posture: 'adopted',
+  child: null,
+  childExited: null
+}
+
+interface World {
+  manager: EngineManager
+  calls: string[]
+  sends: { channel: string; payload: unknown }[]
+  handlers: EventStreamHandlers | null
+}
+
+function makeWorld(
+  opts: {
+    vaultKeys?: Record<string, string>
+    /** Providers whose putKey push rejects. */
+    putKeyFails?: string[]
+    ensureFails?: boolean
+    handle?: Partial<EngineHandle>
+  } = {}
+): World {
+  const calls: string[] = []
+  const sends: { channel: string; payload: unknown }[] = []
+  const world: World = { manager: null as unknown as EngineManager, calls, sends, handlers: null }
+
+  const client = {
+    putKey: async (provider: string, key: string) => {
+      calls.push(`putKey:${provider}=${key}`)
+      if (opts.putKeyFails?.includes(provider)) throw new Error(`engine rejected ${provider}`)
+    },
+    shutdown: async () => {
+      calls.push('shutdown')
+    }
+  }
+
+  const deps: ManagerDeps = {
+    ensure: async () => {
+      calls.push('ensure')
+      if (opts.ensureFails) throw new Error('spawn failed: no uv')
+      return { ...handleFixture, ...opts.handle }
+    },
+    createClient: () => {
+      calls.push('createClient')
+      return client as never
+    },
+    createStream: (_client, handlers) => {
+      world.handlers = handlers
+      return {
+        run: async () => {
+          calls.push('stream.run')
+        },
+        abort: () => {
+          calls.push('stream.abort')
+        }
+      }
+    },
+    vault: {
+      mode: 'encrypted',
+      keys: () => opts.vaultKeys ?? {},
+      setKey: (provider, key) => {
+        calls.push(`vault.setKey:${provider}=${key}`)
+      }
+    },
+    send: (channel, payload) => {
+      calls.push(`send:${channel}`)
+      sends.push({ channel, payload })
+    },
+    isAlive: () => false,
+    killPid: () => {
+      calls.push('killPid')
+    },
+    sleep: async () => {},
+    log: () => {}
+  }
+  world.manager = new EngineManager(deps)
+  return world
+}
+
+describe('EngineManager.start', () => {
+  it('pushes all vault keys BEFORE broadcasting engine-ready (task 3.2 ordering)', async () => {
+    const world = makeWorld({ vaultKeys: { anthropic: 'sk-1', openai: 'sk-2' } })
+    await world.manager.start()
+    const readyIndex = world.sends.findIndex(
+      (s) =>
+        s.channel === 'engine:status' && (s.payload as { state: string }).state === 'ready'
+    )
+    expect(readyIndex).toBeGreaterThanOrEqual(0)
+    const pushIndexes = ['putKey:anthropic=sk-1', 'putKey:openai=sk-2'].map((c) =>
+      world.calls.indexOf(c)
+    )
+    const readyCallIndex = world.calls.lastIndexOf('send:engine:status')
+    for (const pushIndex of pushIndexes) {
+      expect(pushIndex).toBeGreaterThanOrEqual(0)
+      expect(pushIndex).toBeLessThan(readyCallIndex)
+    }
+  })
+
+  it('attempts every vault key and surfaces push failures by provider on the ready status', async () => {
+    const world = makeWorld({
+      vaultKeys: { anthropic: 'sk-1', openai: 'sk-2' },
+      putKeyFails: ['anthropic']
+    })
+    await world.manager.start()
+    // the failed push does not stop the remaining keys
+    expect(world.calls).toContain('putKey:anthropic=sk-1')
+    expect(world.calls).toContain('putKey:openai=sk-2')
+    // ...but the failure is visible, not silently logged away
+    expect(world.manager.status).toEqual({
+      state: 'ready',
+      port: 50000,
+      pid: 4242,
+      version: '0.2.0',
+      adopted: true,
+      keyPushFailures: ['anthropic']
+    })
+    const ready = world.sends.find(
+      (s) => s.channel === 'engine:status' && (s.payload as { state: string }).state === 'ready'
+    )
+    expect((ready?.payload as { keyPushFailures?: string[] }).keyPushFailures).toEqual([
+      'anthropic'
+    ])
+  })
+
+  it('omits keyPushFailures from the ready status when every push succeeds', async () => {
+    const world = makeWorld({ vaultKeys: { anthropic: 'sk-1' } })
+    await world.manager.start()
+    expect(world.manager.status).toEqual({
+      state: 'ready',
+      port: 50000,
+      pid: 4242,
+      version: '0.2.0',
+      adopted: true
+    })
+  })
+
+  it('broadcasts starting, then ready with the handle facts', async () => {
+    const world = makeWorld()
+    await world.manager.start()
+    expect(world.sends[0]).toEqual({ channel: 'engine:status', payload: { state: 'starting' } })
+    expect(world.sends.at(-1)).toEqual({
+      channel: 'engine:status',
+      payload: { state: 'ready', port: 50000, pid: 4242, version: '0.2.0', adopted: true }
+    })
+    expect(world.manager.status.state).toBe('ready')
+  })
+
+  it('broadcasts a failed status when supervision fails', async () => {
+    const world = makeWorld({ ensureFails: true })
+    await world.manager.start()
+    expect(world.manager.status).toEqual({
+      state: 'failed',
+      message: expect.stringContaining('spawn failed')
+    })
+    expect(world.sends.at(-1)?.payload).toMatchObject({ state: 'failed' })
+  })
+
+  it('forwards stream events and hydrations to the renderer', async () => {
+    const world = makeWorld()
+    await world.manager.start()
+    world.handlers?.onEvent({ kind: 'warning', step: null, message: 'm', data: {} })
+    world.handlers?.onHydrate([])
+    expect(world.sends.map((s) => s.channel)).toContain('engine:event')
+    expect(world.sends.map((s) => s.channel)).toContain('jobs:hydrated')
+  })
+})
+
+describe('EngineManager.putKey', () => {
+  it('stores in the vault, then pushes to the engine (clear pushes "")', async () => {
+    const world = makeWorld()
+    await world.manager.start()
+    await world.manager.putKey('anthropic', 'sk-new')
+    await world.manager.putKey('anthropic', '')
+    expect(world.calls).toContain('vault.setKey:anthropic=sk-new')
+    expect(world.calls).toContain('putKey:anthropic=sk-new')
+    expect(world.calls).toContain('vault.setKey:anthropic=')
+    expect(world.calls).toContain('putKey:anthropic=')
+    expect(world.calls.indexOf('vault.setKey:anthropic=sk-new')).toBeLessThan(
+      world.calls.indexOf('putKey:anthropic=sk-new')
+    )
+  })
+})
+
+describe('EngineManager — unexpected engine exit', () => {
+  const spawnedHandle = (
+    childExited: Promise<void>
+  ): Partial<EngineHandle> => ({
+    adopted: false,
+    posture: 'dev',
+    child: { kill: () => true } as never,
+    childExited
+  })
+
+  it('reports failed when the spawned child exits outside the quit path', async () => {
+    let exitChild!: () => void
+    const childExited = new Promise<void>((resolve) => {
+      exitChild = resolve
+    })
+    const world = makeWorld({ handle: spawnedHandle(childExited) })
+    await world.manager.start()
+    expect(world.manager.status.state).toBe('ready')
+
+    exitChild()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(world.manager.status).toEqual({
+      state: 'failed',
+      message: 'engine exited unexpectedly'
+    })
+    expect(world.sends.at(-1)).toEqual({
+      channel: 'engine:status',
+      payload: { state: 'failed', message: 'engine exited unexpectedly' }
+    })
+  })
+
+  it('does not report failed when the child exits during the quit sequence', async () => {
+    let exitChild!: () => void
+    const childExited = new Promise<void>((resolve) => {
+      exitChild = resolve
+    })
+    const world = makeWorld({ handle: spawnedHandle(childExited) })
+    await world.manager.start()
+
+    const quitting = world.manager.quit({ timeoutMs: 5 })
+    exitChild() // the engine exiting IS the quit sequence succeeding
+    await quitting
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(world.manager.status.state).toBe('stopped')
+    const statuses = world.sends
+      .filter((s) => s.channel === 'engine:status')
+      .map((s) => (s.payload as { state: string }).state)
+    expect(statuses).not.toContain('failed')
+  })
+})
+
+describe('EngineManager.quit', () => {
+  it('aborts the stream, posts shutdown, and reports stopped (per P1)', async () => {
+    const world = makeWorld()
+    await world.manager.start()
+    world.calls.length = 0
+    await world.manager.quit({ timeoutMs: 5 })
+    expect(world.calls.indexOf('stream.abort')).toBeLessThan(world.calls.indexOf('shutdown'))
+    expect(world.manager.status.state).toBe('stopped')
+  })
+
+  it('is a no-op before start', async () => {
+    const world = makeWorld()
+    await world.manager.quit({ timeoutMs: 5 })
+    expect(world.calls).toEqual([])
+  })
+})

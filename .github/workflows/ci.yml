@@ -55,3 +55,71 @@ jobs:
           done
           echo "$HEALTH" | grep -q '"frozen":true' || { echo "health probe failed: $HEALTH"; cat engine.out; kill $ENGINE_PID; exit 1; }
           kill $ENGINE_PID
+
+  node:
+    # Desktop app (app/): typecheck, lint, unit tests, production build.
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          # >= 23.6 required: the e2e mock engine runs .ts via native type stripping
+          node-version: 24
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Lint
+        run: npm run lint
+      - name: Unit tests
+        run: npm run test
+      - name: Build
+        run: npm run build
+      - name: Packaging pipeline proof (engine-less linux dir build)
+        run: node scripts/dist.mjs --linux dir
+
+  app-e2e:
+    # Playwright e2e against the mock engine, then the real-engine smoke
+    # (integration project) against `uv run podcast-reader serve`.
+    # Installer builds for tags are deferred until signing credentials exist —
+    # see .github/workflows/release.yml (tasks 6.4-6.6).
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.10"
+      - name: Sync Python engine (dev posture for the real-engine smoke)
+        run: uv sync --extra dev
+        working-directory: .
+      - name: Install dependencies
+        run: npm ci
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('app/package-lock.json') }}
+      - name: Install Playwright chromium
+        run: npx playwright install chromium
+      - name: Build app
+        run: npm run build
+      - name: Mock-engine e2e + real-engine smoke (xvfb)
+        run: xvfb-run -a npx playwright test
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-results
+          path: app/test-results/

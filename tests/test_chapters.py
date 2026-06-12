@@ -10,10 +10,12 @@ import httpx
 import pytest
 
 from podcast_reader.chapters import (
+    KEY_TEST_TIMEOUT_S,
     SYSTEM_PROMPT,
     ChapterError,
     generate_chapters,
     snap_chapters_to_segments,
+    verify_key,
 )
 from podcast_reader.providers import PROVIDERS, ProviderSpec
 
@@ -352,6 +354,42 @@ class TestGenerateChapters:
         message = str(excinfo.value)
         assert api_key not in message
         assert api_key[:12] not in message
+        assert "Incorrect API key" not in message
+
+    def test_verify_key_sends_minimal_completion(self) -> None:
+        """verify_key is one tiny /chat/completions round-trip — same transport
+        as generate_chapters, but max_tokens=1 and no transcript."""
+        recorder = _Recorder(httpx.Response(200, json=_completion("ok")))
+        verify_key(spec=self.SPEC, api_key="sk-test", transport=recorder.transport)
+        request = recorder.requests[0]
+        assert str(request.url) == "https://api.anthropic.com/v1/chat/completions"
+        assert request.headers["authorization"] == "Bearer sk-test"
+        payload = json.loads(request.content)
+        assert payload["model"] == self.SPEC["default_model"]
+        assert payload["max_tokens"] == 1
+        assert SYSTEM_PROMPT not in json.dumps(payload)
+        assert KEY_TEST_TIMEOUT_S < 300  # a key test must not wait like a transcript
+
+    def test_verify_key_explicit_model_passes_through(self) -> None:
+        recorder = _Recorder(httpx.Response(200, json=_completion("ok")))
+        verify_key(
+            spec=PROVIDERS["openrouter"],
+            api_key="sk-test",
+            model="meta-llama/llama-4-maverick",
+            transport=recorder.transport,
+        )
+        assert json.loads(recorder.requests[0].content)["model"] == "meta-llama/llama-4-maverick"
+
+    def test_verify_key_http_error_raises_without_response_body(self) -> None:
+        """K4 redaction: the auth-error body (which echoes the key) never
+        reaches the exception message."""
+        api_key = "sk-verify-secret-key-123456789"
+        body = {"error": {"message": f"Incorrect API key provided: {api_key}"}}
+        recorder = _Recorder(httpx.Response(401, json=body))
+        with pytest.raises(RuntimeError, match="HTTP 401") as excinfo:
+            verify_key(spec=self.SPEC, api_key=api_key, transport=recorder.transport)
+        message = str(excinfo.value)
+        assert api_key not in message
         assert "Incorrect API key" not in message
 
     def test_no_anthropic_import_required(self, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -38,6 +38,11 @@
 !tests/fixtures/*.json
 !tests/fixtures/*.html
 
+# The Electron app (app/) is source, not generated artifacts; its own
+# .gitignore covers node_modules/, dist/, out/
+!app/**/*.json
+!app/**/*.html
+
 # Python
 __pycache__/
 *.pyc

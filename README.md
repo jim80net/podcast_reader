@@ -62,6 +62,34 @@ a no-op, they are protected by the user-profile directory ACLs instead. This
 is the foundation for the desktop app — see
 `docs/superpowers/specs/2026-06-11-desktop-packaging-design.md`.
 
+### Desktop app (`app/`)
+
+An Electron shell for the engine lives in [`app/`](app/README.md): submit
+jobs, watch step-level progress live, read transcripts, and manage
+settings/API keys — all over the engine's authenticated `/v1` API (the
+renderer itself is credential-free). It registers the `podcast-reader://`
+protocol, and protocol-initiated jobs always wait for an explicit
+confirmation click before running.
+
+```bash
+cd app
+npm install
+npm run dev          # dev posture: spawns `uv run podcast-reader serve` for you
+```
+
+**Dev posture (pre-Phase 4):** until a frozen engine ships inside the
+installer, the app finds its engine via, in order: a packaged
+`resources/engine/` payload, the `PODCAST_READER_ENGINE_CMD` env override
+(plain whitespace split — no paths with spaces), or `uv run podcast-reader
+serve` from the repo root — so the repo's Python toolchain
+(`uv sync --extra dev`) is assumed for development.
+
+**Unsigned builds:** installers built today are unsigned dev artifacts
+(`npm run dist -- --win` / `-- --mac`): Windows SmartScreen needs
+"Run anyway", macOS needs right-click → Open (and macOS auto-update does
+not work unsigned). Signed/notarized release pipelines are gated on
+code-signing credentials. Details in [`app/README.md`](app/README.md).
+
 ### Output
 
 The pipeline produces (in `--output-dir`, default: current directory):

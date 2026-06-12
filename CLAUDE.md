@@ -73,13 +73,33 @@ For speaker diarization, set `HF_TOKEN` and accept model terms at:
 | `src/podcast_reader/engine/settings.py` | Data dir, engine state (port/token), user settings persistence |
 | `src/podcast_reader/engine/library.py` | Managed transcript library: source-identity keys, atomic index, staged writes |
 | `src/podcast_reader/engine/jobs.py` | Persistent job journal, FIFO single-worker execution, SSE fan-out |
-| `src/podcast_reader/engine/app.py` | FastAPI app: bearer auth, jobs/events/library/settings/keys/health routes |
+| `src/podcast_reader/engine/app.py` | FastAPI app: bearer auth, jobs (incl. confirm/dismiss of awaiting-confirmation), events, library, settings, keys (push + test), providers, health, shutdown routes |
 | `src/podcast_reader/engine/process.py` | Pre-bound socket handshake, discovery file, child reaping, `serve` |
 | `spike/` | Packaging spike evidence (PyInstaller onedir prototype, SPIKE_REPORT.md) |
 | `src/podcast_reader/providers.py` | Chapter LLM provider registry (base URL, default model, key env, max_tokens) + custom-URL validation |
-| `src/podcast_reader/chapters.py` | Generate chapter markers via any registry provider's OpenAI-compatible `/chat/completions` |
+| `src/podcast_reader/chapters.py` | Generate chapter markers via any registry provider's OpenAI-compatible `/chat/completions`; `verify_key` minimal round-trip backs `POST /v1/keys/test` |
 | `src/podcast_reader/html.py` | Convert whisper JSON to styled HTML with TOC, key points, pull quotes |
 | `pyproject.toml` | Dependencies, entry point, tool configuration |
+
+### Desktop app (`app/` — independent npm package, see `app/README.md`)
+
+| Module | Purpose |
+|--------|---------|
+| `app/src/main/engine.ts` + `engine-cmd.ts` | Engine supervision: adopt-or-kill via the discovery handshake, three-way spawn chain, sentinel readiness |
+| `app/src/main/engine-client.ts` + `sse.ts` | Typed bearer-authed `/v1` client + reconnecting SSE consumer with hydration |
+| `app/src/main/engine-manager.ts` + `quit.ts` | Composition root: push-keys-before-ready ordering, status broadcast, quit sequence (abort SSE → `POST /v1/shutdown` → bounded wait → force-kill) |
+| `app/src/main/vault.ts` | safeStorage-encrypted key vault (session-memory fallback when encryption unavailable) |
+| `app/src/main/ipc.ts` + `protocol.ts` | Typed IPC handlers; `podcast-reader://` URL validation (confirm-before-run) |
+| `app/src/main/updater.ts` | electron-updater orchestration: full-download GitHub Releases, consent, engine-quit-before-install; gated off in dev/unsigned |
+| `app/src/preload/index.ts` | contextBridge `window.api` — the credential-free renderer's only door |
+| `app/src/renderer/` | Vanilla-TS views (Library/Reader/New/Settings) + hash router + jobs store |
+| `app/src/shared/types.ts` | TS mirrors of the Python boundary types (key-set parity enforced by the e2e integration smoke) |
+| `app/tests/mock-engine/` + `app/tests/e2e/` | Scriptable mock engine (separate process, real handshake) + Playwright suites |
+| `app/electron-builder.config.cjs` + `app/scripts/dist.mjs` | Packaging: NSIS/dmg+zip, protocol registration, `--engine-dir` extraResources input |
+
+Engine `/v1` surface the app consumes: `health`, `shutdown`, `jobs` (+
+`{id}`, `{id}/confirm`, `DELETE {id}`), `events` (SSE), `library`,
+`transcripts/{id}.html`, `settings`, `keys`, `keys/test`, `providers`.
 
 ## Pipeline
 
@@ -109,6 +129,17 @@ uv run mypy src/
 # Lint and format
 uv run ruff check src/ tests/
 uv run ruff format --check src/ tests/
+```
+
+```bash
+# Desktop app (run from app/; Node >= 24)
+npm run typecheck   # tsc --noEmit (node + web + e2e projects)
+npm run lint        # eslint
+npm run test        # vitest unit tests
+npm run build       # electron-vite production build into out/
+npm run e2e         # Playwright vs the mock engine (build first; xvfb-run -a on headless)
+npm run e2e:integration  # real-engine smoke (needs `uv sync --extra dev` at the root)
+npm run dist        # electron-builder installers (--engine-dir maps a frozen engine payload)
 ```
 
 - **mypy**: strict mode, all functions fully typed

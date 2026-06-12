@@ -387,10 +387,16 @@ class TestServeKeyStoreWiring:
             return real_make(base, key_store=key_store)
 
         def spy_create(
-            data_dir: Path, store: object, *, key_store: dict[str, str] | None = None
+            data_dir: Path,
+            store: object,
+            *,
+            key_store: dict[str, str] | None = None,
+            on_shutdown: Callable[[], None] | None = None,
         ) -> object:
             captured["app_store"] = key_store
-            return real_create(data_dir, store, key_store=key_store)  # type: ignore[arg-type]
+            return real_create(  # type: ignore[arg-type]
+                data_dir, store, key_store=key_store, on_shutdown=on_shutdown
+            )
 
         monkeypatch.setattr("podcast_reader.engine.process.make_pipeline_runner", spy_make)
         monkeypatch.setattr("podcast_reader.engine.process.create_app", spy_create)
@@ -402,6 +408,90 @@ class TestServeKeyStoreWiring:
 
         assert isinstance(captured["runner_store"], dict)
         assert captured["runner_store"] is captured["app_store"]
+
+
+class TestShutdownEndpointLifecycle:
+    """Spec: Graceful shutdown endpoint — endpoint-triggered exit runs the
+    full serve_engine cleanup path, bounded even under a live SSE subscriber."""
+
+    def test_shutdown_endpoint_exits_bounded_with_live_sse_and_interrupts_job(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Spec scenarios: Shutdown stops the engine cleanly; Open SSE stream
+        cannot block shutdown (per P1); Shutdown mid-job interrupts
+        recoverably (per P2).
+
+        A job is mid-run and an SSE subscriber is attached when
+        POST /v1/shutdown is called: the process must still exit within the
+        bounded graceful-shutdown window, the finally cleanup must run
+        (discovery file removed), and the job — whose runner fails when
+        kill_children reaps its child — must be journaled ``interrupted``.
+        """
+        monkeypatch.setenv("PODCAST_READER_DATA_DIR", str(tmp_path))
+        release = threading.Event()
+        started = threading.Event()
+
+        def fake_runner(record: object, on_event: Callable[[object], None]) -> PipelineResult:
+            started.set()
+            assert release.wait(timeout=30)
+            raise RuntimeError("child terminated by shutdown")
+
+        monkeypatch.setattr(
+            "podcast_reader.engine.process.make_pipeline_runner",
+            lambda base, key_store=None: fake_runner,
+        )
+        # The "children reaped" moment is what makes the in-flight job fail;
+        # begin_shutdown runs before it, so the failure lands as interrupted.
+        monkeypatch.setattr("podcast_reader.engine.process.kill_children", release.set)
+
+        discovery = tmp_path / "discovery.json"
+        servers: list[uvicorn.Server] = []
+        thread = threading.Thread(
+            target=serve_engine,
+            kwargs={"discovery_file": discovery, "on_server": servers.append},
+            daemon=True,
+        )
+        thread.start()
+        assert _wait_for(discovery.exists), "discovery file never appeared"
+        # serve_engine bounds graceful shutdown regardless of supervisor (per P1)
+        assert servers[0].config.timeout_graceful_shutdown == 3
+
+        info = json.loads(discovery.read_text())
+        token = load_engine_state(tmp_path)["token"]
+        headers = {"Authorization": f"Bearer {token}"}
+        base_url = f"http://127.0.0.1:{info['port']}"
+
+        job_id: str | None = None
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline:
+            try:
+                submitted = httpx.post(
+                    f"{base_url}/v1/jobs",
+                    json={"source": "https://example.com/a"},
+                    headers=headers,
+                    timeout=2,
+                )
+                job_id = submitted.json()["id"]
+                break
+            except httpx.TransportError:
+                time.sleep(0.05)
+        assert job_id is not None
+        assert started.wait(timeout=10), "job never started running"
+
+        with httpx.stream("GET", f"{base_url}/v1/events", headers=headers, timeout=30) as stream:
+            assert stream.status_code == 200  # live subscriber attached
+            response = httpx.post(f"{base_url}/v1/shutdown", headers=headers, timeout=10)
+            assert response.status_code == 202
+            begun = time.monotonic()
+            thread.join(timeout=20)
+            assert not thread.is_alive(), "engine did not exit after POST /v1/shutdown"
+            assert time.monotonic() - begun < 15  # bounded despite the open stream
+
+        # the finally cleanup ran
+        assert not discovery.exists(), "discovery file must be removed on shutdown"
+        # per P2: the job that failed while stopping is journaled interrupted
+        journal = {r["id"]: r for r in json.loads((tmp_path / "jobs.json").read_text())}
+        assert journal[job_id]["state"] == "interrupted"
 
 
 class TestServeSmoke:

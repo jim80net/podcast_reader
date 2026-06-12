@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from podcast_reader.providers import ProviderSpec
 
 REQUEST_TIMEOUT_S = 300.0
+KEY_TEST_TIMEOUT_S = 30.0
 
 
 class ChapterError(Exception):
@@ -143,6 +144,34 @@ def format_transcript(segments: list[dict[str, Any]]) -> str:
             continue
         lines.append(f"[{start:.1f}] {text}")
     return "\n".join(lines)
+
+
+def verify_key(
+    *,
+    spec: ProviderSpec,
+    api_key: str,
+    model: str | None = None,
+    transport: httpx.BaseTransport | None = None,
+) -> None:
+    """One minimal ``/chat/completions`` round-trip to validate *api_key*.
+
+    Same transport and endpoint shape as :func:`generate_chapters`, but with a
+    one-token completion and a short timeout — this backs the engine's
+    ``POST /v1/keys/test``. Returns on success; raises ``RuntimeError`` whose
+    message carries only the HTTP status (never the response body — auth-error
+    bodies echo key fragments, the practical key-leak vector).
+    """
+    payload = {
+        "model": model or spec["default_model"],
+        "max_tokens": 1,
+        "messages": [{"role": "user", "content": "ping"}],
+    }
+    url = spec["base_url"].rstrip("/") + "/chat/completions"
+    with httpx.Client(transport=transport, timeout=KEY_TEST_TIMEOUT_S) as client:
+        response = client.post(url, json=payload, headers={"Authorization": f"Bearer {api_key}"})
+    if response.status_code >= 400:
+        # Never include the response body in the message (key-redaction spec).
+        raise RuntimeError(f"Chapter provider request failed: HTTP {response.status_code}")
 
 
 def generate_chapters(
