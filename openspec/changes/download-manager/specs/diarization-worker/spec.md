@@ -51,7 +51,7 @@ For a diarization-enabled job, the engine SHALL pre-convert the input audio to 1
 - **THEN** the output is unchanged from current behavior
 
 ### Requirement: Cut-line on the worker freeze
-The diarization worker's frozen build SHALL be validated (build + run smoke) before the rest of the diarization work proceeds. If the freeze proves non-viable in reasonable size or effort, the diarization capability detaches to post-v1 without blocking this change's other capabilities — desktop diarization slips, CLI diarization via whisper-ctranslate2 remains, and the engine merge/setting code paths stay dormant behind the absent pack.
+The diarization worker's frozen build SHALL be validated (build + run smoke) before the rest of the diarization work proceeds. If the freeze proves non-viable in reasonable size or effort, the diarization capability detaches to post-v1 **entirely** (per S5): no diarization code from this group lands — no merge glue, no `diarize` setting, no speaker rendering, no pack release job — and the registry entry remains unpublished/`unavailable`. Desktop diarization slips without blocking this change's other capabilities; CLI diarization via whisper-ctranslate2 remains.
 
 #### Scenario: Freeze smoke gates the group
 - **WHEN** the diarization implementation begins

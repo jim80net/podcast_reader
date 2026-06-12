@@ -3,7 +3,7 @@
 ## ADDED Requirements
 
 ### Requirement: First-run setup wizard
-The app SHALL present a setup wizard when an app-side first-run flag is unset, the engine is ready, and recommended packs are missing: a hardware summary and the pack list from `GET /v1/packs` with recommended packs pre-selected and sizes shown, install with live progress from forwarded pack events, resume offered for `resumable` packs, and a skip action. Completing or skipping SHALL set the flag; the wizard SHALL be re-runnable from Settings. The wizard SHALL never block the rest of the app — navigation away and back is lossless because pack state lives in the engine.
+The app SHALL present a setup wizard when an app-side first-run flag is unset, the engine is ready, and recommended packs are missing: a hardware summary and the pack list from `GET /v1/packs` with recommended packs pre-selected and sizes shown, install with live progress from forwarded pack events, resume offered for `resumable` packs, and a skip action. The wizard SHALL set `whisper_device` from detected hardware (`cuda` iff Windows + NVIDIA with the CUDA pack registry-available, else `cpu`) (per S4). Completing or skipping SHALL set the flag; the wizard SHALL be re-runnable from Settings. The wizard SHALL never block the rest of the app — navigation away and back is lossless because pack state lives in the engine.
 
 #### Scenario: Recommended packs pre-selected
 - **WHEN** the wizard opens on a Windows machine with an NVIDIA GPU
@@ -22,15 +22,19 @@ The app SHALL present a setup wizard when an app-side first-run flag is unset, t
 - **THEN** the pack is shown resumable and one action continues the download
 
 ### Requirement: Settings pack management section
-The Settings view SHALL gain a Packs section listing every platform-available pack with state, installed version, size, and progress; install and uninstall actions; an explicit re-download affordance for `incompatible` packs; structured errors for `failed` packs; and the license attributions carried by installed pack manifests.
+The Settings view SHALL gain a Packs section listing every platform-available pack with state, installed version, size, and progress; install and uninstall actions; an explicit re-download affordance for `incompatible` and `failed` packs (per S8); structured errors for `failed` packs; and the license attributions carried by installed pack manifests. Settings SHALL show an advisory when `whisper_device=cuda` with no usable CUDA pack (not installed, incompatible, or failed) (per S4/Q2).
 
 #### Scenario: Incompatible pack offers re-download
 - **WHEN** an app update leaves an installed pack flagged `incompatible`
 - **THEN** the Packs section labels it and a single action re-downloads the compatible version
 
 #### Scenario: Uninstall refusal surfaced
-- **WHEN** an uninstall is refused by the engine (409, job running)
+- **WHEN** an uninstall is refused by the engine (409, pack installing — per S1, uninstall is no longer refused for a running job)
 - **THEN** the section shows the engine's reason and the pack remains installed
+
+#### Scenario: Cuda-without-pack advisory
+- **WHEN** Settings renders while `whisper_device=cuda` and no usable CUDA pack exists
+- **THEN** an advisory explains that jobs will run on CPU until the CUDA pack is installed (per S4/Q2)
 
 #### Scenario: Attribution visible
 - **WHEN** packs carrying license notices are installed

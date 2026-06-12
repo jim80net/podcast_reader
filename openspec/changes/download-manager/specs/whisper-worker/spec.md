@@ -54,7 +54,7 @@ The pipeline's transcribe step SHALL prefer the bundled worker: when `resolve_bu
 - **THEN** `whisper-ctranslate2` is invoked exactly as before this change
 
 ### Requirement: Model pack resolution on the frozen path
-On the worker path, the configured whisper model name SHALL resolve to the installed model pack directory (`<data_dir>/models/<name>`), passed to the worker as `--model <dir>` with offline loading. A missing or incompatible model pack SHALL fail the job with structured error code `model_missing` and a hint pointing at pack installation — the engine SHALL NOT auto-download model weights mid-job.
+On the worker path, the configured whisper model name SHALL resolve to the installed model pack directory (`<data_dir>/models/<name>`), passed to the worker as `--model <dir>` with offline loading. The transcribe step SHALL validate the pack's manifest at step start (per S1) — a pack whose manifest is absent (including one removed by a concurrent uninstall) is a missing pack, so the worst case of any race is the structured failure below, never a partial read. A missing or incompatible model pack SHALL fail the job with structured error code `model_missing` and a hint pointing at pack installation — the engine SHALL NOT auto-download model weights mid-job.
 
 #### Scenario: Installed model resolves to its directory
 - **WHEN** a frozen-path job runs with `whisper_model=tiny` and the tiny pack installed
@@ -65,8 +65,23 @@ On the worker path, the configured whisper model name SHALL resolve to the insta
 - **THEN** the job fails `model_missing` with a hint directing the user to download the model, and no network download is attempted
 
 ### Requirement: Device fallback with visible warning
-On the worker path, when the configured device is `cuda` but no NVIDIA GPU is detected or the CUDA pack is not installed (or flagged incompatible), the job SHALL proceed on CPU and emit a warning event naming the specific reason — degrade, not fail. Compute type SHALL derive from the effective device (`float16` for cuda, `int8` for cpu).
+On the worker path, when the configured device is `cuda` but no NVIDIA GPU is detected or the CUDA pack is not installed (or flagged incompatible), the job SHALL proceed on CPU and emit a warning event naming the specific reason — degrade, not fail. The warning SHALL be suppressed on platforms where the CUDA pack is registry-unavailable (e.g. macOS): when nothing is installable, the warning is noise (per S4). Compute type SHALL derive from the effective device (`float16` for cuda, `int8` for cpu).
 
 #### Scenario: CUDA configured without the pack
-- **WHEN** a frozen-path job runs with `whisper_device=cuda` and no usable CUDA pack
+- **WHEN** a frozen-path job runs with `whisper_device=cuda` and no usable CUDA pack on a platform where the CUDA pack is registry-available
 - **THEN** the job completes on CPU and the record carries a warning identifying why CUDA was unavailable
+
+#### Scenario: No warning where the pack cannot exist
+- **WHEN** a frozen-path job runs with `whisper_device=cuda` on a platform where the registry offers no CUDA pack (e.g. macOS)
+- **THEN** the job completes on CPU with no cuda-unavailable warning (per S4)
+
+### Requirement: Device defaulting from detected hardware
+The first-run setup wizard SHALL set `whisper_device` from detected hardware — `cuda` iff the platform is Windows with an NVIDIA GPU and the CUDA pack is registry-available, `cpu` otherwise — so `cuda` reflects real hardware rather than a stale global default (per S4). Uninstalling the CUDA pack SHALL NOT mutate `whisper_device` (per Q2): subsequent jobs degrade per the fallback requirement, and the app's Settings SHALL show an advisory whenever `whisper_device=cuda` with no usable CUDA pack (per Q2).
+
+#### Scenario: Wizard sets the device on a CPU-only machine
+- **WHEN** the first-run wizard completes on a machine without an NVIDIA GPU
+- **THEN** `whisper_device` is set to `cpu`
+
+#### Scenario: CUDA uninstall leaves the setting alone
+- **WHEN** the CUDA pack is uninstalled while `whisper_device=cuda`
+- **THEN** the setting remains `cuda`, the next job degrades to CPU with a warning, and Settings shows an advisory about the unusable cuda configuration (per Q2)

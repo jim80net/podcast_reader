@@ -3,7 +3,7 @@
 ## ADDED Requirements
 
 ### Requirement: Release-grade frozen engine build
-The repository SHALL provide a `packaging/` build that produces the production engine onedir: a PyInstaller spec with two entry points (`podcast-reader-engine` running the real `serve_engine`, `whisper-worker`) sharing one `_internal/` via MERGE/COLLECT, the custom ctranslate2 and faster-whisper hooks under version control, and a build script that stages the yt-dlp/ffmpeg/ffprobe seeds with their generated `tools-manifest.json` into the bundle's tools directory. The output layout SHALL match the packaged-engine contract the app spawn chain and `dist.mjs --engine-dir` already expect, with no app-side changes required.
+The repository SHALL provide a `packaging/` build that produces the production engine onedir: a PyInstaller spec with two entry points (`podcast-reader-engine` running the real `serve_engine`, `whisper-worker`) sharing one `_internal/` via MERGE/COLLECT, the custom ctranslate2 and faster-whisper hooks under version control, collection of the `podcast-reader` package metadata (`copy_metadata`) so frozen `importlib.metadata` version lookups report the real project version (per S3), and a build script that stages the yt-dlp/ffmpeg/ffprobe seeds with their generated `tools-manifest.json` into the bundle's tools directory. The output layout SHALL match the packaged-engine contract the app spawn chain and `dist.mjs --engine-dir` already expect, with no app-side changes required.
 
 #### Scenario: Build output matches the packaged-engine contract
 - **WHEN** the engine build script completes
@@ -14,11 +14,11 @@ The repository SHALL provide a `packaging/` build that produces the production e
 - **THEN** the ctranslate2 and faster-whisper hooks are sourced from `packaging/`, not hand-supplied
 
 ### Requirement: Frozen real-engine CI smoke
-CI SHALL build the real frozen engine (replacing the spike-stub job) on an ubuntu + windows matrix and prove it end-to-end: boot with a temporary data dir, complete the authenticated handshake (token from `engine-state.json`, ready sentinel, discovery file, `/v1/health`), install the `tiny` model pack through `POST /v1/packs/{id}/install`, transcribe a bundled 5-second fixture WAV via a submitted job on CPU, and assert the job reaches `done` with a non-empty HTML artifact. Model downloads SHALL be cached between CI runs.
+CI SHALL build the real frozen engine (replacing the spike-stub job) on an ubuntu + windows matrix and prove it end-to-end **on both legs** (per Q1): boot with a temporary data dir, complete the authenticated handshake (token from `engine-state.json`, ready sentinel, discovery file, `/v1/health`), assert the health-reported engine version equals the project version from `pyproject.toml` (per S3), install the `tiny` model pack through `POST /v1/packs/{id}/install`, transcribe a bundled 5-second fixture WAV via a submitted job on CPU, and assert the job reaches `done` with a non-empty HTML artifact. Model downloads SHALL be cached between CI runs. If demonstrated flake ever forces a downgrade, the ubuntu leg MAY drop to boot-only; the windows leg SHALL keep the full e2e (per Q1).
 
 #### Scenario: Frozen engine transcribes in CI
 - **WHEN** the frozen-smoke job runs on a pull request
-- **THEN** the real frozen engine boots, the tiny pack installs via the API, and the fixture job completes `done` with HTML
+- **THEN** the real frozen engine boots, reports the pyproject version on `/v1/health` (per S3), the tiny pack installs via the API, and the fixture job completes `done` with HTML
 
 #### Scenario: Spike stub retired
 - **WHEN** CI runs after this change

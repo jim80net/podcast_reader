@@ -44,7 +44,7 @@ The engine SHALL run `yt-dlp -U` against the user-data copy in a background thre
 - **THEN** no self-update is attempted
 
 ### Requirement: Extraction-failure self-update with single retry
-When an engine job's download step fails with a yt-dlp error on a URL source and the resolved yt-dlp is the user-data copy, the engine SHALL run `yt-dlp -U` once and retry the download exactly once, emitting a warning event describing the self-update attempt. A second failure SHALL surface the normal structured error.
+The retry hook SHALL be implemented in `ytdlp.py` and gated purely on resolved-binary residence — no engine or CLI flag (per Q3): when a download fails with a structured yt-dlp error on a URL source (`download_failed`, per S7) and the resolved yt-dlp resides in the user-data tools directory, `ytdlp.py` SHALL run `yt-dlp -U` once and retry the download exactly once, emitting a warning event describing the self-update attempt. A second failure SHALL surface the normal structured error. Because the gate is residence alone, any caller — engine job or CLI — gets identical behavior whenever the managed copy is in play (per Q3).
 
 #### Scenario: Extractor breakage heals in-job
 - **WHEN** a download fails, the self-update installs a newer yt-dlp, and the retry succeeds
