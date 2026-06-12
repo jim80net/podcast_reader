@@ -1,4 +1,5 @@
 import type {
+  CookieJarInfo,
   EngineSettings,
   JobRecord,
   KeyTestResult,
@@ -37,6 +38,9 @@ export const CHANNELS = {
   packsUninstall: 'packs:uninstall',
   firstRunGet: 'first-run:get',
   firstRunComplete: 'first-run:complete',
+  pairStart: 'pair:start',
+  cookiesList: 'cookies:list',
+  cookiesDelete: 'cookies:delete',
   updateGetStatus: 'update:get-status',
   updateInstall: 'update:install'
 } as const
@@ -91,6 +95,17 @@ export interface SubmitJobRequest {
   requiresConfirmation?: boolean
 }
 
+/**
+ * The `pair:start` response: the engine's `PairStartResponse` composed with
+ * the engine port the main process is connected to, so Settings can render
+ * the combined `<port>-<code>` paste string (design decision 11).
+ */
+export interface PairingDisplay {
+  port: number
+  code: string
+  expires_at: number
+}
+
 /** What the preload bridge exposes as `window.api`. */
 export interface PodcastReaderApi {
   getEngineStatus(): Promise<EngineStatus>
@@ -116,6 +131,11 @@ export interface PodcastReaderApi {
   /** App-side first-run flag (setup wizard): true once setup was completed or skipped. */
   isFirstRunComplete(): Promise<boolean>
   markFirstRunComplete(): Promise<void>
+  /** Mint an extension pairing code (engine `POST /v1/pair`) plus the engine port. */
+  startPairing(): Promise<PairingDisplay>
+  /** Captured cookie-jar metadata (`GET /v1/cookies`) — domains and dates, never values. */
+  listCookieJars(): Promise<CookieJarInfo[]>
+  deleteCookieJar(domain: string): Promise<void>
   /** Resolve a dropped File's real filesystem path (webUtils.getPathForFile). */
   getPathForFile(file: File): string
   getUpdateStatus(): Promise<UpdateStatus>

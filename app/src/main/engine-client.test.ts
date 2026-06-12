@@ -132,6 +132,27 @@ describe('EngineClient', () => {
     })
   })
 
+  it('mints a pairing code via POST /v1/pair', async () => {
+    const { calls, client: c } = client(() => json({ code: 'ABC234', expires_at: 1234.5 }))
+    await expect(c.mintPairing()).resolves.toEqual({ code: 'ABC234', expires_at: 1234.5 })
+    expect(calls[0]?.method).toBe('POST')
+    expect(calls[0]?.url).toBe('http://127.0.0.1:51234/v1/pair')
+    expect(calls[0]?.headers['authorization']).toBe('Bearer tok-123')
+  })
+
+  it('lists cookie jars (metadata only) and deletes by URL-encoded domain', async () => {
+    const jars = [{ domain: 'example.com', created_at: 1000 }]
+    const { calls, client: c } = client((req) =>
+      req.method === 'GET' ? json(jars) : new Response(null, { status: 204 })
+    )
+    await expect(c.listCookieJars()).resolves.toEqual(jars)
+    await c.deleteCookieJar('odd domain')
+    expect(calls[0]?.method).toBe('GET')
+    expect(calls[0]?.url).toBe('http://127.0.0.1:51234/v1/cookies')
+    expect(calls[1]?.method).toBe('DELETE')
+    expect(calls[1]?.url).toBe('http://127.0.0.1:51234/v1/cookies/odd%20domain')
+  })
+
   it('raises EngineRequestError with the detail on non-2xx', async () => {
     const { client: c } = client(() => json({ detail: 'job not found' }, 404))
     await expect(c.getJob('nope')).rejects.toThrowError(EngineRequestError)
