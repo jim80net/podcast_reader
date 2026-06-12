@@ -65,10 +65,11 @@ For speaker diarization, set `HF_TOKEN` and accept model terms at:
 |--------|---------|
 | `src/podcast_reader/cli.py` | Main CLI entry point — URL routing, pipeline orchestration |
 | `src/podcast_reader/youtube.py` | Fetch YouTube captions as whisper-compatible JSON |
-| `src/podcast_reader/ytdlp.py` | Download audio from X/Twitter and other platforms via yt-dlp |
-| `src/podcast_reader/transcribe.py` | Run whisper-ctranslate2 on audio files |
-| `src/podcast_reader/tools.py` | Tool resolution (external tools + frozen bundled workers) and spawn kwargs |
-| `src/podcast_reader/types.py` | TypedDict boundaries: PipelineRequest/Event, JobRecord, LibraryEntry, EngineSettings |
+| `src/podcast_reader/ytdlp.py` | Download audio via yt-dlp; structured `download_failed` + residence-gated `-U` single-retry heal |
+| `src/podcast_reader/transcribe.py` | Freeze-aware transcribe switch: bundled `whisper-worker` (model-pack validation, cuda→cpu fallback, streamed progress) or whisper-ctranslate2 |
+| `src/podcast_reader/workers/whisper_worker.py` | Frozen whisper worker: argv in, ctranslate2-shaped JSON out, `progress` lines on stderr (lazy faster-whisper via the `worker` extra) |
+| `src/podcast_reader/tools.py` | Tool resolution (external tools + frozen bundled workers), spawn kwargs, `run_child_streaming` |
+| `src/podcast_reader/types.py` | TypedDict boundaries: PipelineRequest/Event, JobRecord, LibraryEntry, EngineSettings; `PipelineError` |
 | `src/podcast_reader/pipeline.py` | Shared step runner with progress events (used by CLI and engine) |
 | `src/podcast_reader/engine/settings.py` | Data dir, engine state (port/token), user settings persistence |
 | `src/podcast_reader/engine/library.py` | Managed transcript library: source-identity keys, atomic index, staged writes |
@@ -77,6 +78,7 @@ For speaker diarization, set `HF_TOKEN` and accept model terms at:
 | `src/podcast_reader/engine/packs.py` | Built-in pack registry (pinned CUDA wheels, HF model snapshots, unpublished diarization), manifest types, compat/integrity pure functions |
 | `src/podcast_reader/engine/pack_manager.py` | Pack downloads (Range resume, sha256-named staging, fail-closed verify) + `PackManager` installer thread (atomic install, manifest-first uninstall) |
 | `src/podcast_reader/engine/hardware.py` | `nvidia-smi` GPU probe (cached) + hardware-derived pack recommendations |
+| `src/podcast_reader/engine/managed_tools.py` | Bundle tool-seed reconciliation into `<data_dir>/tools` (newer wins), `PODCAST_READER_TOOLS_DIR` export, scheduled yt-dlp self-update |
 | `src/podcast_reader/engine/app.py` | FastAPI app: bearer auth, jobs (incl. confirm/dismiss of awaiting-confirmation), events, library, settings, keys (push + test), providers, packs (list/install/uninstall), health, shutdown routes |
 | `src/podcast_reader/engine/process.py` | Pre-bound socket handshake, discovery file, child reaping, `serve` |
 | `spike/` | Packaging spike evidence (PyInstaller onedir prototype, SPIKE_REPORT.md) |
