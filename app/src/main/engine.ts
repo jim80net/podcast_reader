@@ -105,6 +105,8 @@ export function defaultSupervisorDeps(
     readFile: (path) => readFile(path, 'utf8'),
     isAlive: pidIsAlive,
     killPid: (pid) => {
+      // pid <= 0 addresses process groups in kill(2) — never a stale engine.
+      if (pid <= 0) return
       try {
         process.kill(pid, process.platform === 'win32' ? undefined : 'SIGKILL')
       } catch {

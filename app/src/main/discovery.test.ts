@@ -25,6 +25,10 @@ describe('parseDiscovery', () => {
     ['missing port', '{"pid":1,"token_fingerprint":"x","version":"1"}'],
     ['non-integer port', '{"port":"80","pid":1,"token_fingerprint":"x","version":"1"}'],
     ['non-integer pid', '{"port":80,"pid":1.5,"token_fingerprint":"x","version":"1"}'],
+    // pid 0 / negative pids address process groups in kill(2) — a corrupt
+    // discovery file must never be able to aim the stale-kill at a group.
+    ['zero pid', '{"port":80,"pid":0,"token_fingerprint":"x","version":"1"}'],
+    ['negative pid', '{"port":80,"pid":-4242,"token_fingerprint":"x","version":"1"}'],
     ['non-string fingerprint', '{"port":80,"pid":1,"token_fingerprint":7,"version":"1"}'],
     ['non-string version', '{"port":80,"pid":1,"token_fingerprint":"x","version":1}']
   ])('rejects %s', (_label, text) => {

@@ -69,8 +69,14 @@ export async function waitForPidExit(
   }
 }
 
-/** `process.kill(pid, 0)`-based liveness probe (EPERM counts as alive). */
+/**
+ * `process.kill(pid, 0)`-based liveness probe (EPERM counts as alive).
+ *
+ * pid <= 0 is never a single process — kill(0)/kill(-n) address process
+ * groups — so it is reported dead without signaling anything.
+ */
 export function pidIsAlive(pid: number): boolean {
+  if (pid <= 0) return false
   try {
     process.kill(pid, 0)
     return true

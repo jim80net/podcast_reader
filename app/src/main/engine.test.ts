@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events'
 import { PassThrough } from 'node:stream'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import { tokenFingerprint } from './discovery'
 import { ensureEngine, EngineStartupError } from './engine'
@@ -271,5 +271,26 @@ describe('ensureEngine — spawn', () => {
     const world = makeWorld({ childBehavior: 'silent' })
     await expect(ensureEngine(world.deps)).rejects.toThrowError(/sentinel/i)
     expect(world.child.killed.length).toBeGreaterThan(0)
+  })
+})
+
+describe('defaultSupervisorDeps', () => {
+  it('killPid refuses pid <= 0 (kill(0)/kill(-n) address process groups, not a stale engine)', async () => {
+    const { defaultSupervisorDeps } = await import('./engine')
+    const deps = defaultSupervisorDeps({
+      dataDir: '/tmp/x',
+      env: {},
+      resourcesPath: null,
+      devCwd: null,
+      log: () => {}
+    })
+    const spy = vi.spyOn(process, 'kill').mockImplementation(() => true)
+    try {
+      deps.killPid(0)
+      deps.killPid(-7)
+      expect(spy).not.toHaveBeenCalled()
+    } finally {
+      spy.mockRestore()
+    }
   })
 })

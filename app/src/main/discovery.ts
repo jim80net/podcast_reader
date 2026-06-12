@@ -17,7 +17,12 @@ export function parseDiscovery(text: string): DiscoveryInfo {
   const raw = parseObject(text, 'discovery file')
   const { port, pid, token_fingerprint, version } = raw
   if (!Number.isInteger(port)) throw new DiscoveryParseError('discovery file: bad port')
-  if (!Number.isInteger(pid)) throw new DiscoveryParseError('discovery file: bad pid')
+  // Strictly positive: pid 0 / negative pids address process groups in
+  // kill(2), so a corrupt file could otherwise aim the stale-kill at the
+  // app's own group. Treat anything else as a corrupt/stale discovery file.
+  if (!Number.isInteger(pid) || (pid as number) <= 0) {
+    throw new DiscoveryParseError('discovery file: bad pid')
+  }
   if (typeof token_fingerprint !== 'string' || token_fingerprint === '') {
     throw new DiscoveryParseError('discovery file: bad token_fingerprint')
   }

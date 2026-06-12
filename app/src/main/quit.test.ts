@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
-import { runQuitSequence, waitForPidExit } from './quit'
+import { pidIsAlive, runQuitSequence, waitForPidExit } from './quit'
 
 interface Calls {
   order: string[]
@@ -105,5 +105,22 @@ describe('waitForPidExit', () => {
       }
     })
     expect(exited).toBe(true)
+  })
+})
+
+describe('pidIsAlive', () => {
+  it('reports our own pid as alive', () => {
+    expect(pidIsAlive(process.pid)).toBe(true)
+  })
+
+  it('returns false for pid <= 0 without signaling (kill(0)/kill(-n) address process groups)', () => {
+    const spy = vi.spyOn(process, 'kill').mockImplementation(() => true)
+    try {
+      expect(pidIsAlive(0)).toBe(false)
+      expect(pidIsAlive(-1)).toBe(false)
+      expect(spy).not.toHaveBeenCalled()
+    } finally {
+      spy.mockRestore()
+    }
   })
 })
