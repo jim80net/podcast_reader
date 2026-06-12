@@ -16,6 +16,7 @@ from podcast_reader.tools import (
     resolve_bundled_worker,
     resolve_tool,
     run_child,
+    run_child_streaming,
 )
 
 if TYPE_CHECKING:
@@ -299,3 +300,69 @@ class TestChildRegistry:
             return False
 
         assert _wait_for(group_gone), "grandchild must die with the process group"
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX process-group semantics")
+class TestRunChildStreaming:
+    def test_streams_stderr_lines_and_captures_output(self) -> None:
+        """stderr reaches the callback line-by-line; the CompletedProcess still
+        carries full stdout/stderr like run_child."""
+        program = (
+            "import sys\n"
+            "print('progress duration=5.00', file=sys.stderr, flush=True)\n"
+            "print('progress segment_end=2.50', file=sys.stderr, flush=True)\n"
+            "print('/out/episode.json', flush=True)\n"
+        )
+        lines: list[str] = []
+
+        result = run_child_streaming([sys.executable, "-c", program], on_stderr_line=lines.append)
+
+        assert result.returncode == 0
+        assert [line.strip() for line in lines] == [
+            "progress duration=5.00",
+            "progress segment_end=2.50",
+        ]
+        assert result.stdout.strip() == "/out/episode.json"
+        assert result.stderr == "".join(lines)
+        assert live_children() == []
+
+    def test_env_replaces_child_environment(self) -> None:
+        program = "import os; print(os.environ.get('LD_LIBRARY_PATH', ''))"
+        env = {**os.environ, "LD_LIBRARY_PATH": "/data/runtime"}
+
+        result = run_child_streaming(
+            [sys.executable, "-c", program], on_stderr_line=lambda _line: None, env=env
+        )
+
+        assert result.stdout.strip() == "/data/runtime"
+
+    def test_nonzero_exit_reported(self) -> None:
+        result = run_child_streaming(
+            [sys.executable, "-c", "import sys; print('boom', file=sys.stderr); sys.exit(3)"],
+            on_stderr_line=lambda _line: None,
+        )
+        assert result.returncode == 3
+        assert "boom" in result.stderr
+
+    def test_propagates_file_not_found(self, tmp_path: Path) -> None:
+        with pytest.raises(FileNotFoundError):
+            run_child_streaming([str(tmp_path / "no-such-tool")], on_stderr_line=lambda _line: None)
+        assert live_children() == []
+
+    def test_child_registered_while_running_and_killed_on_exception(self) -> None:
+        """The streaming child rides the same registry/kill discipline as
+        run_child: a callback exception kills the process group."""
+        program = "import sys, time\nprint('ready', file=sys.stderr, flush=True)\ntime.sleep(60)\n"
+        seen_pids: list[int] = []
+
+        def explode(_line: str) -> None:
+            seen_pids.extend(live_children())
+            raise KeyboardInterrupt
+
+        with pytest.raises(KeyboardInterrupt):
+            run_child_streaming([sys.executable, "-c", program], on_stderr_line=explode)
+
+        assert len(seen_pids) == 1, "child must be registered while running"
+        assert live_children() == []
+        with pytest.raises(ProcessLookupError):
+            os.killpg(seen_pids[0], 0)  # the child's process group is gone

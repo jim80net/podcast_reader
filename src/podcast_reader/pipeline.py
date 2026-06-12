@@ -24,7 +24,7 @@ from podcast_reader.chapters import (
 from podcast_reader.html import build_html
 from podcast_reader.providers import PROVIDERS, resolve_provider
 from podcast_reader.tools import run_child
-from podcast_reader.transcribe import transcribe
+from podcast_reader.transcribe import transcribe, transcription_engine
 
 # PipelineError is re-imported under its own name: an explicit re-export
 # (mypy strict) for the existing `from podcast_reader.pipeline import
@@ -167,7 +167,7 @@ def run_pipeline(
             _emit(on_event, "step_finished", "download", "", {})
         stem = audio_path.stem
         json_path = output_dir / f"{stem}.json"
-        transcript_source = "whisper-ctranslate2"
+        transcript_source = transcription_engine()
 
         _transcribe_if_needed(
             audio_path=audio_path,
@@ -193,7 +193,7 @@ def run_pipeline(
 
         stem = audio_path.stem
         json_path = output_dir / f"{stem}.json"
-        transcript_source = "whisper-ctranslate2"
+        transcript_source = transcription_engine()
 
         _transcribe_if_needed(
             audio_path=audio_path,
@@ -406,7 +406,7 @@ def _transcribe_if_needed(
         on_event,
         "step_started",
         "transcribe",
-        f"Transcribing with whisper-ctranslate2 "
+        f"Transcribing with {transcription_engine()} "
         f"(model={whisper_model}, lang={whisper_lang}, device={whisper_device})...",
         {},
     )
@@ -417,5 +417,6 @@ def _transcribe_if_needed(
         lang=whisper_lang,
         device=whisper_device,
         hf_token=hf_token,
+        on_event=on_event,
     )
     _emit(on_event, "step_finished", "transcribe", "", {})

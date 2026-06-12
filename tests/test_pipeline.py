@@ -1007,6 +1007,77 @@ class TestRunPipelineTranscriptSource:
         assert call_kwargs["source"] == "whisper-ctranslate2"
 
 
+class TestRunPipelineFrozenWorkerPath:
+    """Frozen-path wiring (tasks 3.2/3.3): the pipeline's on_event consumer
+    receives worker step_progress events, and the step message names the
+    engine actually used."""
+
+    def test_step_progress_events_flow_through_on_event(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import subprocess
+
+        from podcast_reader.engine.packs import MANIFEST_FILE, REGISTRY, pack_dir
+
+        data_dir = tmp_path / "data"
+        monkeypatch.setenv("PODCAST_READER_DATA_DIR", str(data_dir))
+        entry = REGISTRY["model-tiny"]
+        target = pack_dir(data_dir, entry)
+        target.mkdir(parents=True)
+        (target / "model.bin").write_bytes(b"0123456789")
+        (target / MANIFEST_FILE).write_text(
+            json.dumps(
+                {
+                    "pack_schema": 1,
+                    "id": entry["id"],
+                    "version": entry["version"],
+                    "component_versions": dict(entry["component_versions"]),
+                    "files": [{"path": "model.bin", "sha256": "0" * 64, "size": 10}],
+                    "licenses": [],
+                }
+            )
+        )
+        audio_path = tmp_path / "episode.mp3"
+        audio_path.write_text("fake audio")
+        json_path = tmp_path / "episode.json"
+
+        def scripted(
+            args: list[str],
+            *,
+            on_stderr_line: object,
+            env: dict[str, str] | None = None,
+        ) -> subprocess.CompletedProcess[str]:
+            emit_line = on_stderr_line
+            assert callable(emit_line)
+            emit_line("progress duration=10.00\n")
+            emit_line("progress segment_end=4.00\n")
+            json_path.write_text(json.dumps(_SAMPLE_SEGMENTS))
+            return subprocess.CompletedProcess(args, 0, stdout=str(json_path), stderr="")
+
+        events: list[PipelineEvent] = []
+        with (
+            patch(
+                "podcast_reader.transcribe.resolve_bundled_worker",
+                return_value="/bundle/whisper-worker",
+            ),
+            patch("podcast_reader.transcribe.run_child_streaming", side_effect=scripted),
+            patch("podcast_reader.pipeline._wsl_path", return_value=None),
+        ):
+            request = _request(input_arg=str(audio_path), output_dir=tmp_path)
+            request["whisper_model"] = "tiny"
+            run_pipeline(request, on_event=events.append)
+
+        progress = [e for e in events if e["kind"] == "step_progress"]
+        assert [(e["step"], e["data"]["seconds"]) for e in progress] == [
+            ("transcribe", 0.0),
+            ("transcribe", 4.0),
+        ]
+        started = next(
+            e for e in events if e["kind"] == "step_started" and e["step"] == "transcribe"
+        )
+        assert "whisper-worker" in started["message"]
+
+
 class TestRunPipelineYtdlpIntegration:
     """End-to-end integration test for the yt-dlp download path.
 

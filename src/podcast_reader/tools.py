@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
 _CHILDREN_LOCK = threading.Lock()
 _CHILDREN: dict[int, subprocess.Popen[str]] = {}
@@ -106,24 +106,86 @@ def run_child(args: Sequence[str]) -> subprocess.CompletedProcess[str]:
     try:
         stdout, stderr = proc.communicate()
     except BaseException:
-        # Preserve subprocess.run's kill-on-exception guarantee: without it a
-        # KeyboardInterrupt would orphan the detached child (start_new_session
-        # insulates it from the terminal's SIGINT). On POSIX kill the whole
-        # process group (pid == pgid via start_new_session) so grandchildren
-        # like yt-dlp's ffmpeg die too — mirroring kill_children. On Windows
-        # the engine's Job Object reaps descendants, so killing the direct
-        # child suffices.
-        if sys.platform == "win32":
-            proc.kill()
-        else:
-            with contextlib.suppress(ProcessLookupError):  # already exited
-                os.killpg(proc.pid, signal.SIGKILL)
-        proc.wait()
+        _kill_child_tree(proc)
         raise
     finally:
         with _CHILDREN_LOCK:
             _CHILDREN.pop(proc.pid, None)
     return subprocess.CompletedProcess(list(args), proc.wait(), stdout, stderr)
+
+
+def run_child_streaming(
+    args: Sequence[str],
+    *,
+    on_stderr_line: Callable[[str], None],
+    env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
+    """Run a registered child, consuming its stderr incrementally line-by-line.
+
+    :func:`run_child` plus two worker-spawn needs: *on_stderr_line* receives
+    every stderr line as it appears (the whisper worker's progress protocol
+    maps onto ``step_progress`` events this way), and *env*, when given,
+    replaces the child environment (POSIX ``LD_LIBRARY_PATH`` injection — the
+    runtime dir must be on the loader path before the child starts). stdout
+    is drained concurrently on a helper thread so neither pipe can fill and
+    deadlock the stderr loop. Same registry and kill-on-exception discipline
+    as :func:`run_child`; the full stdout/stderr still come back on the
+    ``CompletedProcess``.
+    """
+    proc: subprocess.Popen[str] = subprocess.Popen(
+        args,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=env,
+        **popen_kwargs(),
+    )
+    stdout_pipe, stderr_pipe = proc.stdout, proc.stderr
+    assert stdout_pipe is not None and stderr_pipe is not None  # noqa: S101 — PIPE above
+    with _CHILDREN_LOCK:
+        _CHILDREN[proc.pid] = proc
+    stdout_parts: list[str] = []
+    stderr_parts: list[str] = []
+
+    def drain_stdout() -> None:
+        stdout_parts.append(stdout_pipe.read())
+
+    reader = threading.Thread(target=drain_stdout, name="child-stdout-drain", daemon=True)
+    reader.start()
+    try:
+        for line in stderr_pipe:
+            stderr_parts.append(line)
+            on_stderr_line(line)
+        reader.join()
+        returncode = proc.wait()
+    except BaseException:
+        _kill_child_tree(proc)
+        raise
+    finally:
+        with _CHILDREN_LOCK:
+            _CHILDREN.pop(proc.pid, None)
+    return subprocess.CompletedProcess(
+        list(args), returncode, "".join(stdout_parts), "".join(stderr_parts)
+    )
+
+
+def _kill_child_tree(proc: subprocess.Popen[str]) -> None:
+    """Kill an interrupted child and reap it (POSIX: its whole process group).
+
+    Preserves subprocess.run's kill-on-exception guarantee: without it a
+    KeyboardInterrupt would orphan the detached child (start_new_session
+    insulates it from the terminal's SIGINT). On POSIX kill the whole
+    process group (pid == pgid via start_new_session) so grandchildren
+    like yt-dlp's ffmpeg die too — mirroring kill_children. On Windows
+    the engine's Job Object reaps descendants, so killing the direct
+    child suffices.
+    """
+    if sys.platform == "win32":
+        proc.kill()
+    else:
+        with contextlib.suppress(ProcessLookupError):  # already exited
+            os.killpg(proc.pid, signal.SIGKILL)
+    proc.wait()
 
 
 def live_children() -> list[int]:
