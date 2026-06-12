@@ -13,10 +13,9 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from podcast_reader.engine.events import SUBSCRIBER_FULL_STREAK_LIMIT, SUBSCRIBER_QUEUE_SIZE
 from podcast_reader.engine.jobs import (
     MAX_TERMINAL_JOBS,
-    SUBSCRIBER_FULL_STREAK_LIMIT,
-    SUBSCRIBER_QUEUE_SIZE,
     JobStateError,
     JobStore,
 )
@@ -578,12 +577,12 @@ class TestSubscriptions:
         store.subscribe()  # never drained
         event = PipelineEvent(kind="warning", step=None, message="m", data={})
         for _ in range(SUBSCRIBER_QUEUE_SIZE):  # fill without ever hitting Full
-            store._publish(event)
+            store.bus.publish(event)
         assert store.subscriber_count == 1
         for _ in range(SUBSCRIBER_FULL_STREAK_LIMIT - 1):
-            store._publish(event)
+            store.bus.publish(event)
         assert store.subscriber_count == 1  # one publish short of the limit
-        store._publish(event)
+        store.bus.publish(event)
         assert store.subscriber_count == 0
 
     def test_full_streak_resets_when_consumer_drains(self, tmp_path: Path) -> None:
@@ -591,13 +590,13 @@ class TestSubscriptions:
         q = store.subscribe()
         event = PipelineEvent(kind="warning", step=None, message="m", data={})
         for _ in range(SUBSCRIBER_QUEUE_SIZE + SUBSCRIBER_FULL_STREAK_LIMIT - 1):
-            store._publish(event)
+            store.bus.publish(event)
         q.get_nowait()  # a live consumer drains → the next publish is not full
-        store._publish(event)
+        store.bus.publish(event)
         assert store.subscriber_count == 1
         # only a fresh full streak of LIMIT prunes it
         for _ in range(SUBSCRIBER_FULL_STREAK_LIMIT):
-            store._publish(event)
+            store.bus.publish(event)
         assert store.subscriber_count == 0
 
 

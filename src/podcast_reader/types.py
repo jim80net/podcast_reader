@@ -8,8 +8,21 @@ from typing import Any, Literal
 # Python < 3.12; typing.TypedDict raises PydanticUserError there.
 from typing_extensions import TypedDict
 
-StepName = Literal["resolve", "captions", "download", "transcribe", "chapters", "render"]
-EventKind = Literal["step_started", "step_finished", "warning", "job_done", "job_failed"]
+StepName = Literal["resolve", "captions", "download", "transcribe", "diarize", "chapters", "render"]
+# step_progress: incremental in-step progress (whisper worker, group 3).
+# pack_state / pack_progress: pack installer events on the shared SSE stream
+# (per S6); they carry data.pack_id and MUST NOT carry job_id (per Q5 —
+# job_id presence is the renderer's job/pack discriminator).
+EventKind = Literal[
+    "step_started",
+    "step_progress",
+    "step_finished",
+    "warning",
+    "job_done",
+    "job_failed",
+    "pack_state",
+    "pack_progress",
+]
 JobState = Literal["queued", "awaiting-confirmation", "running", "done", "failed", "interrupted"]
 
 JOB_STATES: tuple[JobState, ...] = (
