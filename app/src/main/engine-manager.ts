@@ -64,6 +64,7 @@ export class EngineManager {
       return
     }
     this.handle = handle
+    this.observeChildExit(handle)
     const client = this.deps.createClient(handle)
     this.engineClient = client
 
@@ -127,6 +128,23 @@ export class EngineManager {
       opts
     )
     this.setStatus({ state: 'stopped' })
+  }
+
+  /**
+   * Surface unexpected engine death: a spawned child exiting while we still
+   * own it becomes a visible `failed` status. `quit()` nulls `this.handle`
+   * synchronously before it runs the shutdown sequence, so an exit observed
+   * during (or after) quit is ignored. Adopted engines have no exit event
+   * (per P7) and are not watched here. Respawn supervision is a follow-up —
+   * for now the user restarts the app.
+   */
+  private observeChildExit(handle: EngineHandle): void {
+    if (handle.childExited === null) return
+    void handle.childExited.then(() => {
+      if (this.handle !== handle) return
+      this.deps.log(`engine pid ${handle.pid} exited unexpectedly`)
+      this.setStatus({ state: 'failed', message: 'engine exited unexpectedly' })
+    })
   }
 
   private waitEngineExit(handle: EngineHandle, timeoutMs: number): Promise<boolean> {

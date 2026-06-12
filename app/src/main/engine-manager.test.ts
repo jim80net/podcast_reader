@@ -23,7 +23,13 @@ interface World {
   handlers: EventStreamHandlers | null
 }
 
-function makeWorld(opts: { vaultKeys?: Record<string, string>; ensureFails?: boolean } = {}): World {
+function makeWorld(
+  opts: {
+    vaultKeys?: Record<string, string>
+    ensureFails?: boolean
+    handle?: Partial<EngineHandle>
+  } = {}
+): World {
   const calls: string[] = []
   const sends: { channel: string; payload: unknown }[] = []
   const world: World = { manager: null as unknown as EngineManager, calls, sends, handlers: null }
@@ -41,7 +47,7 @@ function makeWorld(opts: { vaultKeys?: Record<string, string>; ensureFails?: boo
     ensure: async () => {
       calls.push('ensure')
       if (opts.ensureFails) throw new Error('spawn failed: no uv')
-      return handleFixture
+      return { ...handleFixture, ...opts.handle }
     },
     createClient: () => {
       calls.push('createClient')
@@ -143,6 +149,57 @@ describe('EngineManager.putKey', () => {
     expect(world.calls.indexOf('vault.setKey:anthropic=sk-new')).toBeLessThan(
       world.calls.indexOf('putKey:anthropic=sk-new')
     )
+  })
+})
+
+describe('EngineManager — unexpected engine exit', () => {
+  const spawnedHandle = (
+    childExited: Promise<void>
+  ): Partial<EngineHandle> => ({
+    adopted: false,
+    posture: 'dev',
+    child: { kill: () => true } as never,
+    childExited
+  })
+
+  it('reports failed when the spawned child exits outside the quit path', async () => {
+    let exitChild!: () => void
+    const childExited = new Promise<void>((resolve) => {
+      exitChild = resolve
+    })
+    const world = makeWorld({ handle: spawnedHandle(childExited) })
+    await world.manager.start()
+    expect(world.manager.status.state).toBe('ready')
+
+    exitChild()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(world.manager.status).toEqual({
+      state: 'failed',
+      message: 'engine exited unexpectedly'
+    })
+    expect(world.sends.at(-1)).toEqual({
+      channel: 'engine:status',
+      payload: { state: 'failed', message: 'engine exited unexpectedly' }
+    })
+  })
+
+  it('does not report failed when the child exits during the quit sequence', async () => {
+    let exitChild!: () => void
+    const childExited = new Promise<void>((resolve) => {
+      exitChild = resolve
+    })
+    const world = makeWorld({ handle: spawnedHandle(childExited) })
+    await world.manager.start()
+
+    const quitting = world.manager.quit({ timeoutMs: 5 })
+    exitChild() // the engine exiting IS the quit sequence succeeding
+    await quitting
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(world.manager.status.state).toBe('stopped')
+    const statuses = world.sends
+      .filter((s) => s.channel === 'engine:status')
+      .map((s) => (s.payload as { state: string }).state)
+    expect(statuses).not.toContain('failed')
   })
 })
 
