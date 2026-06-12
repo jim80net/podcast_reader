@@ -85,7 +85,7 @@ if (!isPrimaryInstance) {
 
 async function start(): Promise<void> {
   const dataDir = resolveDataDir(process.env, homedir())
-  const vault = new KeyVault(join(app.getPath('userData'), 'vault.json'), safeStorage)
+  const vault = new KeyVault(join(app.getPath('userData'), 'vault.json'), safeStorage, log)
   if (vault.mode === 'session-memory') {
     log('safeStorage encryption unavailable: keys are held in memory for this session only')
   }

@@ -28,7 +28,8 @@ export class KeyVault {
 
   constructor(
     private readonly vaultPath: string,
-    private readonly safeStorage: SafeStorageLike
+    private readonly safeStorage: SafeStorageLike,
+    private readonly log: (message: string) => void = console.warn
   ) {
     this.mode = safeStorage.isEncryptionAvailable() ? 'encrypted' : 'session-memory'
     if (this.mode === 'encrypted') this.load()
@@ -58,16 +59,25 @@ export class KeyVault {
     let raw: string
     try {
       raw = readFileSync(this.vaultPath, 'utf8')
-    } catch {
-      return // no vault yet
+    } catch (err) {
+      // Only a missing file means a fresh vault. Anything else (EACCES,
+      // EISDIR, …) is a present-but-unreadable vault: quarantine it so a
+      // later persist() can never silently clobber the stored keys.
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return
+      this.quarantine(`unreadable (${String(err)})`)
+      return
     }
     let parsed: unknown
     try {
       parsed = JSON.parse(raw)
-    } catch {
-      return // corrupt vault: start empty; the next save rewrites it
+    } catch (err) {
+      this.quarantine(`invalid JSON (${String(err)})`)
+      return
     }
-    if (typeof parsed !== 'object' || parsed === null) return
+    if (typeof parsed !== 'object' || parsed === null) {
+      this.quarantine('not a JSON object')
+      return
+    }
     for (const [provider, ciphertext] of Object.entries(parsed as Record<string, unknown>)) {
       if (typeof ciphertext !== 'string') continue
       try {
@@ -75,6 +85,24 @@ export class KeyVault {
       } catch {
         // undecryptable (keychain changed): drop the entry rather than crash
       }
+    }
+  }
+
+  /**
+   * Move a corrupt/unreadable vault aside with a timestamped rename (the
+   * engine's journal quarantine pattern, `engine/jobs.py:_recover_journal`)
+   * and start empty — the user's ciphertext is preserved for inspection.
+   */
+  private quarantine(reason: string): void {
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+    const corruptPath = `${this.vaultPath}.corrupt-${stamp}`
+    try {
+      renameSync(this.vaultPath, corruptPath)
+      this.log(`key vault ${reason}; quarantined to ${corruptPath}, starting empty`)
+    } catch (renameErr) {
+      this.log(
+        `key vault ${reason}; quarantine rename failed (${String(renameErr)}), starting empty`
+      )
     }
   }
 

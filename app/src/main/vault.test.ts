@@ -1,6 +1,14 @@
-import { mkdtempSync, readFileSync, rmSync, existsSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync
+} from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import { KeyVault } from './vault'
@@ -73,6 +81,42 @@ describe('KeyVault (encrypted mode)', () => {
 
   it('reports encrypted mode', () => {
     expect(new KeyVault(tempVaultPath(), fakeSafeStorage).mode).toBe('encrypted')
+  })
+
+  it('quarantines a corrupt vault file instead of letting the next save clobber it', () => {
+    const path = tempVaultPath()
+    writeFileSync(path, 'not json{', 'utf8')
+    const logs: string[] = []
+    const vault = new KeyVault(path, fakeSafeStorage, (m) => logs.push(m))
+
+    expect(vault.keys()).toEqual({})
+    expect(existsSync(path)).toBe(false) // moved aside, not left in place
+    const quarantined = readdirSync(dirname(path)).filter((f) => f.includes('vault.json.corrupt-'))
+    expect(quarantined).toHaveLength(1)
+    expect(readFileSync(join(dirname(path), quarantined[0] ?? ''), 'utf8')).toBe('not json{')
+    expect(logs.join('\n')).toContain('quarantined')
+
+    // a later save writes a fresh vault and leaves the quarantined copy alone
+    vault.setKey('anthropic', 'sk-123')
+    expect(new KeyVault(path, fakeSafeStorage).keys()).toEqual({ anthropic: 'sk-123' })
+    expect(readFileSync(join(dirname(path), quarantined[0] ?? ''), 'utf8')).toBe('not json{')
+  })
+
+  it('quarantines an unreadable-but-present vault path (read error other than ENOENT)', () => {
+    const path = tempVaultPath()
+    mkdirSync(path) // readFileSync(path) -> EISDIR: present but unreadable
+    const logs: string[] = []
+    const vault = new KeyVault(path, fakeSafeStorage, (m) => logs.push(m))
+    expect(vault.keys()).toEqual({})
+    expect(logs.join('\n')).toContain('quarantine')
+  })
+
+  it('treats a missing vault file as fresh — no quarantine, no log', () => {
+    const path = tempVaultPath()
+    const logs: string[] = []
+    expect(new KeyVault(path, fakeSafeStorage, (m) => logs.push(m)).keys()).toEqual({})
+    expect(logs).toEqual([])
+    expect(readdirSync(dirname(path))).toEqual([])
   })
 
   it('drops undecryptable entries instead of crashing', () => {
