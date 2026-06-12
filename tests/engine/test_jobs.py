@@ -111,6 +111,49 @@ class TestExecution:
         assert failed["events"][-1]["kind"] == "job_failed"
         store.shutdown()
 
+    def test_auth_required_failure_gets_the_engine_face_hint(self, tmp_path: Path) -> None:
+        """Spec scenario: Engine job hints at the extension —
+        download_auth_required arrives neutral from the pipeline, and the
+        job store (the face that knows its affordances) authors a hint
+        referencing extension cookie sharing and cookies-file import. The
+        broken Chrome/Windows --cookies-from-browser path is never
+        recommended (per N2)."""
+
+        def auth_failing(
+            record: JobRecord, on_event: Callable[[PipelineEvent], None]
+        ) -> PipelineResult:
+            raise PipelineError("download_auth_required", "yt-dlp failed: login required", "")
+
+        store = JobStore(tmp_path, auth_failing)
+        record = store.submit("https://x.com/user/status/1", None)
+        store.start_worker()
+        assert _wait_for(lambda: store.get(record["id"])["state"] == "failed")
+        error = store.get(record["id"])["error"]
+        assert error is not None
+        assert error["code"] == "download_auth_required"
+        assert "browser extension" in error["hint"]
+        assert "cookies file" in error["hint"]
+        assert "--cookies-from-browser" not in error["hint"]
+        # the job_failed event carries the same authored hint
+        assert store.get(record["id"])["events"][-1]["data"]["hint"] == error["hint"]
+        store.shutdown()
+
+    def test_pipeline_authored_hints_pass_through_unchanged(self, tmp_path: Path) -> None:
+        """The engine-face mapping fills only the neutral auth hint; any
+        hint authored at the raise site passes through verbatim."""
+
+        def failing(record: JobRecord, on_event: Callable[[PipelineEvent], None]) -> PipelineResult:
+            raise PipelineError("download_failed", "yt-dlp failed: broken", "Try again later.")
+
+        store = JobStore(tmp_path, failing)
+        record = store.submit("https://x.com/a", None)
+        store.start_worker()
+        assert _wait_for(lambda: store.get(record["id"])["state"] == "failed")
+        error = store.get(record["id"])["error"]
+        assert error is not None
+        assert error["hint"] == "Try again later."
+        store.shutdown()
+
     def test_unexpected_exception_maps_to_internal_error(self, tmp_path: Path) -> None:
         def exploding(
             record: JobRecord, on_event: Callable[[PipelineEvent], None]

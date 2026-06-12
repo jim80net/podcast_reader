@@ -45,6 +45,32 @@ class TestCliAdapter:
         with pytest.raises(SystemExit, match="1"):
             main_with_args(["/nope"])
 
+    @patch(
+        "podcast_reader.cli.run_pipeline",
+        side_effect=PipelineError("download_auth_required", "yt-dlp failed: login required", ""),
+    )
+    def test_auth_required_maps_the_env_hint(
+        self, _m: MagicMock, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Spec scenario: CLI keeps the env hint — download_auth_required is
+        raised neutral, and the CLI face authors the YT_DLP_COOKIES advice."""
+        with pytest.raises(SystemExit, match="1"):
+            main_with_args(["https://x.com/user/status/1"])
+        err = capsys.readouterr().err
+        assert "Set YT_DLP_COOKIES to a cookies file path for authenticated content." in err
+        assert "--cookies-from-browser" not in err  # never recommended (per N2)
+
+    @patch(
+        "podcast_reader.cli.run_pipeline",
+        side_effect=PipelineError("download_failed", "yt-dlp failed: broken", ""),
+    )
+    def test_non_auth_failure_gets_no_env_hint(
+        self, _m: MagicMock, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        with pytest.raises(SystemExit, match="1"):
+            main_with_args(["https://x.com/user/status/1"])
+        assert "YT_DLP_COOKIES" not in capsys.readouterr().err
+
     @patch("podcast_reader.cli.serve_engine")
     def test_serve_subcommand_dispatches(self, mock_serve: MagicMock) -> None:
         main_with_args(["serve", "--discovery-file", "/tmp/d.json"])
