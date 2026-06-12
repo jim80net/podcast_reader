@@ -243,6 +243,7 @@ class TestDiarizeStep:
             ["not-a-dict"],
             [{"start": 0.0, "speaker": "SPEAKER_00"}],  # missing end
             [{"start": "0", "end": 4.0, "speaker": "SPEAKER_00"}],  # non-numeric
+            [{"start": True, "end": 4.0, "speaker": "SPEAKER_00"}],  # bool is not numeric
             [{"start": 0.0, "end": 4.0}],  # missing speaker
         ],
     )

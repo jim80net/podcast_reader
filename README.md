@@ -124,9 +124,11 @@ cd ../app && npm run dist -- --engine-dir ../packaging/dist/engine --win
 ```
 
 On Windows without a POSIX shell, substitute `.venv-engine\Scripts\python.exe`
-for `.venv-engine/bin/python` and `dist\engine\podcast-reader-engine.exe` for
-the engine path (the `frozen-smoke` job in `.github/workflows/ci.yml` shows the
-exact Windows invocations).
+for `.venv-engine/bin/python` (and for the bare `python3` on the
+`frozen_smoke.py` line — cmd/PowerShell have no `python3`), and
+`dist\engine\podcast-reader-engine.exe` for the engine path (the
+`frozen-smoke` job in `.github/workflows/ci.yml` shows the exact Windows
+invocations).
 
 CI (`frozen-smoke`) builds this engine on ubuntu + windows and proves it
 end-to-end: boot, authenticated handshake, `POST /v1/packs/model-tiny/install`,

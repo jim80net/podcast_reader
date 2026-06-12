@@ -162,10 +162,15 @@ def _turn_shape_ok(turn: object) -> bool:
     """
     return (
         isinstance(turn, dict)
-        and isinstance(turn.get("start"), (int, float))
-        and isinstance(turn.get("end"), (int, float))
+        and _is_number(turn.get("start"))
+        and _is_number(turn.get("end"))
         and "speaker" in turn
     )
+
+
+def _is_number(value: object) -> bool:
+    """True for real numbers only — bool is an int subclass and must not pass."""
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
 def _resolve_worker(base: Path) -> tuple[str | None, str]:

@@ -51,14 +51,15 @@ MERGE(
 engine_pyz = PYZ(engine_a.pure, engine_a.zipped_data, cipher=block_cipher)
 worker_pyz = PYZ(worker_a.pure, worker_a.zipped_data, cipher=block_cipher)
 
-# Per the PyInstaller multipackage docs
-# (https://pyinstaller.org/en/stable/spec-files.html#multipackage-bundles),
-# every EXE in a MERGE'd spec must receive its Analysis.dependencies (the
-# cross-references MERGE recorded) right after the PYZ argument, so each
-# executable resolves the shared copies instead of silently missing them.
+# Deliberately NOT passing Analysis.dependencies to the EXEs: the
+# multipackage-bundles doc's dependencies mechanism is for SEPARATE bundles
+# cross-referencing each other. In this shared-COLLECT onedir (both EXEs on
+# one _internal/), passing dependencies strips shared C extensions from the
+# worker and the cross-reference does not resolve — CI proof: both
+# frozen-smoke legs failed with "No module named 'av._core'" with
+# dependencies present, and pass without (the spike's original layout).
 engine_exe = EXE(
     engine_pyz,
-    engine_a.dependencies,
     engine_a.scripts,
     [],
     exclude_binaries=True,
@@ -72,7 +73,6 @@ engine_exe = EXE(
 
 worker_exe = EXE(
     worker_pyz,
-    worker_a.dependencies,
     worker_a.scripts,
     [],
     exclude_binaries=True,
