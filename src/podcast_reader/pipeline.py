@@ -25,6 +25,11 @@ from podcast_reader.html import build_html
 from podcast_reader.providers import PROVIDERS, resolve_provider
 from podcast_reader.tools import run_child
 from podcast_reader.transcribe import transcribe
+
+# PipelineError is re-imported under its own name: an explicit re-export
+# (mypy strict) for the existing `from podcast_reader.pipeline import
+# PipelineError` consumers (CLI, engine job store).
+from podcast_reader.types import PipelineError as PipelineError
 from podcast_reader.types import PipelineEvent, PipelineResult
 from podcast_reader.youtube import (
     NoTranscriptError,
@@ -47,16 +52,6 @@ class InputType(Enum):
     YOUTUBE = "youtube"
     URL = "url"
     LOCAL_FILE = "local_file"
-
-
-class PipelineError(Exception):
-    """Unrecoverable pipeline failure with a structured code/message/hint."""
-
-    def __init__(self, code: str, message: str, hint: str = "") -> None:
-        super().__init__(message)
-        self.code = code
-        self.message = message
-        self.hint = hint
 
 
 _YT_URL_RE = re.compile(r"youtube\.com/|youtu\.be/")

@@ -42,6 +42,23 @@ class PipelineEvent(TypedDict):
     data: dict[str, Any]
 
 
+class PipelineError(Exception):
+    """Unrecoverable pipeline failure with a structured code/message/hint.
+
+    The exception twin of :class:`JobError`. Lives here (bottom of the import
+    graph) so step modules below ``pipeline.py`` — ``ytdlp.py``
+    (``download_failed``, per S7) and ``transcribe.py`` (``model_missing``) —
+    can raise it without an import cycle; ``pipeline.py`` re-exports it for
+    its existing consumers (CLI, engine job store).
+    """
+
+    def __init__(self, code: str, message: str, hint: str = "") -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
+        self.hint = hint
+
+
 class JobError(TypedDict):
     code: str
     message: str
