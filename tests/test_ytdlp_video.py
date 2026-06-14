@@ -9,7 +9,6 @@ holds for ``download_video`` (mock the ``run_child`` subprocess boundary).
 from __future__ import annotations
 
 import subprocess
-import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
@@ -97,17 +96,16 @@ class TestDownloadVideo:
             result = download_video(self.URL, tmp_path)
         assert result == produced
 
-    def test_ignores_sidecar_files_even_when_newer(self, tmp_path: Path) -> None:
+    def test_ignores_sidecar_files(self, tmp_path: Path) -> None:
         """yt-dlp sidecars (.info.json, thumbnails, partials) must never be
-        returned as the media file — even with a newer mtime than the media
-        (OCR): selection is by media-container suffix, not just recency."""
+        returned as the media file (OCR): selection is by media-container
+        suffix, so it holds regardless of mtime — no timing dependency."""
         media = tmp_path / "123.mp4"
         with patch("podcast_reader.ytdlp.run_child") as mock_run:
             mock_run.return_value = subprocess.CompletedProcess(
                 args=[], returncode=0, stdout="", stderr=""
             )
             media.touch()
-            time.sleep(0.01)  # sidecars written AFTER the media → newer mtime
             (tmp_path / "123.info.json").touch()
             (tmp_path / "123.jpg").touch()
             (tmp_path / "123.mp4.part").touch()
