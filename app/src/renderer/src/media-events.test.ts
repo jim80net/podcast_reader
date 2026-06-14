@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { isMediaReady } from './media-events'
+import { isMediaReady, mediaTerminalState } from './media-events'
 import type { PipelineEvent } from '../../shared/types'
 
 function event(overrides: Partial<PipelineEvent>): PipelineEvent {
@@ -20,5 +20,28 @@ describe('isMediaReady', () => {
     expect(
       isMediaReady(event({ kind: 'pack_state', data: { source_id: 'abc', state: 'ready' } }), 'abc')
     ).toBe(false)
+  })
+})
+
+describe('mediaTerminalState', () => {
+  it('returns the terminal state for the matching source', () => {
+    expect(mediaTerminalState(event({ data: { source_id: 'abc', state: 'ready' } }), 'abc')).toBe(
+      'ready'
+    )
+    expect(
+      mediaTerminalState(event({ data: { source_id: 'abc', state: 'unavailable' } }), 'abc')
+    ).toBe('unavailable')
+  })
+
+  it('returns null for non-terminal states, other sources, and other kinds', () => {
+    expect(
+      mediaTerminalState(event({ data: { source_id: 'abc', state: 'preparing' } }), 'abc')
+    ).toBeNull()
+    expect(
+      mediaTerminalState(event({ data: { source_id: 'other', state: 'ready' } }), 'abc')
+    ).toBeNull()
+    expect(
+      mediaTerminalState(event({ kind: 'media_progress', data: { source_id: 'abc' } }), 'abc')
+    ).toBeNull()
   })
 })

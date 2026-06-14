@@ -392,7 +392,10 @@ document.addEventListener('DOMContentLoaded', function() {
 (function() {
   if (window.parent === window) return;
   var CH = 'pr-sync';
-  var nodes = Array.prototype.slice.call(document.querySelectorAll('[data-start]'));
+  // Only <p> passages are sync targets — NOT the chapter <section> containers
+  // (which also carry data-start as anchors). Including a section would let the
+  // highlight/seek land on a whole-chapter container instead of a passage.
+  var nodes = Array.prototype.slice.call(document.querySelectorAll('p[data-start]'));
   var items = nodes.map(function(el) {
     return { el: el, start: parseFloat(el.getAttribute('data-start')) };
   }).filter(function(it) { return !isNaN(it.start); });

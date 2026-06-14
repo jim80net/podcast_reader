@@ -293,7 +293,9 @@ def serve_engine(
     media_manager = MediaManager(
         data_dir=base,
         bus=bus,
-        cache_max_bytes=load_settings(base)["media_cache_max_bytes"],
+        # A live resolver, not a snapshot: a PUT /v1/settings change to the cap
+        # takes effect without a restart (read fresh on each eviction).
+        cache_max_bytes=lambda: load_settings(base)["media_cache_max_bytes"],
         get_entry=lambda sid: library.get_entry(Path(load_settings(base)["library_dir"]), sid),
     )
 

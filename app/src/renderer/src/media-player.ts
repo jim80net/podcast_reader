@@ -53,13 +53,10 @@ export function loadGeometry(store: Storage = localStorage): Geometry | null {
   try {
     const value = JSON.parse(raw) as Record<string, unknown>
     const { x, y, w, h } = value
-    if (
-      typeof x === 'number' &&
-      typeof y === 'number' &&
-      typeof w === 'number' &&
-      typeof h === 'number'
-    ) {
-      return { x, y, w, h }
+    // Require finite numbers (cubic P2): NaN/Infinity from corrupted storage
+    // would otherwise propagate into the layout and break the panel.
+    if ([x, y, w, h].every((n) => typeof n === 'number' && Number.isFinite(n))) {
+      return { x: x as number, y: y as number, w: w as number, h: h as number }
     }
     return null
   } catch {
@@ -364,10 +361,12 @@ function installDrag(
     const onUp = (): void => {
       win.removeEventListener('pointermove', onMove)
       win.removeEventListener('pointerup', onUp)
+      win.removeEventListener('pointercancel', onUp) // lost-pointer safety (cubic P2)
       saveGeometry(geometry, store)
     }
     win.addEventListener('pointermove', onMove)
     win.addEventListener('pointerup', onUp)
+    win.addEventListener('pointercancel', onUp)
   }
   handle.addEventListener('pointerdown', onPointerDown)
   return () => handle.removeEventListener('pointerdown', onPointerDown)
@@ -400,10 +399,12 @@ function installResize(
     const onUp = (): void => {
       win.removeEventListener('pointermove', onMove)
       win.removeEventListener('pointerup', onUp)
+      win.removeEventListener('pointercancel', onUp) // lost-pointer safety (cubic P2)
       saveGeometry(geometry, store)
     }
     win.addEventListener('pointermove', onMove)
     win.addEventListener('pointerup', onUp)
+    win.addEventListener('pointercancel', onUp)
   }
   handle.addEventListener('pointerdown', onPointerDown)
   return () => handle.removeEventListener('pointerdown', onPointerDown)

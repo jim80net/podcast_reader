@@ -144,17 +144,26 @@ class MediaManager:
         *,
         data_dir: Path,
         bus: EventBus,
-        cache_max_bytes: int,
+        cache_max_bytes: int | Callable[[], int],
         get_entry: Callable[[str], LibraryEntry | None],
         clock: Callable[[], float] | None = None,
     ) -> None:
         self._data_dir = data_dir
         self._bus = bus
-        self._cache_max_bytes = cache_max_bytes
+        # The cap may be a live resolver (serve_engine passes one reading the
+        # current setting) so a PUT /v1/settings change applies without a
+        # restart; a plain int is wrapped for callers/tests that pass a constant.
+        self._cache_cap: Callable[[], int] = (
+            cache_max_bytes if callable(cache_max_bytes) else (lambda: cache_max_bytes)
+        )
         self._get_entry = get_entry
         self._clock = clock if clock is not None else time.time
         self._lock = threading.Lock()
         self._downloads: dict[str, _Download] = {}
+        # source_ids whose download terminally failed this session: media_info
+        # reports them `unavailable` instead of re-triggering on every poll
+        # (cleared on a restart, when a retry is appropriate).
+        self._failed: set[str] = set()
 
     # -- public API ------------------------------------------------------
 
@@ -254,7 +263,8 @@ class MediaManager:
     # -- remote single-flight download -----------------------------------
 
     def _remote_info(self, source_id: str, entry: LibraryEntry) -> MediaInfo:
-        """Info for a remote source: ready when cached, else preparing + start."""
+        """Info for a remote source: ready when cached, unavailable when it
+        previously failed, else preparing + start (single-flight)."""
         cached = self._cache_path(source_id)
         if cached.is_file():
             self._touch(source_id)
@@ -263,6 +273,12 @@ class MediaManager:
             return MediaInfo(
                 kind=kind, youtube_id="", duration_s=duration, status="ready", progress=1.0
             )
+        # A terminal failure must not re-trigger a download on every poll nor
+        # leave the client stuck on `preparing` (cubic P1): report unavailable.
+        with self._lock:
+            failed = source_id in self._failed
+        if failed:
+            return _unavailable()
         self._ensure_download(source_id, entry["source"])
         return MediaInfo(
             kind="video", youtube_id="", duration_s=0.0, status="preparing", progress=0.0
@@ -306,6 +322,8 @@ class MediaManager:
             self._publish_state(source_id, "ready", message="Media ready")
         except Exception as exc:  # the download thread must survive anything
             logger.warning("Media download for %s failed: %s", source_id, exc)
+            with self._lock:
+                self._failed.add(source_id)  # terminal: no re-trigger until restart
             self._publish_state(source_id, "unavailable", message=f"Media unavailable: {exc}")
         finally:
             # The partial staging dir is discarded — a partial is never served.
@@ -363,7 +381,7 @@ class MediaManager:
             access = self._load_access()
             victims = [
                 sid
-                for sid in eviction_victims(sizes, access, cap=self._cache_max_bytes)
+                for sid in eviction_victims(sizes, access, cap=self._cache_cap())
                 if sid != protect
             ]
             for sid in victims:
@@ -380,7 +398,15 @@ class MediaManager:
                 raise TypeError("access map must be a JSON object")
         except (OSError, ValueError, TypeError):
             return {}
-        return {str(sid): float(ts) for sid, ts in loaded.items()}
+        # A malformed value (non-numeric timestamp) is corruption, not a reason
+        # to crash a media request (cubic P2) — skip the bad entry, keep the rest.
+        access: dict[str, float] = {}
+        for sid, ts in loaded.items():
+            try:
+                access[str(sid)] = float(ts)
+            except (TypeError, ValueError):
+                continue
+        return access
 
     def _save_access(self, access: Mapping[str, float]) -> None:
         self._cache_dir().mkdir(parents=True, exist_ok=True)

@@ -109,6 +109,16 @@ describe('geometry persistence', () => {
     expect(loadGeometry(store)).toBeNull()
   })
 
+  it('rejects non-finite numbers (corrupted storage must not break layout)', () => {
+    const store = memoryStorage()
+    store.setItem(GEOMETRY_KEY, JSON.stringify({ x: 0, y: 0, w: null, h: 270 }))
+    expect(loadGeometry(store)).toBeNull()
+    // JSON has no NaN/Infinity literals; a stringified bad value parses back as
+    // a string, which the typeof-number guard already rejects.
+    store.setItem(GEOMETRY_KEY, '{"x":0,"y":0,"w":"NaN","h":270}')
+    expect(loadGeometry(store)).toBeNull()
+  })
+
   it('clamps geometry into the viewport, enforcing a minimum size', () => {
     // Off-screen / oversized → pulled back inside an 800x600 viewport.
     expect(clampGeometry({ x: -50, y: -50, w: 2000, h: 2000 }, 800, 600)).toEqual({

@@ -54,6 +54,12 @@ export function createMediaProtocolHandler(
 
     // Verbatim pass-through: returning the engine Response streams its body and
     // propagates its status/headers (206 + Content-Range) to the media element.
-    return fetchFn(`${engine.baseUrl}/v1/media/${sourceId}`, { method: 'GET', headers })
+    // Forward the abort signal so a rapid seek/teardown cancels the upstream
+    // fetch instead of leaving it running (cubic P2).
+    return fetchFn(`${engine.baseUrl}/v1/media/${sourceId}`, {
+      method: 'GET',
+      headers,
+      signal: request.signal
+    })
   }
 }

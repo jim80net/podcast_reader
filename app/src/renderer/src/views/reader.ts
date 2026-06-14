@@ -1,6 +1,6 @@
 import { el } from '../dom'
 import { extractEngineDetail } from '../engine-error'
-import { isMediaReady } from '../media-events'
+import { mediaTerminalState } from '../media-events'
 import { createMediaPlayer } from '../media-player'
 import { hrefFor } from '../router'
 import { createSyncBridge } from '../sync-bridge'
@@ -77,23 +77,44 @@ export function mountReader(container: HTMLElement, sourceId: string): ViewClean
     }
   }
 
-  // F4 wait-contract: subscribe to media-prep events, resolve to playback on
-  // ready. A missed event self-heals via the re-fetch in the catch path below.
+  // F4 wait-contract: show a preparing indication, then resolve to playback on
+  // the terminal media-prep event. Two races are closed (cubic P1): (1) a
+  // `ready`/`unavailable` that fired between the first mediaInfo and this
+  // subscription is recovered by an immediate post-subscribe recheck; (2) a
+  // terminal `unavailable` clears the indicator instead of waiting forever.
   const waitForReady = (): void => {
     const preparing = el('p', { class: 'media-preparing', text: 'Preparing video…' })
     mediaSlot.append(preparing)
+
+    const settle = (status: string): void => {
+      if (disposed) return
+      if (status === 'ready') {
+        void window.api
+          .mediaInfo(sourceId)
+          .then((fresh) => {
+            if (!disposed && fresh.status === 'ready') mountPlayer(fresh)
+          })
+          .catch(() => {
+            /* transient: a later event or the next open retries */
+          })
+      } else if (status === 'unavailable') {
+        preparing.remove() // give up gracefully: transcript-only
+        unsubscribe?.()
+        unsubscribe = null
+      }
+    }
+
     unsubscribe = window.api.onPipelineEvent((event) => {
-      if (!isMediaReady(event, sourceId)) return
-      void window.api
-        .mediaInfo(sourceId)
-        .then((fresh) => {
-          if (disposed || fresh.status !== 'ready') return
-          mountPlayer(fresh)
-        })
-        .catch(() => {
-          /* transient: a later event or the next open retries */
-        })
+      const state = mediaTerminalState(event, sourceId)
+      if (state !== null) settle(state)
     })
+    // Immediate recheck: catch a terminal transition that beat the subscription.
+    void window.api
+      .mediaInfo(sourceId)
+      .then((fresh) => settle(fresh.status))
+      .catch(() => {
+        /* transient: the event path still applies */
+      })
   }
 
   void window.api

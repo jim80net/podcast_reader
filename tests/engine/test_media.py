@@ -293,6 +293,64 @@ class TestLazyDownload:
             not p.name.endswith(".part") for p in (tmp_path / "media-cache").iterdir()
         )
 
+    def test_failed_download_reports_unavailable_and_does_not_retrigger(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # cubic P1: a terminal failure must become `unavailable`, not loop back
+        # to `preparing` (which would re-trigger a download on every poll and
+        # leave the client stuck).
+        url = "https://x.com/user/status/9"
+        sid = "ab" * 32
+        calls: list[str] = []
+
+        def boom(
+            u: str, out_dir: object, cookies: object = None, on_event: object = None
+        ) -> object:
+            calls.append(u)
+            raise RuntimeError("permanently broken extractor")
+
+        monkeypatch.setattr("podcast_reader.engine.media.download_video", boom)
+        mgr = _manager(tmp_path, get_entry=lambda s: _entry(url, s))
+
+        assert mgr.media_info(sid)["status"] == "preparing"
+        mgr.join_downloads(2)
+        # Subsequent lookups are terminal-unavailable and do NOT start a new dl.
+        assert mgr.media_info(sid)["status"] == "unavailable"
+        assert mgr.media_info(sid)["status"] == "unavailable"
+        mgr.join_downloads(2)
+        assert len(calls) == 1
+
+    def test_cache_cap_resolver_is_read_live(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # cubic P2: a callable cap is re-read each eviction, so a settings change
+        # applies without a restart.
+        cap = {"v": 1024**3}
+        url = "https://x.com/user/status/10"
+        sid = "cd" * 32
+
+        def fake_download(
+            u: str, out_dir: object, cookies: object = None, on_event: object = None
+        ) -> object:
+            produced = Path(str(out_dir)) / "dl.mp4"
+            produced.write_bytes(b"\x00" * 50)
+            return produced
+
+        monkeypatch.setattr("podcast_reader.engine.media.download_video", fake_download)
+        monkeypatch.setattr(
+            "podcast_reader.engine.media.run_child",
+            lambda _args: _ffmpeg_completed(_FFMPEG_VIDEO_STDERR),
+        )
+        mgr = MediaManager(
+            data_dir=tmp_path,
+            bus=EventBus(),
+            cache_max_bytes=lambda: cap["v"],
+            get_entry=lambda s: _entry(url, s),
+        )
+        mgr.media_info(sid)
+        mgr.join_downloads(2)
+        assert mgr.ready_path(sid) is not None  # under the generous live cap
+
     def test_publishes_ready_event_with_source_id_not_job_id(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
