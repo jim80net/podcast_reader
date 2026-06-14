@@ -1,6 +1,7 @@
 import { runQuitSequence, waitForPidExit } from './quit'
 import { PUSH_CHANNELS } from '../shared/ipc'
 import type { EngineHandle } from './engine'
+import type { EngineAccess } from './media-protocol'
 import type { EngineClient, EventStreamHandlers } from './engine-client'
 import type { EngineStatus } from '../shared/ipc'
 import type { KeyStorageMode } from './vault'
@@ -57,6 +58,17 @@ export class EngineManager {
 
   get keyStorageMode(): KeyStorageMode {
     return this.deps.vault.mode
+  }
+
+  /**
+   * Loopback engine coordinates for the `app://media` protocol handler
+   * (media-protocol.ts): the bearer token the renderer never holds, plus the
+   * 127.0.0.1 base URL. Null until ready and after quit, so the handler
+   * answers 503 outside the engine's live window.
+   */
+  get media(): EngineAccess | null {
+    if (this.handle === null || this.engineClient === null) return null
+    return { baseUrl: `http://127.0.0.1:${this.handle.port}`, token: this.handle.token }
   }
 
   async start(): Promise<void> {

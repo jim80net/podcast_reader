@@ -31,15 +31,15 @@ TDD throughout: write the failing test first, then the implementation. Run `uv r
 
 ## 6. App main process
 
-- [ ] 6.1 `registerSchemesAsPrivileged` for the internal `app://` scheme at module top-level (before `whenReady`); `protocol.handle('app', …)` at ready. Unit/e2e for registration.
-- [ ] 6.2 `media-protocol.ts`: validate `^[0-9a-f]{64}$`, loopback-only, add bearer, forward `Range`, return engine `Response` verbatim. Tests for id validation, header forwarding, verbatim status.
-- [ ] 6.3 `mediaInfo(sourceId)` IPC + preload bridge typing; engine-client method. Tests for the IPC round-trip.
+- [x] 6.1 `registerSchemesAsPrivileged` for the internal `app://` scheme at module top-level (before `whenReady`); `protocol.handle('app', …)` at ready. Unit/e2e for registration.
+- [x] 6.2 `media-protocol.ts`: validate `^[0-9a-f]{64}$`, loopback-only, add bearer, forward `Range`, return engine `Response` verbatim. Tests for id validation, header forwarding, verbatim status.
+- [x] 6.3 `mediaInfo(sourceId)` IPC + preload bridge typing; engine-client method. Tests for the IPC round-trip.
 
 ## 7. Renderer
 
-- [ ] 7.1 `media-player.ts`: floating draggable/resizable panel, geometry persistence, video/audio/YouTube render paths behind `{seekTo, onTime}`, minimize, YouTube embed-disabled fallback. Vitest for kind→skin selection, geometry persistence, the raw-postMessage YouTube control wiring.
-- [ ] 7.2 `sync-bridge.ts`: parent-side `pr-sync` protocol with channel + `event.source` filtering; throttled time posts; seek handling. Vitest for filtering (drops foreign/cross-frame messages).
-- [ ] 7.3 `views/reader.ts`: mount the player beside the artifact iframe, `mediaInfo` → kind, `preparing` state awaiting SSE `ready` (info re-fetch fallback), `src` set only when ready, teardown on cleanup. Vitest + e2e.
+- [x] 7.1 `media-player.ts`: floating draggable/resizable panel, geometry persistence, video/audio/YouTube render paths behind `{seekTo, onTime}`, minimize, YouTube embed-disabled fallback. Vitest for kind→skin selection, geometry persistence, the raw-postMessage YouTube control wiring.
+- [x] 7.2 `sync-bridge.ts`: parent-side `pr-sync` protocol with channel + `event.source` filtering; throttled time posts; seek handling. Vitest for filtering (drops foreign/cross-frame messages).
+- [x] 7.3 `views/reader.ts`: mount the player beside the artifact iframe, `mediaInfo` → kind, `preparing` state awaiting SSE `ready` (info re-fetch fallback), `src` set only when ready, teardown on cleanup. Vitest + e2e.
 
 ## 8. CSP
 
@@ -47,9 +47,9 @@ TDD throughout: write the failing test first, then the implementation. Run `uv r
 
 ## 9. Tests & CI
 
-- [ ] 9.1 Extend `app/tests/mock-engine/` with `/v1/media/{id}` + `/info` serving tiny fixture mp4/mp3 (with Range).
-- [ ] 9.2 Playwright e2e: player mount, click-to-seek, highlight-follow for a video and an audio fixture.
-- [ ] 9.3 YouTube path: unit coverage for URL/seek/control wiring + a documented manual check (precedent: V5 toolbar-popup).
+- [x] 9.1 Extend `app/tests/mock-engine/` with `/v1/media/{id}` + `/info` serving tiny fixture mp4/mp3 (with Range).
+- [x] 9.2 Playwright e2e: player mount, click-to-seek, highlight-follow for a video and an audio fixture.
+- [x] 9.3 YouTube path: unit coverage for URL/seek/control wiring + a documented manual check (precedent: V5 toolbar-popup).
 
 ## 10. Docs
 

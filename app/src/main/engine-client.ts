@@ -7,6 +7,7 @@ import type {
   JobSubmission,
   KeyTestResult,
   LibraryEntry,
+  MediaInfo,
   PacksResponse,
   PairStartResponse,
   PipelineEvent,
@@ -90,6 +91,13 @@ export class EngineClient {
   async transcriptHtml(sourceId: string): Promise<string> {
     const res = await this.request('GET', `/v1/transcripts/${encodeURIComponent(sourceId)}.html`)
     return res.text()
+  }
+
+  // engine/app.py (GET /v1/media/{id}/info — playback classification + prep
+  // status). Media BYTES never cross this client; only this metadata does —
+  // the bytes load directly via the main-mediated app:// scheme (media-protocol.ts).
+  mediaInfo(sourceId: string): Promise<MediaInfo> {
+    return this.json('GET', `/v1/media/${encodeURIComponent(sourceId)}/info`)
   }
 
   // engine/app.py:347 (GET /v1/settings)

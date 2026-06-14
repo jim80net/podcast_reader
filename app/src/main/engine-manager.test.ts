@@ -89,6 +89,22 @@ function makeWorld(
   return world
 }
 
+describe('EngineManager.media (app:// media-protocol access)', () => {
+  it('is null before start and exposes loopback baseUrl + token once ready', async () => {
+    const world = makeWorld()
+    expect(world.manager.media).toBeNull()
+    await world.manager.start()
+    expect(world.manager.media).toEqual({ baseUrl: 'http://127.0.0.1:50000', token: 'tok' })
+  })
+
+  it('returns to null after quit so the media handler reports engine-not-ready', async () => {
+    const world = makeWorld()
+    await world.manager.start()
+    await world.manager.quit()
+    expect(world.manager.media).toBeNull()
+  })
+})
+
 describe('EngineManager.start', () => {
   it('pushes all vault keys BEFORE broadcasting engine-ready (task 3.2 ordering)', async () => {
     const world = makeWorld({ vaultKeys: { anthropic: 'sk-1', openai: 'sk-2' } })

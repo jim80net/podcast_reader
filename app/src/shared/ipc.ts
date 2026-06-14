@@ -4,6 +4,7 @@ import type {
   JobRecord,
   KeyTestResult,
   LibraryEntry,
+  MediaInfo,
   PacksResponse,
   PipelineEvent,
   ProviderInfo,
@@ -27,6 +28,7 @@ export const CHANNELS = {
   jobsDismiss: 'jobs:dismiss',
   libraryList: 'library:list',
   libraryTranscript: 'library:transcript',
+  mediaInfo: 'media:info',
   settingsGet: 'settings:get',
   settingsPut: 'settings:put',
   keysPut: 'keys:put',
@@ -116,6 +118,12 @@ export interface PodcastReaderApi {
   dismissJob(jobId: string): Promise<void>
   listLibrary(): Promise<LibraryEntry[]>
   transcriptHtml(sourceId: string): Promise<string>
+  /**
+   * A library entry's playback classification + prep status (`GET
+   * /v1/media/{id}/info`). Only this metadata crosses IPC; media bytes reach
+   * the renderer solely through the main-mediated `app://media/<id>` scheme.
+   */
+  mediaInfo(sourceId: string): Promise<MediaInfo>
   getSettings(): Promise<EngineSettings>
   putSettings(settings: SettingsUpdate): Promise<EngineSettings>
   /** Write-only: stores in the vault and pushes to the engine ("" clears). */

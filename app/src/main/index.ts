@@ -1,7 +1,7 @@
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 
-import { BrowserWindow, app, dialog, ipcMain, safeStorage } from 'electron'
+import { BrowserWindow, app, dialog, ipcMain, protocol, safeStorage } from 'electron'
 import { autoUpdater } from 'electron-updater'
 
 import { AppConfigStore } from './app-config'
@@ -11,6 +11,7 @@ import { defaultSupervisorDeps, ensureEngine } from './engine'
 import { EngineClient, EventStream } from './engine-client'
 import { EngineManager } from './engine-manager'
 import { registerIpcHandlers } from './ipc'
+import { createMediaProtocolHandler } from './media-protocol'
 import { parseProtocolUrl, selectProtocolArgv } from './protocol'
 import { pidIsAlive } from './quit'
 import { BUILD_SIGNED, UpdaterController, updaterGate } from './updater'
@@ -27,8 +28,23 @@ import type { UpdateStatus } from '../shared/ipc'
  */
 
 const PROTOCOL_SCHEME = 'podcast-reader'
+/** Internal in-app resource scheme for media bytes (app-shell spec, F3). */
+const MEDIA_SCHEME = 'app'
 
 const log = (message: string): void => console.log(`[podcast-reader] ${message}`)
+
+// Privileged-scheme registration MUST run at module top level, before the
+// app's ready event — calling registerSchemesAsPrivileged after ready silently
+// no-ops (design F3). standard + secure + stream + supportFetchAPI lets the
+// <video>/<audio> elements load and seek app://media/<id> like https. This is
+// SEPARATE from the external podcast-reader:// deep-link (setAsDefaultProtocolClient
+// below) — different layer, no overlap.
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: MEDIA_SCHEME,
+    privileges: { standard: true, secure: true, stream: true, supportFetchAPI: true }
+  }
+])
 
 function broadcast(channel: string, payload: unknown): void {
   broadcastTo(BrowserWindow.getAllWindows(), channel, payload)
@@ -124,6 +140,13 @@ async function start(): Promise<void> {
   })
   const appConfig = new AppConfigStore(join(app.getPath('userData'), 'app-config.json'), log)
   registerIpcHandlers(ipcMain, manager, setupUpdater(), appConfig)
+
+  // Install the app://media handler now that the engine manager (token source)
+  // exists. The handler reads loopback coordinates lazily on each request, so
+  // it answers 503 before ready and after quit (manager.media returns null).
+  const mediaManager = manager
+  const mediaHandler = createMediaProtocolHandler(() => mediaManager.media)
+  protocol.handle(MEDIA_SCHEME, (request) => mediaHandler(request))
 
   createWindow()
   await manager.start()

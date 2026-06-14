@@ -110,6 +110,21 @@ interface PackStatus {
   licenses: LicenseNotice[]
 }
 
+interface MediaInfo {
+  kind: string
+  youtube_id: string
+  duration_s: number
+  status: string
+  progress: number
+}
+
+/** A scripted media entry: its info plus the bytes the media route serves. */
+interface MediaEntry {
+  info: MediaInfo
+  bytes: Buffer
+  contentType: string
+}
+
 // ---- state ------------------------------------------------------------------
 
 const token = process.env.MOCK_ENGINE_TOKEN ?? ''
@@ -220,6 +235,32 @@ let pairingFailedAttempts = 0
 // jar + created_at. /v1 listing is metadata-only like the real engine; the
 // /__mock/cookies seam exposes jar content to the test runner only.
 const cookieJars = new Map<string, { jar: string; created_at: number }>()
+
+// Media entries (floating-video-player): source_id → {info, bytes}. Seeded via
+// /__mock/seed `media`. The byte payloads are tiny placeholders — enough for
+// the player to mount and for Range to be exercised (the browser never decodes
+// them in the kept e2e assertions; click-to-seek/highlight drive sync directly).
+const media = new Map<string, MediaEntry>()
+
+// A minimal mp4 ftyp box + an mp3 frame header are enough placeholder bytes.
+const FIXTURE_MP4 = Buffer.from('0000001c66747970697336320000020069736f32617663316d703431', 'hex')
+const FIXTURE_MP3 = Buffer.from('fffb90c40000000000000000000000000000000000000000', 'hex')
+
+function seedMedia(sourceId: string, kind: string, partial: Partial<MediaInfo> = {}): void {
+  const isYoutube = kind === 'youtube'
+  const isAudio = kind === 'audio'
+  media.set(sourceId, {
+    info: {
+      kind,
+      youtube_id: isYoutube ? (partial.youtube_id ?? 'dQw4w9WgXcQ') : '',
+      duration_s: partial.duration_s ?? 30,
+      status: partial.status ?? (kind === 'unavailable' ? 'unavailable' : 'ready'),
+      progress: partial.progress ?? 1
+    },
+    bytes: isYoutube ? Buffer.alloc(0) : isAudio ? FIXTURE_MP3 : FIXTURE_MP4,
+    contentType: isAudio ? 'audio/mpeg' : 'video/mp4'
+  })
+}
 
 interface LogEntry {
   seq: number
@@ -418,6 +459,33 @@ async function handleControl(
     for (const jar of (body.cookieJars as { domain: string; jar: string }[] | undefined) ?? []) {
       cookieJars.set(jar.domain, { jar: jar.jar, created_at: nowSeconds() })
     }
+    // Media entries: { source_id, kind, ...info overrides }[]
+    for (const entry of (body.media as
+      | ({ source_id: string; kind: string } & Partial<MediaInfo>)[]
+      | undefined) ?? []) {
+      seedMedia(entry.source_id, entry.kind, entry)
+    }
+    res.writeHead(204).end()
+    return
+  }
+  if (req.method === 'POST' && path === '/__mock/media-state') {
+    // Flip a media entry's prep status and broadcast a media_state event — the
+    // seam for the preparing→ready drill (F4). media events carry source_id and
+    // NEVER job_id, exactly like pack events.
+    const body = await readBody(req)
+    const sourceId = body.source_id as string
+    const state = body.state as string
+    const entry = media.get(sourceId)
+    if (entry !== undefined) {
+      entry.info.status = state
+      entry.info.progress = state === 'ready' ? 1 : entry.info.progress
+    }
+    broadcast({
+      kind: 'media_state',
+      step: null,
+      message: `media ${state}`,
+      data: { source_id: sourceId, state }
+    })
     res.writeHead(204).end()
     return
   }
@@ -658,6 +726,23 @@ async function handleV1(req: IncomingMessage, res: ServerResponse, path: string)
     sendJson(res, 200, library)
     return
   }
+  const mediaInfoMatch = /^\/v1\/media\/([^/]+)\/info$/.exec(path)
+  if (req.method === 'GET' && mediaInfoMatch !== null) {
+    const entry = media.get(decodeURIComponent(mediaInfoMatch[1] ?? ''))
+    const info: MediaInfo =
+      entry?.info ?? { kind: 'unavailable', youtube_id: '', duration_s: 0, status: 'unavailable', progress: 0 }
+    sendJson(res, 200, info)
+    return
+  }
+  const mediaBytesMatch = /^\/v1\/media\/([^/]+)$/.exec(path)
+  if (req.method === 'GET' && mediaBytesMatch !== null) {
+    const entry = media.get(decodeURIComponent(mediaBytesMatch[1] ?? ''))
+    if (entry === undefined || entry.info.status !== 'ready' || entry.bytes.length === 0) {
+      return detail(res, 404, 'media not ready')
+    }
+    serveBytesWithRange(req, res, entry.bytes, entry.contentType)
+    return
+  }
   const transcriptMatch = /^\/v1\/transcripts\/(.+)\.html$/.exec(path)
   if (req.method === 'GET' && transcriptMatch !== null) {
     const html = transcripts.get(decodeURIComponent(transcriptMatch[1] ?? ''))
@@ -713,6 +798,45 @@ async function handleV1(req: IncomingMessage, res: ServerResponse, path: string)
     return
   }
   detail(res, 404, `mock engine: no route for ${req.method} ${path}`)
+}
+
+/**
+ * Serve `bytes` honoring an inbound `Range` header — 206 + Content-Range for a
+ * ranged request, 200 + Accept-Ranges otherwise. Mirrors the engine's
+ * FileResponse Range behavior closely enough to exercise media seeking (F5).
+ */
+function serveBytesWithRange(
+  req: IncomingMessage,
+  res: ServerResponse,
+  bytes: Buffer,
+  contentType: string
+): void {
+  const total = bytes.length
+  const range = req.headers.range
+  const match = typeof range === 'string' ? /^bytes=(\d*)-(\d*)$/.exec(range.trim()) : null
+  if (match !== null) {
+    const start = match[1] === '' ? 0 : Number(match[1])
+    const end = match[2] === '' ? total - 1 : Math.min(Number(match[2]), total - 1)
+    if (Number.isNaN(start) || Number.isNaN(end) || start > end || start >= total) {
+      res.writeHead(416, { 'content-range': `bytes */${total}` }).end()
+      return
+    }
+    const chunk = bytes.subarray(start, end + 1)
+    res.writeHead(206, {
+      'content-type': contentType,
+      'content-range': `bytes ${start}-${end}/${total}`,
+      'accept-ranges': 'bytes',
+      'content-length': String(chunk.length)
+    })
+    res.end(chunk)
+    return
+  }
+  res.writeHead(200, {
+    'content-type': contentType,
+    'accept-ranges': 'bytes',
+    'content-length': String(total)
+  })
+  res.end(bytes)
 }
 
 function fingerprint(value: string): string {
