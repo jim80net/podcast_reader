@@ -44,6 +44,7 @@ const api: PodcastReaderApi = {
   getPathForFile: (file) => webUtils.getPathForFile(file),
   getUpdateStatus: () => ipcRenderer.invoke(CHANNELS.updateGetStatus),
   installUpdate: () => ipcRenderer.invoke(CHANNELS.updateInstall),
+  engineRestart: () => ipcRenderer.invoke(CHANNELS.engineRestart),
   onEngineStatus: (listener: (status: EngineStatus) => void) =>
     subscribe(PUSH_CHANNELS.engineStatus, listener),
   onPipelineEvent: (listener: (event: PipelineEvent) => void) =>

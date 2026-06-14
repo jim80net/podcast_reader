@@ -44,7 +44,8 @@ export const CHANNELS = {
   cookiesList: 'cookies:list',
   cookiesDelete: 'cookies:delete',
   updateGetStatus: 'update:get-status',
-  updateInstall: 'update:install'
+  updateInstall: 'update:install',
+  engineRestart: 'engine:restart'
 } as const
 
 /** Main → renderer push channels (`webContents.send`). */
@@ -72,6 +73,12 @@ export type EngineStatus =
       /** Providers whose vaulted key failed to push at startup (absent when all succeeded). */
       keyPushFailures?: string[]
     }
+  /**
+   * A spawned engine exited unexpectedly and the bounded respawn policy is
+   * retrying. `attempt`/`maxAttempts` drive the renderer's "Reconnecting…
+   * (N/M)" banner (engine-respawn-supervision design).
+   */
+  | { state: 'restarting'; attempt: number; maxAttempts: number }
   | { state: 'failed'; message: string }
   | { state: 'stopped' }
 
@@ -149,6 +156,8 @@ export interface PodcastReaderApi {
   getUpdateStatus(): Promise<UpdateStatus>
   /** Apply a downloaded update now (quit sequence first, then quitAndInstall). */
   installUpdate(): Promise<void>
+  /** Manually respawn the engine after it reached the terminal `failed` state. */
+  engineRestart(): Promise<void>
   onEngineStatus(listener: (status: EngineStatus) => void): () => void
   onPipelineEvent(listener: (event: PipelineEvent) => void): () => void
   onJobsHydrated(listener: (jobs: JobRecord[]) => void): () => void

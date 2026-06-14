@@ -24,8 +24,9 @@
  * Stdout: one ready line `MOCK_ENGINE_READY {"port":N,"pid":N}`.
  */
 import { createHash } from 'node:crypto'
-import { appendFileSync } from 'node:fs'
+import { appendFileSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:http'
+import { join } from 'node:path'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 
 // ---- mirrored payload shapes (kept structurally equal to src/shared/types.ts) --
@@ -546,6 +547,16 @@ async function handleControl(
     res.writeHead(204).end()
     return
   }
+  if (req.method === 'POST' && path === '/__mock/crash') {
+    // A REAL death seam (engine-respawn-supervision L2): exit the process with
+    // a non-zero code so a SPAWNED engine's `childExited` resolves and the
+    // app's respawn supervision fires — not just an SSE close. Only meaningful
+    // when the mock was launched in --spawned mode (the app owns the child).
+    record('crash')
+    res.writeHead(202).end()
+    setTimeout(() => process.exit(1), 20)
+    return
+  }
   detail(res, 404, `unknown mock control endpoint: ${path}`)
 }
 
@@ -855,9 +866,39 @@ const server = createServer((req, res) => {
   })
 })
 
+// --spawned: the app OWNS this process (PODCAST_READER_ENGINE_CMD posture),
+// rather than adopting a pre-written discovery file. We then mirror the real
+// engine's boot: write engine-state.json + engine.json into the data dir, then
+// emit the READY sentinel on stdout (the app reads discovery strictly after
+// the sentinel, no port polling). Respawn re-runs this command → a fresh PID.
+const spawnedMode = process.argv.includes('--spawned')
+const READY_SENTINEL = 'PODCAST_READER_READY'
+
 server.listen(0, '127.0.0.1', () => {
   const address = server.address()
   const port = typeof address === 'object' && address !== null ? address.port : 0
   record('listening', String(port))
+  if (spawnedMode) {
+    const dataDir = process.env.PODCAST_READER_DATA_DIR
+    if (dataDir === undefined || dataDir === '') {
+      console.error('--spawned requires PODCAST_READER_DATA_DIR')
+      process.exit(2)
+    }
+    writeFileSync(join(dataDir, 'engine-state.json'), JSON.stringify({ port, token }), {
+      mode: 0o600
+    })
+    writeFileSync(
+      join(dataDir, 'engine.json'),
+      JSON.stringify({
+        port,
+        pid: process.pid,
+        token_fingerprint: fingerprint(token),
+        version: '0.3.0'
+      }),
+      { mode: 0o600 }
+    )
+    // The sentinel the app's awaitSentinel watches for.
+    console.log(READY_SENTINEL)
+  }
   console.log(`MOCK_ENGINE_READY ${JSON.stringify({ port, pid: process.pid })}`)
 })

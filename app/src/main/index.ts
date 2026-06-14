@@ -10,6 +10,7 @@ import { resolveDataDir } from './data-dir'
 import { defaultSupervisorDeps, ensureEngine } from './engine'
 import { EngineClient, EventStream } from './engine-client'
 import { EngineManager } from './engine-manager'
+import { RespawnPolicy } from './respawn-policy'
 import { registerIpcHandlers } from './ipc'
 import { createMediaProtocolHandler } from './media-protocol'
 import { parseProtocolUrl, selectProtocolArgv } from './protocol'
@@ -136,6 +137,10 @@ async function start(): Promise<void> {
     isAlive: pidIsAlive,
     killPid: supervisorDeps.killPid,
     sleep: supervisorDeps.sleep,
+    now: Date.now,
+    // Jitter (0–250ms) de-syncs simultaneous crash bursts; Math.random is fine
+    // here — this is backoff spread, not anything security-sensitive.
+    policy: new RespawnPolicy({ jitter: () => Math.floor(Math.random() * 250) }),
     log
   })
   const appConfig = new AppConfigStore(join(app.getPath('userData'), 'app-config.json'), log)
