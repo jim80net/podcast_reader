@@ -20,9 +20,9 @@ TDD throughout: write the failing test first, then the implementation. Run `uv r
 
 ## 4. Engine routes + events (`engine/app.py`)
 
-- [ ] 4.1 `GET /v1/media/{source_id}/info` → `MediaInfo`; immediate for local/YouTube, `preparing` + kick-off for uncached remote. Route tests (auth required, kinds, preparing).
-- [ ] 4.2 `GET /v1/media/{source_id}` via `FileResponse` with Range; `404` when unavailable. Tests for `206`/`Content-Range` and `404`.
-- [ ] 4.3 Media-prep SSE events on the EventBus carrying `source_id`, never `job_id`, terminating in `ready`. Test event shape + the no-`job_id` invariant.
+- [x] 4.1 `GET /v1/media/{source_id}/info` → `MediaInfo`; immediate for local/YouTube, `preparing` + kick-off for uncached remote. Route tests (auth required, kinds, preparing).
+- [x] 4.2 `GET /v1/media/{source_id}` via `FileResponse` with Range; `404` when unavailable. Tests for `206`/`Content-Range` and `404`.
+- [x] 4.3 Media-prep SSE events on the EventBus carrying `source_id`, never `job_id`, terminating in `ready`. Test event shape + the no-`job_id` invariant.
 
 ## 5. Transcript artifact (`html.py`)
 

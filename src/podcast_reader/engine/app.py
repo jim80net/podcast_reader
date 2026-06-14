@@ -13,6 +13,7 @@ import hmac
 import json
 import os
 import queue
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -60,13 +61,20 @@ from podcast_reader.types import (
     EngineSettings,
     JobRecord,  # noqa: TC001 — runtime response model
     LibraryEntry,  # noqa: TC001 — runtime response model
+    MediaInfo,  # noqa: TC001 — runtime response model
 )
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Iterator
 
     from podcast_reader.engine.jobs import JobStore
+    from podcast_reader.engine.media import MediaManager
     from podcast_reader.engine.pack_manager import PackManager
+
+#: A library source_id is a sha256 hexdigest (library.source_identity). Media
+#: routes validate against it so a path param can never reach a cache path as
+#: traversal — defense in depth atop the app-side app:// scheme validation.
+_SOURCE_ID_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
 class JobSubmission(BaseModel):
@@ -215,6 +223,7 @@ def create_app(
     key_test_transport: httpx.BaseTransport | None = None,
     pack_manager: PackManager | None = None,
     pairing: PairingState | None = None,
+    media_manager: MediaManager | None = None,
 ) -> FastAPI:
     """Build the engine's FastAPI app bound to *store* and *data_dir*.
 
@@ -426,6 +435,31 @@ def create_app(
             raise HTTPException(status_code=404, detail="pack not found") from exc
         except PackInstallingError as exc:  # self-authored message, safe to echo
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    def _require_media_manager() -> MediaManager:
+        if media_manager is None:
+            raise HTTPException(status_code=503, detail="media manager not configured")
+        return media_manager
+
+    def _valid_source_id(source_id: str) -> str:
+        # A non-matching id can never reach a cache path; 404 (not 400) keeps the
+        # surface uniform with the not-found cases below.
+        if not _SOURCE_ID_RE.match(source_id):
+            raise HTTPException(status_code=404, detail="media not found")
+        return source_id
+
+    @app.get("/v1/media/{source_id}/info")
+    def media_info(source_id: str) -> MediaInfo:
+        """Player kind + preparation status; kicks off a lazy remote download."""
+        return _require_media_manager().media_info(_valid_source_id(source_id))
+
+    @app.get("/v1/media/{source_id}")
+    def media_bytes(source_id: str) -> FileResponse:
+        """Serve the ready media bytes with Range (FileResponse, per F5)."""
+        path = _require_media_manager().ready_path(_valid_source_id(source_id))
+        if path is None:
+            raise HTTPException(status_code=404, detail="media not found")
+        return FileResponse(path)
 
     @app.get("/v1/library")
     def library() -> list[LibraryEntry]:

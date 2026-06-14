@@ -36,6 +36,7 @@ from podcast_reader.engine.managed_tools import (
     maybe_self_update_ytdlp,
     seed_tools,
 )
+from podcast_reader.engine.media import MediaManager
 from podcast_reader.engine.pack_manager import PackManager
 from podcast_reader.engine.settings import (
     atomic_write_json,
@@ -286,6 +287,15 @@ def serve_engine(
     # Startup pack validation (per S8/F13): flag incompatible or damaged
     # installed packs before serving; the same checks back every GET /v1/packs.
     pack_manager.validate_installed()
+    # Media core (floating-video-player): shares the same EventBus so media-prep
+    # events ride the SSE stream. get_entry reads the current library_dir each
+    # call (the setting can change at runtime), mirroring the route helpers.
+    media_manager = MediaManager(
+        data_dir=base,
+        bus=bus,
+        cache_max_bytes=load_settings(base)["media_cache_max_bytes"],
+        get_entry=lambda sid: library.get_entry(Path(load_settings(base)["library_dir"]), sid),
+    )
 
     # POST /v1/shutdown hook: the server object is created after the app, so
     # the hook reaches it through this list (filled before any request runs).
@@ -301,6 +311,7 @@ def serve_engine(
         key_store=key_store,
         on_shutdown=request_shutdown,
         pack_manager=pack_manager,
+        media_manager=media_manager,
     )
     # timeout_graceful_shutdown bounds exit even when a client leaves an SSE
     # stream open — an open /v1/events response would otherwise hold graceful
