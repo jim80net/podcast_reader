@@ -1,12 +1,18 @@
 # Floating Video Player — Design
 
 **Date:** 2026-06-13
-**Status:** Approved brainstorm, pre-systems-review
+**Status:** Approved design v2, post-systems-review (pre-openspec)
 **Author:** Jim Park, with Claude
 **Review history:** v1 — design approved in brainstorm (five scope decisions: all sources,
 lazy-download + LRU cache for remote, floating in-window overlay, full bidirectional
 transcript sync, audio player for audio-only entries; media transport via approach B —
-engine owns media, main reverse-proxies with the bearer token).
+engine owns media, main reverse-proxies with the bearer token). v2 — applies
+systems-review findings F1–F8: YouTube via raw-iframe postMessage (no third-party JS in
+the `window.api` context, F1); engine serves media via `FileResponse` for real Range
+support (F5); `registerSchemesAsPrivileged` timing made explicit (F3); no `ffprobe`
+dependency — probe via `ffmpeg`/yt-dlp (F8); explicit `preparing` wait-contract (F4);
+CSP-inheritance caveat (F2); gap-free highlight boundaries (F6); audio-only remote
+format fallback (F7).
 
 ## Problem
 
@@ -81,8 +87,20 @@ synchronization must serve audio-only entries, not just video.
 ```
 
 YouTube is special-cased end to end: the engine reports `kind: youtube` + `youtube_id`,
-and the renderer embeds the YouTube IFrame player directly — **no media bytes flow through
-the engine or the `app://` protocol for YouTube.**
+and the renderer embeds the YouTube player directly — **no media bytes flow through the
+engine or the `app://` protocol for YouTube.**
+
+**YouTube embedding stays out of the `window.api` context (F1).** The renderer exposes the
+credential bridge `window.api` (contextBridge) to its main world. A *cross-origin* YouTube
+iframe cannot reach `window.api`, but the YouTube **JS IFrame API** (`youtube.com/iframe_api`
++ its injected `www-widgetapi.js`) would execute in that same main world, making youtube.com
+a potential caller of `mediaInfo` / `transcriptHtml` / job submission / cookies. Therefore
+the design does **not** load the YouTube JS API. Instead it embeds
+`<iframe src="https://www.youtube-nocookie.com/embed/<id>?enablejsapi=1">` and drives it via
+the **raw YouTube iframe `postMessage` control protocol** (`{event:'command',
+func:'seekTo', args:[t]}`, `listening`/`onStateChange` info events), confining all YouTube
+code to its own cross-origin iframe. This also eliminates any `script-src` CSP allowance for
+youtube.com — only a `frame-src` allowance remains.
 
 ## Components
 
@@ -94,14 +112,19 @@ Owns all non-YouTube media. Responsibilities:
   never parses URLs).
 - **Probe.** `MediaInfo` = `{kind, youtube_id, duration_s, status, progress}` where
   `kind ∈ {youtube, video, audio, unavailable}` and `status ∈ {ready, preparing,
-  unavailable}`. Local files and cached files are probed with `ffprobe` (resolved via
-  `tools.py`, the same way `diarize.py` resolves ffmpeg). YouTube info is immediate.
+  unavailable}`. **No `ffprobe` dependency (F8):** the tool seeds bundle `ffmpeg` (proven:
+  `diarize.py:121` resolves `ffmpeg`, not `ffprobe`), so duration/has-video-track is read
+  from `ffmpeg -i` stderr for local files, or captured from yt-dlp's known format at
+  download time for remote sources. YouTube info is immediate (classification only).
 - **Lazy download (remote).** First info/byte request for an uncached remote source
-  returns `status: preparing` and starts a **single-flight** download keyed by
-  `source_id` (concurrent requests for the same id join the in-flight one). The download
-  reuses `ytdlp.py` with a new video variant (best mp4, ffmpeg merge) rather than the
-  audio-only `-x` path. Staging uses the `.part` discipline borrowed from `pack_manager`;
-  a failed/partial download is discarded, never served.
+  returns `status: preparing` and starts a **single-flight** download — an in-process
+  future-map in `media.py` keyed by `source_id`, **independent of the FIFO job worker**;
+  concurrent requests for the same id join the in-flight download. It reuses `ytdlp.py`
+  with a new video variant: format selector `bv*+ba/b` (best video+audio, **falling back
+  to best single stream when there is no video track — F7**, so audio-only posts still
+  resolve), ffmpeg merge. Staging uses the `.part` discipline borrowed from
+  `pack_manager`; a failed/partial download is discarded, never served. After an engine
+  restart mid-download the `.part` is gone and the next request restarts cleanly.
 - **Cache + eviction.** Completed media lands in `<data_dir>/media-cache/`, evicted LRU
   by last access against `EngineSettings.media_cache_max_bytes` (default 5 GiB). Eviction
   runs on insert when over cap.
@@ -111,23 +134,33 @@ Owns all non-YouTube media. Responsibilities:
 ### Engine — `src/podcast_reader/engine/app.py` (routes)
 - `GET /v1/media/{source_id}/info` → `MediaInfo` JSON. Triggers/awaits the single-flight
   cache fill for remote sources; immediate for local and YouTube.
-- `GET /v1/media/{source_id}` → streams the cached/local bytes with HTTP **Range** support
-  (206 partial content) so the player can seek. 404/`unavailable` when there is no
-  playable media. Both routes are bearer-authed like the rest of `/v1`.
+- `GET /v1/media/{source_id}` → serves the cached/local bytes with HTTP **Range** support
+  (206 partial content) so the player can seek. **Implemented with Starlette
+  `FileResponse` (F5)**, which provides Range/`Content-Range`/`Accept-Ranges` for on-disk
+  files out of the box — a hand-rolled `StreamingResponse` would silently return 200
+  full-body and break seeking on large videos. 404/`unavailable` when there is no playable
+  media. Both routes are bearer-authed like the rest of `/v1`.
 
 ### Main — `app/src/main/media-protocol.ts` (new) + scheme registration
 - Register an internal **`app://`** scheme as privileged (standard + secure + stream +
-  `supportFetchAPI`) via `protocol.registerSchemesAsPrivileged` **before** `app.ready`.
+  `supportFetchAPI`) via `protocol.registerSchemesAsPrivileged` **at module top-level,
+  before `app.whenReady` (F3)** — index.ts today registers only `setAsDefaultProtocolClient`
+  (a different mechanism, OS deep-link), so this is the first privileged-scheme
+  registration; calling it after `ready` silently no-ops. The `protocol.handle('app', …)`
+  binding itself is installed inside `whenReady`.
   A *distinct* internal scheme (not the existing external deep-link scheme
   `podcast-reader://transcribe`, decision 7) keeps the two mechanisms cleanly separated:
   `podcast-reader://` is the OS-registered handler that *launches* the app with a URL
   (`open-url` / `second-instance` argv); `app://` is a `session.protocol.handle`
   interceptor for in-app resource loads. Different layers, no overlap.
-- Handle `app://media/<source_id>`: validate `source_id` against the library-key pattern,
-  reject anything else (no SSRF — the handler only ever targets `127.0.0.1:<port>`), then
-  `fetch` the engine route with the `Authorization` header and the inbound `Range` header,
-  and return the engine `Response` directly so Electron streams the body (no full-file
-  buffering in main).
+- Handle `app://media/<source_id>`: validate `source_id` against the **sha256 hexdigest
+  pattern `^[0-9a-f]{64}$`** (that is exactly what `library.source_identity` produces —
+  `library.py:34` — so traversal is impossible), reject anything else (no SSRF — the
+  handler only ever targets `127.0.0.1:<port>`), then `fetch` the engine route with the
+  `Authorization` header and **the inbound `Range` header passed through**, and **return
+  the engine `Response` verbatim** so Electron streams the body and the 206 status +
+  `Content-Range` headers propagate to the `<video>` element (no full-file buffering in
+  main).
 - This realizes the privileged custom protocol decision 8 deferred; the *artifact* served
   through it (to drop `unsafe-inline`) is a future follow-on, not this change.
 
@@ -145,9 +178,20 @@ Owns all non-YouTube media. Responsibilities:
 - `app/src/renderer/src/views/reader.ts` (extended): fetch `mediaInfo`, mount the player
   beside the existing transcript iframe, wire the bridge, tear both down on view cleanup.
 
+**`preparing` wait-contract (F4).** When `mediaInfo` returns `status: preparing`, the
+renderer shows a "preparing video…" state and **waits for the SSE media-prep `ready` event**
+for that `source_id` (the existing reconnecting SSE consumer already hydrates from REST
+after every reconnect, so a missed event self-heals via an info re-fetch fallback). The
+`<video>`/`<audio>` `src="app://media/ID"` is set **only once `ready`** — the element never
+points at a half-written cache file.
+
 ### Artifact — `src/podcast_reader/html.py`
-- Emit `data-start` (and `data-end`) seconds on passages and chapter sections (currently
-  only chapter sections carry `id` anchors and `ts` spans are display-only).
+- Emit `data-start` (and `data-end`) seconds on each `<p>` passage (html.py:278 — passages
+  already carry `start`/`end` in their dicts) and chapter sections (currently only chapter
+  sections carry `id` anchors and `ts` spans are display-only). **Highlight boundaries are
+  gap-free (F6):** the effective end used for "which passage contains `t`" is the *next*
+  passage's `start` (last passage clamped to duration), not the raw `data-end` — paragraph
+  `end` is the last segment's end and can leave silence gaps that would drop the highlight.
 - Add a sync script that is **inert when standalone** (`if (window.parent === window)
   return`): on a passage click it posts `{ch:'pr-sync', type:'seek', t}` to the parent;
   on receiving `{ch:'pr-sync', type:'time', t}` it highlights the passage whose
@@ -170,8 +214,11 @@ filter is mandatory because the **YouTube IFrame API also posts messages to the 
 | iframe → parent | `{ch:'pr-sync', type:'ready'}` | bridge handshake |
 
 Optional per-mount nonce injected into the srcdoc as defense-in-depth. For YouTube, the
-renderer drives `seekTo` / `onStateChange` through the YT IFrame API behind the same
-`media-player` interface, so the bridge code is identical across kinds.
+renderer drives `seekTo` and reads playback time via the **raw YouTube iframe `postMessage`
+control protocol** (F1) behind the same `media-player` `{seekTo, onTime}` interface, so the
+sync bridge code is identical across kinds. Note the dual filter (`event.source` + `pr-sync`
+channel) is what keeps the artifact-sync messages and the YouTube-iframe control messages
+from being confused, since both arrive as `message` events on the renderer `window`.
 
 ## Security / CSP
 
@@ -185,8 +232,16 @@ renderer drives `seekTo` / `onStateChange` through the YT IFrame API behind the 
   token. The sync script runs inside that sandbox and reaches the parent solely via
   `postMessage`.
 - **CSP deltas, scoped tight:** `media-src app:`; `frame-src
-  https://www.youtube-nocookie.com`; `script-src … https://www.youtube.com` (for
-  `iframe_api`); `img-src … https://i.ytimg.com` (poster thumbnails). No wildcards.
+  https://www.youtube-nocookie.com`. **No `script-src` allowance for youtube.com** — F1's
+  raw-iframe approach loads no third-party JS into the renderer. No wildcards.
+- **CSP is one inherited meta tag (F2).** The app's CSP is a single `http-equiv` meta in
+  `index.html` (line 17) and srcdoc frames *inherit* it (CSP cannot be scoped per-frame —
+  see that file's own comment). So `media-src app:` and `frame-src youtube-nocookie` are
+  also inherited by the opaque-origin transcript artifact. Risk is low — the artifact is
+  our generated, sandboxed content with no IPC bridge and no token — but it widens the
+  artifact's embedding/loading powers, which is one more reason to keep deltas minimal
+  (F1). The eventual tightening is the decision-8 follow-on: serve the artifact through
+  `app://` with its own per-response CSP, then drop `unsafe-inline` from the chrome CSP.
 
 ## Types
 
