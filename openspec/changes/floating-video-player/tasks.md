@@ -53,4 +53,4 @@ TDD throughout: write the failing test first, then the implementation. Run `uv r
 
 ## 10. Docs
 
-- [ ] 10.1 Update `CLAUDE.md` (new modules + the `/v1` media surface row), `app/README.md` (the player + the `app://` scheme), and the engine env/settings table (`media_cache_max_bytes`).
+- [x] 10.1 Update `CLAUDE.md` (new modules + the `/v1` media surface row), `app/README.md` (the player + the `app://` scheme), and the engine env/settings table (`media_cache_max_bytes`).
