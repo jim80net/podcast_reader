@@ -43,7 +43,7 @@ TDD throughout: write the failing test first, then the implementation. Run `uv r
 
 ## 8. CSP
 
-- [ ] 8.1 Add `media-src app:` and `frame-src https://www.youtube-nocookie.com` to the meta CSP in `renderer/index.html`; **no** `script-src` youtube allowance. Note the inherited-CSP caveat in the comment.
+- [x] 8.1 Add `media-src app:` and `frame-src https://www.youtube-nocookie.com` to the meta CSP in `renderer/index.html`; **no** `script-src` youtube allowance. Note the inherited-CSP caveat in the comment.
 
 ## 9. Tests & CI
 
