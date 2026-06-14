@@ -95,7 +95,14 @@ export class EngineManager {
       this.setStatus({ state: 'failed', message: err instanceof Error ? err.message : String(err) })
       return
     }
-    await this.wireUp(handle)
+    // A wireUp throw must clear `spawning` (else all future spawns wedge) and
+    // surface a failed status rather than an unhandled rejection (OCR).
+    try {
+      await this.wireUp(handle)
+    } catch (err) {
+      this.spawning = false
+      this.setStatus({ state: 'failed', message: err instanceof Error ? err.message : String(err) })
+    }
   }
 
   /**
@@ -233,7 +240,12 @@ export class EngineManager {
       this.setStatus({ state: 'stopped' })
       return
     }
-    await this.wireUp(handle)
+    try {
+      await this.wireUp(handle)
+    } catch (err) {
+      this.spawning = false
+      await this.handleSpawnFailure(err)
+    }
   }
 
   /**
@@ -304,7 +316,10 @@ export class EngineManager {
   private async respawn(delayMs: number): Promise<void> {
     await this.deps.sleep(delayMs)
     if (this.quitting) {
+      // Quit won the race during the backoff: we never spawned anything, so
+      // settle on the terminal `stopped` (not a dangling `restarting`).
       this.spawning = false
+      this.setStatus({ state: 'stopped' })
       return
     }
     let handle: EngineHandle
@@ -323,7 +338,14 @@ export class EngineManager {
       this.setStatus({ state: 'stopped' })
       return
     }
-    await this.wireUp(handle)
+    // A wireUp throw (e.g. createClient/createStream) must not wedge `spawning`
+    // true forever (OCR): route it back through the policy like a spawn failure.
+    try {
+      await this.wireUp(handle)
+    } catch (err) {
+      this.spawning = false
+      await this.handleSpawnFailure(err)
+    }
   }
 
   /** A spawn that could not even start counts as a failure → back into the policy. */

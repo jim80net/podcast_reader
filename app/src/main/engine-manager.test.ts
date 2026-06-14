@@ -428,6 +428,8 @@ describe('EngineManager — quit during respawn (C1/C2 checkpoints)', () => {
 
     const respawnEnsures = world.calls.filter((c) => c === 'ensure').length
     expect(respawnEnsures).toBe(1) // only the initial start
+    // The after-backoff quit bail settles on the terminal stopped state (cubic P2).
+    expect(world.manager.status.state).toBe('stopped')
   })
 
   it('quit after ensure() resolves SIGKILLs the just-spawned child', async () => {
@@ -582,7 +584,7 @@ describe('EngineManager — crash/quit during wireUp key-push (C1/C2 wireUp wind
     expect(world.calls).not.toContain('stream.run#1')
   })
 
-  it('a second crash <60s after a healthy respawn counts as attempt 2 (markReady wiring)', async () => {
+  it('a second crash <60s after a healthy respawn counts as attempt 2 (respawn re-stamps markReady)', async () => {
     let exitFirst!: () => void
     const firstExit = new Promise<void>((resolve) => {
       exitFirst = resolve
@@ -598,18 +600,24 @@ describe('EngineManager — crash/quit during wireUp key-push (C1/C2 wireUp wind
         spawnedWorldHandle(firstExit),
         spawnedWorldHandle(secondExit),
         spawnedWorldHandle(new Promise<void>(() => {}))
-      ]
+      ],
+      deferSleep: true // hold respawn #1's backoff so we can advance the clock inside it
     })
-    world.setNow(1000)
-    await world.manager.start() // markReady stamped at now=1000
+    world.setNow(0)
+    await world.manager.start() // initial markReady at t=0
     expect(world.manager.status.state).toBe('ready')
 
-    exitFirst()
+    exitFirst() // crash 1 at t=0 → attempt 1 → parked in backoff
     await flush()
-    // First crash → attempt 1, respawned to ready (markReady at now=1000 still).
+    // Advance the clock PAST the 60s reset window BEFORE respawn #1 reaches ready,
+    // so respawn's wireUp re-stamps markReady at t=100_000. If it did NOT re-stamp,
+    // lastReadyAt would still be 0 and the next crash would reset to attempt 1.
+    world.setNow(100_000)
+    world.resolveSleep()
+    await flush()
     expect(world.manager.status.state).toBe('ready')
 
-    world.setNow(2000) // 1s later — well under the 60s healthy reset
+    world.setNow(101_000) // 1s after respawn's markReady, but 101s after the initial one
     exitSecond()
     await flush()
 
@@ -617,8 +625,31 @@ describe('EngineManager — crash/quit during wireUp key-push (C1/C2 wireUp wind
       .filter((s) => s.channel === 'engine:status')
       .map((s) => s.payload as { state: string; attempt?: number })
       .filter((s) => s.state === 'restarting')
-    // Two distinct restarting bursts; the second reports attempt 2 (not reset).
+    // attempt 2 is only reachable if respawn #1 re-stamped markReady at t=100_000
+    // (else the 101s gap since the initial markReady would have reset to attempt 1).
     expect(restarting.at(-1)?.attempt).toBe(2)
     expect(world.calls).toContain('sleep:2000') // attempt-2 backoff
+  })
+
+  it('a wireUp failure clears spawning and does not wedge future restarts (OCR)', async () => {
+    // createStream throwing simulates a wiring failure after a successful spawn.
+    const world = makeWorld({ handle: spawnedWorldHandle(new Promise<void>(() => {})) })
+    const deps = (world.manager as unknown as { deps: ManagerDeps }).deps
+    let failNextStream = true
+    const realCreateStream = deps.createStream
+    deps.createStream = (client, handlers) => {
+      if (failNextStream) {
+        failNextStream = false
+        throw new Error('stream wiring blew up')
+      }
+      return realCreateStream(client, handlers)
+    }
+    await world.manager.start()
+    // The wireUp threw → not ready, but spawning was cleared (not wedged) and a
+    // status was surfaced rather than an unhandled rejection.
+    expect(world.manager.status.state).not.toBe('ready')
+    // A subsequent restart is NOT blocked by a stuck spawning flag.
+    await world.manager.restart()
+    expect(world.manager.status.state).toBe('ready')
   })
 })
