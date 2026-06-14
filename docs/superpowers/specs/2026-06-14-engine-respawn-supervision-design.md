@@ -1,10 +1,20 @@
 # Engine Respawn Supervision — Design
 
 **Date:** 2026-06-14
-**Status:** Approved brainstorm, pre-systems-review
+**Status:** Approved design v2, post-systems-review (pre-openspec)
 **Author:** Jim Park, with Claude
 **Review history:** v1 — approved in brainstorm (scope: spawned-child-exit detection
 only; backoff + give-up-after-3 + healthy-uptime reset; manual retry; quit-safe).
+v2 — systems-review findings: crash path nulls handle/client/stream immediately so
+`media` reports not-ready during restart and ownership is unambiguous (C1/C2/M5); the
+`quitting` flag is set first in `quit()` and re-checked by the respawn loop after every
+await, SIGKILL-ing a just-spawned child if quitting won the race (C1/C2); renderer
+`renderEngineStatus` gains a `restarting` arm AND an `assertNever` default (H1); give-up
+boundary and `lastReadyAt` init pinned (M1); respawn status owned solely by
+`observeChildExit`/policy, `onConnectionChange` stays unsubscribed (M2); `restart()` is
+re-entrancy-guarded and bypasses `quit()` (L1); the e2e death seam is a real
+`process.exit` (L2). The linchpin holds: `ensure()`/`tryAdopt` probes the discovery PID
+and spawns fresh when it is dead (`engine.ts:142`).
 
 ## Problem
 
@@ -67,35 +77,67 @@ spawned engine exits  ──observeChildExit──▶  is this still our handle,
 ### `RespawnPolicy` (new, pure) — `app/src/main/respawn-policy.ts`
 A small state machine, no I/O, injected clock:
 - `markReady(now)` — stamps the last time the engine reached `ready` (no timer started).
+  `lastReadyAt` initializes to `0`, so a crash before the engine ever reached `ready`
+  satisfies the lazy reset and simply resets an already-0 count (harmless).
 - `recordFailure(now)` → `{ action: 'retry'; delayMs } | { action: 'give-up' }`. First, if
   `now - lastReadyAt ≥ HEALTHY_RESET_MS` (60s), the consecutive-failure count is reset to 0
   (a crash after a long healthy run starts a fresh burst — no background timer needed, the
-  check is lazy at failure time). Then it increments the count and returns `give-up` once it
-  reaches `MAX_ATTEMPTS` (3), else the backoff delay for this attempt (1s, 2s, 4s; capped;
-  small fixed jitter via an injected jitter source so it stays deterministic).
+  check is lazy at failure time). Then it increments the count. **Boundary (pinned):**
+  count 1 → `retry` 1s, count 2 → `retry` 2s, count 3 → `retry` 4s, count 4 → `give-up`
+  — i.e. three respawn attempts (using all three backoff delays), then give up on the
+  fourth consecutive crash. Jitter is added via an injected source so it stays deterministic.
 - `reset()` — clears the count (used by manual `restart()`).
-- Pure and deterministic: unit-tested in isolation (schedule, give-up threshold, lazy reset).
+- Pure and deterministic: unit-tested in isolation, with an explicit boundary table
+  (failures 1–4 → retry@1s / retry@2s / retry@4s / give-up; reset after a ≥60s-healthy run).
 
 ### `EngineManager` (extended)
 - Refactor the post-spawn wiring in `start()` (observeChildExit, createClient, push keys,
   SSE stream, ready status) into a private `wireUp(handle)` reused by both `start()` and
-  respawn — so a respawn reconstructs exactly the same live state.
-- `observeChildExit` calls a new `private handleUnexpectedExit()` instead of going straight
-  to `failed`: consult `RespawnPolicy`; on `retry` set `restarting`, sleep the delay, then
-  `ensure()` + `wireUp()`; on `give-up` set `failed` (message: engine keeps crashing).
-- A `quitting` flag (set at the top of `quit()`) plus the existing `this.handle !== handle`
-  guard makes respawn quit-safe under any interleaving.
-- Mark a healthy engine (reset the policy) when a (re)spawn reaches `ready` and survives
-  `HEALTHY_RESET_MS` — implemented by stamping the ready time and checking it on the next
-  failure (no timer needed), which keeps the manager free of background timers.
-- New `restart()` entry (IPC-exposed) for manual recovery from `failed`: resets the policy
-  and runs the spawn path again.
+  respawn — so a respawn reconstructs exactly the same live state. **`wireUp` aborts any
+  existing `this.stream` before creating the new one:** the per-install port and token are
+  stable across respawns, so the crashed engine's old SSE stream (which reconnects with
+  backoff) would otherwise silently re-attach to the *new* engine, producing a duplicate
+  event stream. Aborting first guarantees exactly one stream.
+- **Crash path nulls ownership immediately (M5/C2).** `observeChildExit` calls a new
+  `private handleUnexpectedExit(handle)` which — after the `this.handle !== handle` and
+  `!quitting` guards — sets `this.handle = null`, `this.engineClient = null`, and aborts
+  `this.stream`. This makes the `media` getter (and any "is the engine live" check) report
+  not-ready during the restart window (preserving its "answers 503 outside the engine's
+  live window" invariant), and removes the dead handle that would otherwise confuse `quit()`.
+- `handleUnexpectedExit` then consults `RespawnPolicy.recordFailure(now())`: on `give-up`
+  → status `failed` (message: engine keeps crashing); on `retry` → status `restarting`,
+  `await sleep(delayMs)`, then run the respawn (below).
+- **`markReady` is stamped inside `wireUp`** at the same verified-ready point `start()`
+  broadcasts `ready` (after the key-push loop), so every (re)spawn that reaches ready resets
+  the healthy clock — not just the first start.
+- **Quit-safety with explicit checkpoints (C1/C2).** `quit()` sets `this.quitting = true`
+  **first**, before reading `this.handle`. The respawn routine re-checks `this.quitting`
+  **after the backoff sleep** and **again after `ensure()` resolves**; if quitting won the
+  race after `ensure()`, it SIGKILLs the just-spawned child (via the existing force-kill
+  path) instead of wiring it up, and sets `stopped`. So no engine is ever spawned after a
+  quit, and no corpse is wired up. `observeChildExit` also keeps its `this.handle !== handle`
+  guard (a graceful-shutdown exit during `quit()` is ignored).
+- A failed `ensure()` during respawn counts as a failure → back into `RespawnPolicy` (a
+  respawn that can't even spawn still backs off and eventually gives up).
+- **`restart()` (manual recovery from `failed`, IPC-exposed):** re-entrancy-guarded (a
+  no-op if a start/respawn is already in flight); it does **not** go through `quit()` (there
+  is no live engine to shut down — the crash path already nulled the handle). It clears
+  `quitting`, calls `RespawnPolicy.reset()`, aborts any lingering stream, then runs
+  `ensure()` + `wireUp()`.
+- **Respawn status is owned solely by `observeChildExit`/`RespawnPolicy` (M2).** The manager
+  does not subscribe to the SSE stream's `onConnectionChange`, so a crashing engine's stream
+  drop never races the `restarting`/`ready` transitions. Keep it unsubscribed.
 
 ### IPC + renderer
 - `EngineStatus` (`app/src/shared/ipc.ts`) gains `{ state: 'restarting'; attempt; maxAttempts }`.
 - A new `engine:restart` invoke channel → `manager.restart()`, exposed on `window.api`.
 - The renderer's engine-status surface shows a brief "Reconnecting to engine… (attempt
   N/3)" banner for `restarting`, and a "Restart engine" button on `failed`.
+- **Exhaustiveness (H1).** `renderEngineStatus` (`app/src/renderer/src/main.ts`) currently
+  has no `default`/exhaustiveness check, so a new union member silently renders nothing.
+  Add the `case 'restarting'` arm **and** an `assertNever(status)` default so future
+  `EngineStatus` additions fail the build. Other consumers test `=== 'ready'` and need no
+  change (a `restarting` value is correctly not-ready).
 
 ## Data flow / job survival
 
@@ -112,22 +154,32 @@ reconnects (existing behavior). The renderer's job store updates from that hydra
 
 ## Testing
 
-- **`respawn-policy.test.ts`** (pure): backoff schedule, give-up after 3, counter reset
-  after healthy uptime, with an injected clock + jitter.
-- **`engine-manager` unit tests**: unexpected exit → `restarting` then `ready` (respawn
-  re-pushes keys + re-establishes the stream via mocked deps); exit-during-quit → no
-  respawn (quitting guard); give-up after N → `failed`; `restart()` resets and respawns.
-- **Playwright e2e**: the mock engine exits (its `/v1/shutdown`-style death seam); assert
-  the app shows `restarting` then returns to `ready` and the library still loads.
+- **`respawn-policy.test.ts`** (pure): the pinned boundary table (failures 1–4 →
+  retry@1s / retry@2s / retry@4s / give-up), the lazy healthy reset (≥60s since
+  `markReady` resets the count; <60s does not), and `reset()`, all with an injected
+  clock + jitter source.
+- **`engine-manager` unit tests** (mocked deps): unexpected exit → `restarting` then
+  `ready`, with the old stream aborted, keys re-pushed, and a new stream created;
+  `markReady` resets the policy after a healthy run; **exit during quit → no respawn**
+  and **quit during backoff / after ensure() → the just-spawned child is SIGKILL'd, no
+  engine survives, status `stopped`** (the C1/C2 checkpoints); give-up after the 4th crash
+  → `failed`; `media` getter returns null while `restarting`; `restart()` resets and
+  respawns and is a no-op while a respawn is in flight.
+- **Playwright e2e**: the mock engine **actually exits its process** (a real
+  `process.exit` death seam, not just an SSE close — the respawn trigger is `childExited`,
+  a process-exit event); assert the app shows `restarting` then returns to `ready` and the
+  library still loads.
 
 ## Risks & mitigations
 
 | Risk | Mitigation |
 |------|-----------|
 | Crash-loop hammering CPU | exponential backoff + give-up-after-3 |
-| Respawn fights the quit sequence | `quitting` flag + `this.handle !== handle` guard |
-| A long-healthy engine's first crash is treated as a burst | reset the count after ≥60s healthy |
-| Respawn leaves stale keys/stream | reuse the single `wireUp` path start() uses |
+| Respawn fights the quit sequence | `quitting` set first in `quit()` + re-checked after each respawn await (SIGKILL a child spawned after quit) + `this.handle !== handle` guard |
+| A long-healthy engine's first crash is treated as a burst | reset the count after ≥60s healthy (`markReady` in `wireUp`) |
+| Respawn leaves stale keys/stream | reuse the single `wireUp` path start() uses; `wireUp` aborts the old stream first (else it re-attaches to the new engine on the stable port+token) |
+| `media` getter points at a dead engine during restart | crash path nulls `handle`/`engineClient` immediately → getter returns null → `app://media` gives a clean 503, not a hang |
+| New `restarting` union member silently unhandled in the UI | `renderEngineStatus` gains the arm **and** an `assertNever` default |
 | False positives | none — detection is an unambiguous process-exit event only |
 
 ## Follow-ons (tracked, not built here)
