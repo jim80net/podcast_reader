@@ -235,6 +235,66 @@ class TestSpeakerRendering:
         assert '<span class="speaker">Speaker 2</span>' in result
 
 
+class TestSyncMetadata:
+    """media-playback / job-pipeline: the artifact carries playback-sync
+    metadata (data-start on passages) and an inert-when-standalone sync script."""
+
+    # sentences_per_para=1 splits at the last sentence boundary after the
+    # threshold is met, so two one-sentence segments collapse into one passage;
+    # three segments yield two passages (starts 0.0 and 4.0).
+    _SEGS = [
+        {"start": 0.0, "end": 2.0, "text": "First passage here."},
+        {"start": 2.0, "end": 4.0, "text": "Still the first passage."},
+        {"start": 4.0, "end": 6.0, "text": "Now the second passage."},
+    ]
+
+    def test_passages_carry_data_start(self) -> None:
+        from podcast_reader.html import build_html
+
+        html = build_html(list(self._SEGS), title="T", sentences_per_para=1, source="test")
+        # Two passages with distinct, gap-free starts.
+        assert 'data-start="0.000"' in html
+        assert 'data-start="4.000"' in html
+        # data-end is emitted too.
+        assert "data-end=" in html
+
+    def test_sync_script_present_and_inert_standalone(self) -> None:
+        from podcast_reader.html import build_html
+
+        html = build_html(list(self._SEGS), title="T", sentences_per_para=1, source="test")
+        # No-op when opened standalone (no parent player).
+        assert "window.parent === window" in html
+        # Channel-tagged protocol both sides agree on.
+        assert "pr-sync" in html
+
+    def test_sync_script_present_without_chapters(self) -> None:
+        from podcast_reader.html import build_html
+
+        html = build_html(list(self._SEGS), title="T", sentences_per_para=1, source="test")
+        # Sync must work even when there are no chapters (unlike the sidebar
+        # scroll script, which is chapter-gated).
+        assert "pr-sync" in html
+
+    def test_chapter_sections_carry_data_start(self) -> None:
+        from podcast_reader.html import build_html
+
+        chapters = [
+            {
+                "title": "Only Chapter",
+                "start": 0.0,
+                "end": 6.0,
+                "abstract": "All of it.",
+                "type": "content",
+                "key_points": [],
+            }
+        ]
+        html = build_html(
+            list(self._SEGS), title="T", chapters=chapters, sentences_per_para=1, source="test"
+        )
+        # The <section> carries a machine-readable start for chapter-level seeking.
+        assert 'data-start="0.000"' in html
+
+
 class TestBuildHtmlIntegration:
     def test_speakerless_output_byte_identical_no_chapters(self) -> None:
         """Spec scenario: speakerless transcripts unchanged — golden file

@@ -26,8 +26,8 @@ TDD throughout: write the failing test first, then the implementation. Run `uv r
 
 ## 5. Transcript artifact (`html.py`)
 
-- [ ] 5.1 Emit `data-start`/`data-end` on `<p>` passages and chapter sections (passages already carry start/end). Test attribute presence + values.
-- [ ] 5.2 Add the inline sync script: passage-click → post `seek`; `time` → highlight + scroll the gap-free `[start, next-start)` passage; no-op when `window.parent === window`. Test standalone no-op and the CLI/engine byte-identical output.
+- [x] 5.1 Emit `data-start`/`data-end` on `<p>` passages and chapter sections (passages already carry start/end). Test attribute presence + values.
+- [x] 5.2 Add the inline sync script: passage-click → post `seek`; `time` → highlight + scroll the gap-free `[start, next-start)` passage; no-op when `window.parent === window`. Test standalone no-op and the CLI/engine byte-identical output.
 
 ## 6. App main process
 
