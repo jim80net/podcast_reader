@@ -102,4 +102,8 @@ export function registerIpcHandlers(
 
   ipcMain.handle(CHANNELS.updateGetStatus, () => updates.status())
   ipcMain.handle(CHANNELS.updateInstall, () => updates.installNow())
+
+  // Manual recovery from the terminal `failed` state — respawns a fresh engine
+  // without going through the quit sequence (engine-respawn-supervision design).
+  ipcMain.handle(CHANNELS.engineRestart, () => manager.restart())
 }

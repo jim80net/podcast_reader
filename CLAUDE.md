@@ -103,7 +103,7 @@ For speaker diarization, set `HF_TOKEN` and accept model terms at:
 |--------|---------|
 | `app/src/main/engine.ts` + `engine-cmd.ts` | Engine supervision: adopt-or-kill via the discovery handshake, three-way spawn chain, sentinel readiness |
 | `app/src/main/engine-client.ts` + `sse.ts` | Typed bearer-authed `/v1` client + reconnecting SSE consumer with hydration |
-| `app/src/main/engine-manager.ts` + `quit.ts` | Composition root: push-keys-before-ready ordering, status broadcast, quit sequence (abort SSE → `POST /v1/shutdown` → bounded wait → force-kill) |
+| `app/src/main/engine-manager.ts` + `quit.ts` + `respawn-policy.ts` | Composition root: push-keys-before-ready ordering (shared `wireUp`), status broadcast, quit sequence (abort SSE → `POST /v1/shutdown` → bounded wait → force-kill), and bounded auto-respawn of a crashed **spawned** engine (1s/2s/4s backoff, give-up-after-3, 60s-healthy reset, quit-safe checkpoints, manual `restart()` + the `restarting` status; adopted engines keep prior behavior) |
 | `app/src/main/vault.ts` | safeStorage-encrypted key vault (session-memory fallback when encryption unavailable) |
 | `app/src/main/ipc.ts` + `protocol.ts` | Typed IPC handlers; `podcast-reader://` URL validation (confirm-before-run) |
 | `app/src/main/media-protocol.ts` | `app://media/<source_id>` privileged-scheme handler: sha256-id validation (no SSRF/traversal), adds the bearer token (renderer never holds it), forwards `Range`, returns the engine `Response` verbatim (streamed) |

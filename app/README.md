@@ -149,6 +149,35 @@ port polling. An engine reporting a health version older than
 `MIN_ENGINE_VERSION` (`src/main/version.ts`) is stopped and respawned; a
 newer one is adopted (per P3/Q1).
 
+## Engine respawn supervision
+
+If a **spawned** engine exits unexpectedly mid-session, the app auto-respawns
+it instead of stranding the user on a `failed` status. Detection keys off the
+child-process exit event only, so it has no false-positive surface; **adopted**
+engines (another instance already holds the per-install port) emit no exit
+event and keep the prior behavior.
+
+The bounded policy (`src/main/respawn-policy.ts`, pure + unit-tested) backs off
+between attempts — **1s / 2s / 4s** — and gives up to a terminal `failed`
+status after **three** consecutive failed attempts; the failure budget resets
+once the engine has run healthy for **60s**. Each respawn reconstructs the same
+live state as a cold start: it re-pushes the vaulted keys (still before
+broadcasting `ready`), aborts the dead engine's SSE stream before opening a
+fresh one (the port and token are stable across respawns, so the old stream
+would otherwise re-attach to the new engine), and re-arms exit detection.
+In-flight jobs survive via the engine's persistent journal plus the app's
+reconnect-then-rehydrate.
+
+While respawning, the app reports a `restarting` engine status (the renderer
+shows "Reconnecting to engine… (attempt N/3)"); during that window the engine
+is reported not-ready to the `app://media` path, so it never proxies to a dead
+engine. From the terminal `failed` state a **Restart engine** button calls
+`window.api.engineRestart()`, which resets the budget and spawns a fresh engine
+without going through the quit sequence (concurrent invocations are a no-op).
+The respawn loop is quit-safe: `quit()` sets a quitting flag first, and the
+loop re-checks it after the backoff and again after the spawn — a child spawned
+after a quit began is SIGKILL'd rather than wired up.
+
 ## Floating media player
 
 The Reader hosts a draggable, resizable floating player synced to the

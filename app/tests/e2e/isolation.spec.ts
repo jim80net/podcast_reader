@@ -89,6 +89,7 @@ test('engine bearer token is unreachable from the renderer', async ({ harness })
       'getPathForFile',
       'getUpdateStatus',
       'installUpdate',
+      'engineRestart',
       'onEngineStatus',
       'onPipelineEvent',
       'onJobsHydrated',

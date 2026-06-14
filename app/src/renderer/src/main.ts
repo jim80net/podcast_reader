@@ -1,6 +1,7 @@
 import './style.css'
 
 import { el } from './dom'
+import { engineStatusView } from './engine-status-view'
 import { createJobsHydrator } from './jobs-hydrator'
 import { setupNeeded } from './packs-store'
 import { hrefFor, navigate, onRouteChange, parseHash } from './router'
@@ -65,23 +66,25 @@ root.append(
 
 function renderEngineStatus(status: EngineStatus): void {
   enginePill.dataset['state'] = status.state
-  engineBanner.hidden = true
-  switch (status.state) {
-    case 'starting':
-      enginePill.textContent = 'engine starting…'
-      break
-    case 'ready':
-      enginePill.textContent = `engine v${status.version}${status.adopted ? ' (adopted)' : ''}`
-      break
-    case 'failed':
-      enginePill.textContent = 'engine failed'
-      engineBanner.textContent = `Engine failed to start: ${status.message}`
-      engineBanner.hidden = false
-      break
-    case 'stopped':
-      enginePill.textContent = 'engine stopped'
-      break
+  // engineStatusView owns the exhaustive mapping (incl. the assertNever guard),
+  // so a new EngineStatus member fails the build rather than rendering nothing.
+  const view = engineStatusView(status)
+  enginePill.textContent = view.pill
+  engineBanner.replaceChildren()
+  if (view.banner === null) {
+    engineBanner.hidden = true
+    return
   }
+  engineBanner.append(el('span', { text: view.banner }))
+  if (view.showRestart) {
+    const restart = el('button', { text: 'Restart engine', attrs: { type: 'button' } })
+    restart.addEventListener('click', () => {
+      restart.disabled = true
+      void window.api.engineRestart()
+    })
+    engineBanner.append(restart)
+  }
+  engineBanner.hidden = false
 }
 
 // ---- auto-update surfacing (design decision 9) -----------------------------------

@@ -66,6 +66,10 @@ function makeManager(opts: { ready?: boolean; results?: Record<string, unknown> 
     putKey: (...args: unknown[]) => {
       calls.push(['manager.putKey', ...args])
       return Promise.resolve()
+    },
+    restart: (...args: unknown[]) => {
+      calls.push(['manager.restart', ...args])
+      return Promise.resolve()
     }
   }
   return { manager: manager as unknown as EngineManager, calls }
@@ -184,5 +188,14 @@ describe('registerIpcHandlers', () => {
       reason: 'test'
     })
     await expect(reg.invoke(CHANNELS.updateInstall)).resolves.toBeUndefined()
+  })
+
+  it('routes engine restart to the manager even without a ready engine', async () => {
+    const reg = makeRegistrar()
+    // Manual restart is the recovery from `failed` — the engine is NOT ready.
+    const { manager, calls } = makeManager({ ready: false })
+    registerIpcHandlers(reg.ipcMain, manager, fakeUpdates, makeConfig())
+    await expect(reg.invoke(CHANNELS.engineRestart)).resolves.toBeUndefined()
+    expect(calls).toContainEqual(['manager.restart'])
   })
 })
