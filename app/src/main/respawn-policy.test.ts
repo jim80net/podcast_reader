@@ -18,9 +18,9 @@ function noJitterPolicy(): RespawnPolicy {
 describe('RespawnPolicy.recordFailure — pinned boundary table', () => {
   it('retries 1s/2s/4s for the first three crashes, then gives up on the fourth', () => {
     const policy = noJitterPolicy()
-    expect(policy.recordFailure(0)).toEqual({ action: 'retry', delayMs: 1000 })
-    expect(policy.recordFailure(0)).toEqual({ action: 'retry', delayMs: 2000 })
-    expect(policy.recordFailure(0)).toEqual({ action: 'retry', delayMs: 4000 })
+    expect(policy.recordFailure(0)).toEqual({ action: 'retry', delayMs: 1000, attempt: 1 })
+    expect(policy.recordFailure(0)).toEqual({ action: 'retry', delayMs: 2000, attempt: 2 })
+    expect(policy.recordFailure(0)).toEqual({ action: 'retry', delayMs: 4000, attempt: 3 })
     expect(policy.recordFailure(0)).toEqual({ action: 'give-up' })
   })
 
@@ -32,8 +32,8 @@ describe('RespawnPolicy.recordFailure — pinned boundary table', () => {
 describe('RespawnPolicy jitter', () => {
   it('adds the injected jitter to the base backoff', () => {
     const policy = new RespawnPolicy({ jitter: () => 250 })
-    expect(policy.recordFailure(0)).toEqual({ action: 'retry', delayMs: 1250 })
-    expect(policy.recordFailure(0)).toEqual({ action: 'retry', delayMs: 2250 })
+    expect(policy.recordFailure(0)).toEqual({ action: 'retry', delayMs: 1250, attempt: 1 })
+    expect(policy.recordFailure(0)).toEqual({ action: 'retry', delayMs: 2250, attempt: 2 })
   })
 })
 
@@ -47,7 +47,8 @@ describe('RespawnPolicy healthy reset (lazy, at failure time)', () => {
     // A crash 60s after ready resets the burst → back to count 1 → 1s.
     expect(policy.recordFailure(10_000 + HEALTHY_RESET_MS)).toEqual({
       action: 'retry',
-      delayMs: 1000
+      delayMs: 1000,
+      attempt: 1
     })
   })
 
@@ -60,7 +61,8 @@ describe('RespawnPolicy healthy reset (lazy, at failure time)', () => {
     // A crash 59.999s after ready stays in the burst → count 3 → 4s.
     expect(policy.recordFailure(10_000 + HEALTHY_RESET_MS - 1)).toEqual({
       action: 'retry',
-      delayMs: 4000
+      delayMs: 4000,
+      attempt: 3
     })
   })
 
@@ -68,7 +70,7 @@ describe('RespawnPolicy healthy reset (lazy, at failure time)', () => {
     const policy = noJitterPolicy()
     // The first crash, before markReady was ever called: now (=70s) - 0 ≥ 60s,
     // so the (already-0) count is reset, then incremented to 1 → 1s.
-    expect(policy.recordFailure(70_000)).toEqual({ action: 'retry', delayMs: 1000 })
+    expect(policy.recordFailure(70_000)).toEqual({ action: 'retry', delayMs: 1000, attempt: 1 })
   })
 })
 
@@ -80,6 +82,6 @@ describe('RespawnPolicy.reset', () => {
     policy.recordFailure(0)
     policy.reset()
     // Fresh budget after reset → back to the first retry.
-    expect(policy.recordFailure(0)).toEqual({ action: 'retry', delayMs: 1000 })
+    expect(policy.recordFailure(0)).toEqual({ action: 'retry', delayMs: 1000, attempt: 1 })
   })
 })

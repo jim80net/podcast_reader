@@ -20,7 +20,7 @@ export const MAX_RESPAWN_ATTEMPTS = BACKOFF_MS.length
 export const HEALTHY_RESET_MS = 60_000
 
 export type RespawnDecision =
-  | { action: 'retry'; delayMs: number }
+  | { action: 'retry'; delayMs: number; attempt: number }
   | { action: 'give-up' }
 
 export interface RespawnPolicyOptions {
@@ -58,6 +58,10 @@ export class RespawnPolicy {
     this.count += 1
     const backoff = BACKOFF_MS[this.count - 1]
     if (backoff === undefined) return { action: 'give-up' }
-    return { action: 'retry', delayMs: backoff + this.jitter() }
+    // `attempt` is the policy's authoritative consecutive-failure count — the
+    // manager displays it directly so the "attempt N/max" banner never diverges
+    // from the real give-up budget (e.g. a quick re-crash after a respawn that
+    // did not clear the count still reads attempt 2, not a reset 1).
+    return { action: 'retry', delayMs: backoff + this.jitter(), attempt: this.count }
   }
 }

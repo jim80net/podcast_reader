@@ -56,8 +56,6 @@ export class EngineManager {
   private quitting = false
   /** Re-entrancy guard: a (re)spawn or manual restart is in flight. */
   private spawning = false
-  /** Which respawn attempt the current burst is on (1..MAX); 0 between bursts. */
-  private attemptNumber = 0
 
   constructor(private readonly deps: ManagerDeps) {}
 
@@ -129,10 +127,17 @@ export class EngineManager {
       }
     }
 
+    // Re-check after the key-push awaits (C1/C2): putKey is async, so a crash
+    // could have nulled our handle (→ a respawn now owns the state) or a quit
+    // could have begun while we were pushing keys. Either way, abandon this
+    // wireUp — do NOT credit the engine as healthy, re-broadcast `ready`, or
+    // start a stream against a dead engine. Touch nothing else: the respawn
+    // path (crash) or quit() already owns `spawning`/`status` from here.
+    if (this.quitting || this.handle !== handle) return
+
     // Verified-ready point: stamp the healthy clock so every (re)spawn that
     // reaches ready resets the failure budget (not just the first start).
     this.deps.policy.markReady(this.deps.now())
-    this.attemptNumber = 0
     this.spawning = false
 
     this.setStatus({
@@ -273,17 +278,17 @@ export class EngineManager {
    */
   private async scheduleRespawn(decision: ReturnType<RespawnPolicy['recordFailure']>): Promise<void> {
     if (decision.action === 'give-up') {
-      this.attemptNumber = 0
       this.setStatus({
         state: 'failed',
         message: 'engine keeps crashing — automatic restart gave up'
       })
       return
     }
-    this.attemptNumber += 1
+    // `attempt` comes straight from the policy (the give-up budget), so the
+    // banner stays consistent with how close we actually are to giving up.
     this.setStatus({
       state: 'restarting',
-      attempt: this.attemptNumber,
+      attempt: decision.attempt,
       maxAttempts: MAX_RESPAWN_ATTEMPTS
     })
     this.spawning = true

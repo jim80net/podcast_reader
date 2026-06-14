@@ -26,6 +26,8 @@ interface World {
   streamCount(): number
   /** Resolve the in-flight backoff sleep (only when `deferSleep` is set). */
   resolveSleep(): void
+  /** Resolve the held key-push (only when `deferPutKey` is set). */
+  resolvePutKey(): void
   /** Advance the injected clock the policy reads. */
   setNow(ms: number): void
 }
@@ -45,6 +47,8 @@ function makeWorld(
     policy?: RespawnPolicy
     /** Hold backoff sleeps open until `resolveSleep()` (quit-race tests). */
     deferSleep?: boolean
+    /** Hold the key-push await open until `resolvePutKey()` (wireUp-race tests). */
+    deferPutKey?: boolean
   } = {}
 ): World {
   const calls: string[] = []
@@ -52,6 +56,7 @@ function makeWorld(
   let streams = 0
   let now = 0
   let pendingSleep: (() => void) | null = null
+  let pendingPutKey: (() => void) | null = null
   let ensureCalls = 0
   const world = {
     manager: null as unknown as EngineManager,
@@ -64,6 +69,11 @@ function makeWorld(
       pendingSleep = null
       r?.()
     },
+    resolvePutKey: () => {
+      const r = pendingPutKey
+      pendingPutKey = null
+      r?.()
+    },
     setNow: (ms: number) => {
       now = ms
     }
@@ -73,6 +83,7 @@ function makeWorld(
     putKey: async (provider: string, key: string) => {
       calls.push(`putKey:${provider}=${key}`)
       if (opts.putKeyFails?.includes(provider)) throw new Error(`engine rejected ${provider}`)
+      if (opts.deferPutKey) await new Promise<void>((resolve) => (pendingPutKey = resolve))
     },
     shutdown: async () => {
       calls.push('shutdown')
@@ -516,5 +527,98 @@ describe('EngineManager.quit', () => {
     const world = makeWorld()
     await world.manager.quit({ timeoutMs: 5 })
     expect(world.calls).toEqual([])
+  })
+})
+
+describe('EngineManager — crash/quit during wireUp key-push (C1/C2 wireUp window)', () => {
+  it('a crash during the key-push does not settle to ready or create a stream', async () => {
+    let exitChild!: () => void
+    const childExited = new Promise<void>((resolve) => {
+      exitChild = resolve
+    })
+    const world = makeWorld({
+      vaultKeys: { anthropic: 'sk-1' },
+      handle: spawnedWorldHandle(childExited),
+      handles: [spawnedWorldHandle(childExited), spawnedWorldHandle(new Promise<void>(() => {}))],
+      deferPutKey: true,
+      deferSleep: true // park the respawn in its backoff so we inspect the window
+    })
+    // start() hangs awaiting the held key-push (wireUp mid-loop).
+    void world.manager.start()
+    await flush()
+    // The child crashes while we are still pushing keys.
+    exitChild()
+    await flush()
+    // Now release the held key-push: the stale wireUp continuation must bail.
+    world.resolvePutKey()
+    await flush()
+
+    // The crash path owns the state (restarting, parked in backoff). The stale
+    // wireUp neither broadcast ready nor created a stream against the dead engine.
+    expect(world.manager.status.state).toBe('restarting')
+    expect(world.streamCount()).toBe(0)
+    expect(world.calls).not.toContain('stream.run#1')
+  })
+
+  it('a quit during the key-push ends stopped, with no stream and media null', async () => {
+    // The child never exits on its own here — quit() is what lands mid-push.
+    const world = makeWorld({
+      vaultKeys: { anthropic: 'sk-1' },
+      handle: spawnedWorldHandle(new Promise<void>(() => {})),
+      deferPutKey: true
+    })
+    void world.manager.start()
+    await flush()
+    // Quit lands while wireUp is mid key-push.
+    const quitting = world.manager.quit({ timeoutMs: 5 })
+    await quitting
+    // Releasing the key-push: the stale wireUp must bail on the quitting flag.
+    world.resolvePutKey()
+    await flush()
+
+    expect(world.manager.status.state).toBe('stopped')
+    expect(world.manager.media).toBeNull()
+    expect(world.streamCount()).toBe(0)
+    expect(world.calls).not.toContain('stream.run#1')
+  })
+
+  it('a second crash <60s after a healthy respawn counts as attempt 2 (markReady wiring)', async () => {
+    let exitFirst!: () => void
+    const firstExit = new Promise<void>((resolve) => {
+      exitFirst = resolve
+    })
+    let exitSecond!: () => void
+    const secondExit = new Promise<void>((resolve) => {
+      exitSecond = resolve
+    })
+    const world = makeWorld({
+      handle: spawnedWorldHandle(firstExit),
+      // respawn #1 → a healthy engine that later crashes; respawn #2 → never exits.
+      handles: [
+        spawnedWorldHandle(firstExit),
+        spawnedWorldHandle(secondExit),
+        spawnedWorldHandle(new Promise<void>(() => {}))
+      ]
+    })
+    world.setNow(1000)
+    await world.manager.start() // markReady stamped at now=1000
+    expect(world.manager.status.state).toBe('ready')
+
+    exitFirst()
+    await flush()
+    // First crash → attempt 1, respawned to ready (markReady at now=1000 still).
+    expect(world.manager.status.state).toBe('ready')
+
+    world.setNow(2000) // 1s later — well under the 60s healthy reset
+    exitSecond()
+    await flush()
+
+    const restarting = world.sends
+      .filter((s) => s.channel === 'engine:status')
+      .map((s) => s.payload as { state: string; attempt?: number })
+      .filter((s) => s.state === 'restarting')
+    // Two distinct restarting bursts; the second reports attempt 2 (not reset).
+    expect(restarting.at(-1)?.attempt).toBe(2)
+    expect(world.calls).toContain('sleep:2000') // attempt-2 backoff
   })
 })
