@@ -135,6 +135,7 @@ class SettingsBody(BaseModel):
     chapter_provider: str | None = None
     custom_provider_url: str | None = None
     diarize: bool | None = None
+    media_cache_max_bytes: int | None = None
 
     def to_settings(self, current: EngineSettings) -> EngineSettings:
         return EngineSettings(
@@ -155,6 +156,11 @@ class SettingsBody(BaseModel):
                 else current["custom_provider_url"]
             ),
             diarize=self.diarize if self.diarize is not None else current["diarize"],
+            media_cache_max_bytes=(
+                self.media_cache_max_bytes
+                if self.media_cache_max_bytes is not None
+                else current["media_cache_max_bytes"]
+            ),
         )
 
 

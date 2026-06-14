@@ -13,6 +13,8 @@ StepName = Literal["resolve", "captions", "download", "transcribe", "diarize", "
 # pack_state / pack_progress: pack installer events on the shared SSE stream
 # (per S6); they carry data.pack_id and MUST NOT carry job_id (per Q5 —
 # job_id presence is the renderer's job/pack discriminator).
+# media_state / media_progress: lazy media-prep events (media-playback); they
+# carry data.source_id and MUST NOT carry job_id, mirroring the pack split.
 EventKind = Literal[
     "step_started",
     "step_progress",
@@ -22,6 +24,8 @@ EventKind = Literal[
     "job_failed",
     "pack_state",
     "pack_progress",
+    "media_state",
+    "media_progress",
 ]
 JobState = Literal["queued", "awaiting-confirmation", "running", "done", "failed", "interrupted"]
 
@@ -119,6 +123,24 @@ class EngineSettings(TypedDict):
     chapter_provider: str  # a podcast_reader.providers.PROVIDERS key
     custom_provider_url: str  # base URL for the "custom" provider ("" otherwise)
     diarize: bool  # default false; warn-and-skip when the pack is absent
+    media_cache_max_bytes: int  # LRU cap for the lazy media cache (media-playback)
+
+
+#: A library entry's playback classification (media-playback). ``youtube`` plays
+#: via a cross-origin embed (no bytes through the engine); ``video``/``audio``
+#: stream from the engine; ``unavailable`` leaves the Reader transcript-only.
+MediaKind = Literal["youtube", "video", "audio", "unavailable"]
+#: Preparation status: ``ready`` to serve, ``preparing`` while a lazy download
+#: runs, ``unavailable`` when no playable media can be produced.
+MediaStatus = Literal["ready", "preparing", "unavailable"]
+
+
+class MediaInfo(TypedDict):
+    kind: MediaKind
+    youtube_id: str  # "" unless kind == "youtube"
+    duration_s: float  # 0.0 when unknown
+    status: MediaStatus
+    progress: float  # 0.0..1.0 while preparing; 1.0 when ready
 
 
 def new_job_record(*, job_id: str, source: str, title: str | None) -> JobRecord:

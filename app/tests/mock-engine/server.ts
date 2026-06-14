@@ -73,6 +73,7 @@ interface EngineSettings {
   chapter_provider: string
   custom_provider_url: string
   diarize: boolean
+  media_cache_max_bytes: number
 }
 
 interface PackProgress {
@@ -132,7 +133,8 @@ let settings: EngineSettings = {
   chapter_model: '',
   chapter_provider: 'anthropic',
   custom_provider_url: '',
-  diarize: false
+  diarize: false,
+  media_cache_max_bytes: 5 * 1024 ** 3
 }
 let keyTestResult: { ok: boolean; detail: string | null } = { ok: true, detail: null }
 const pushedKeys = new Set<string>()

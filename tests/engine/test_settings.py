@@ -135,6 +135,8 @@ class TestUserSettings:
         assert settings["library_dir"] == str(tmp_path / "library")
         # diarization-worker spec: disabled by default.
         assert settings["diarize"] is False
+        # media-playback spec: lazy media cache cap, 5 GiB default.
+        assert settings["media_cache_max_bytes"] == 5 * 1024**3
 
     def test_defaults_not_persisted_until_saved(self, tmp_path: Path) -> None:
         load_settings(tmp_path)
@@ -185,6 +187,27 @@ class TestUserSettings:
         settings = load_settings(tmp_path)
 
         assert settings["diarize"] is False
+        assert settings["whisper_model"] == "medium"  # file values still win
+
+    def test_pre_media_cache_file_upgrades_to_default(self, tmp_path: Path) -> None:
+        """media-playback spec: settings files predating `media_cache_max_bytes`
+        upgrade cleanly via the merge-over-defaults discipline."""
+        pre_media = {
+            "whisper_model": "medium",
+            "whisper_lang": "en",
+            "whisper_device": "cpu",
+            "sentences": 3,
+            "library_dir": str(tmp_path / "library"),
+            "chapter_model": "",
+            "chapter_provider": "anthropic",
+            "custom_provider_url": "",
+            "diarize": False,
+        }
+        (tmp_path / "settings.json").write_text(json.dumps(pre_media))
+
+        settings = load_settings(tmp_path)
+
+        assert settings["media_cache_max_bytes"] == 5 * 1024**3
         assert settings["whisper_model"] == "medium"  # file values still win
 
     def test_post_upgrade_file_keeps_explicit_haiku_model(self, tmp_path: Path) -> None:

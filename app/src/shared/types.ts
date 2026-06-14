@@ -19,7 +19,8 @@ export type StepName =
 // -- src/podcast_reader/types.py:16 (EventKind) --
 // pack_state / pack_progress ride the same SSE stream as job events; they
 // carry data.pack_id and NEVER a job_id (per Q5 — job_id presence is the
-// renderer's job/pack discriminator).
+// renderer's job/pack discriminator). media_state / media_progress carry
+// data.source_id and likewise NEVER a job_id (media-playback).
 export type EventKind =
   | 'step_started'
   | 'step_progress'
@@ -29,6 +30,8 @@ export type EventKind =
   | 'job_failed'
   | 'pack_state'
   | 'pack_progress'
+  | 'media_state'
+  | 'media_progress'
 
 // -- src/podcast_reader/types.py:26 (JobState) --
 export type JobState =
@@ -105,6 +108,7 @@ export interface EngineSettings {
   chapter_provider: string // a podcast_reader.providers.PROVIDERS key
   custom_provider_url: string // base URL for the "custom" provider ("" otherwise)
   diarize: boolean // default false; engine warns-and-skips when the pack is absent
+  media_cache_max_bytes: number // LRU cap for the lazy media cache (media-playback)
 }
 
 // -- src/podcast_reader/engine/app.py:100 (SettingsBody) --
@@ -119,6 +123,20 @@ export interface SettingsUpdate {
   chapter_provider?: string
   custom_provider_url?: string
   diarize?: boolean
+  media_cache_max_bytes?: number
+}
+
+// -- src/podcast_reader/types.py (MediaInfo) --
+// media-playback: a library entry's playback classification + prep status.
+export type MediaKind = 'youtube' | 'video' | 'audio' | 'unavailable'
+export type MediaStatus = 'ready' | 'preparing' | 'unavailable'
+
+export interface MediaInfo {
+  kind: MediaKind
+  youtube_id: string // "" unless kind === 'youtube'
+  duration_s: number // 0 when unknown
+  status: MediaStatus
+  progress: number // 0..1 while preparing; 1 when ready
 }
 
 // -- src/podcast_reader/engine/app.py:50 (JobSubmission) --

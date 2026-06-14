@@ -12,7 +12,8 @@ const settings: EngineSettings = {
   chapter_model: '',
   chapter_provider: 'anthropic',
   custom_provider_url: '',
-  diarize: false
+  diarize: false,
+  media_cache_max_bytes: 5 * 1024 ** 3
 }
 
 const providers: ProviderInfo[] = [
