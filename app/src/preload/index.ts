@@ -26,6 +26,7 @@ const api: PodcastReaderApi = {
   dismissJob: (jobId) => ipcRenderer.invoke(CHANNELS.jobsDismiss, jobId),
   listLibrary: () => ipcRenderer.invoke(CHANNELS.libraryList),
   transcriptHtml: (sourceId) => ipcRenderer.invoke(CHANNELS.libraryTranscript, sourceId),
+  mediaInfo: (sourceId) => ipcRenderer.invoke(CHANNELS.mediaInfo, sourceId),
   getSettings: () => ipcRenderer.invoke(CHANNELS.settingsGet),
   putSettings: (settings: SettingsUpdate) => ipcRenderer.invoke(CHANNELS.settingsPut, settings),
   putKey: (provider, apiKey) => ipcRenderer.invoke(CHANNELS.keysPut, provider, apiKey),

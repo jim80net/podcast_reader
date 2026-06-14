@@ -129,6 +129,14 @@ describe('registerIpcHandlers', () => {
     expect(calls).toContainEqual(['uninstallPack', 'model-tiny'])
   })
 
+  it('routes media info to the engine client', async () => {
+    const reg = makeRegistrar()
+    const { manager, calls } = makeManager()
+    registerIpcHandlers(reg.ipcMain, manager, fakeUpdates, makeConfig())
+    await reg.invoke(CHANNELS.mediaInfo, 'abc123')
+    expect(calls).toContainEqual(['mediaInfo', 'abc123'])
+  })
+
   it('composes the pairing display from the engine mint and the manager port', async () => {
     const reg = makeRegistrar()
     const { manager, calls } = makeManager({

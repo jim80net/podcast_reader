@@ -1625,3 +1625,72 @@ class TestCookieRoutes:
         for path in engine.data_dir.rglob("*"):
             if path.is_file() and path != jar_file:
                 assert "sweep-secret-value" not in path.read_text(errors="replace"), path
+
+
+class TestMediaRoutes:
+    """media-playback: GET /v1/media/{id}/info and GET /v1/media/{id} (task 4)."""
+
+    def _client(
+        self, tmp_path: Path, entries: dict[str, LibraryEntry]
+    ) -> tuple[TestClient, dict[str, str]]:
+        from podcast_reader.engine.media import MediaManager
+
+        store = JobStore(tmp_path, lambda record, on_event: _RESULT)
+        manager = MediaManager(
+            data_dir=tmp_path,
+            bus=store.bus,
+            cache_max_bytes=5 * 1024**3,
+            get_entry=lambda sid: entries.get(sid),
+        )
+        app = create_app(tmp_path, store, media_manager=manager)
+        token = load_engine_state(tmp_path)["token"]
+        return TestClient(app), {"Authorization": f"Bearer {token}"}
+
+    @staticmethod
+    def _entry(source_id: str, source: str) -> LibraryEntry:
+        return LibraryEntry(
+            source_id=source_id, source=source, title="t", html_path="/x.html", created_at=0.0
+        )
+
+    def test_info_requires_bearer(self, tmp_path: Path) -> None:
+        sid = hashlib.sha256(b"yt").hexdigest()
+        client, _ = self._client(tmp_path, {})
+        assert client.get(f"/v1/media/{sid}/info").status_code == 401
+
+    def test_info_youtube(self, tmp_path: Path) -> None:
+        sid = hashlib.sha256(b"yt").hexdigest()
+        url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+        client, headers = self._client(tmp_path, {sid: self._entry(sid, url)})
+        body = client.get(f"/v1/media/{sid}/info", headers=headers).json()
+        assert body["kind"] == "youtube"
+        assert body["youtube_id"] == "dQw4w9WgXcQ"
+        assert body["status"] == "ready"
+
+    def test_info_unknown_id_unavailable(self, tmp_path: Path) -> None:
+        sid = hashlib.sha256(b"missing").hexdigest()
+        client, headers = self._client(tmp_path, {})
+        body = client.get(f"/v1/media/{sid}/info", headers=headers).json()
+        assert body["kind"] == "unavailable"
+        assert body["status"] == "unavailable"
+
+    def test_invalid_source_id_rejected(self, tmp_path: Path) -> None:
+        client, headers = self._client(tmp_path, {})
+        assert client.get("/v1/media/not-a-hex-id/info", headers=headers).status_code == 404
+
+    def test_bytes_served_for_local_file_with_range(self, tmp_path: Path) -> None:
+        media = tmp_path / "clip.mp4"
+        media.write_bytes(b"0123456789" * 100)
+        sid = hashlib.sha256(b"local").hexdigest()
+        client, headers = self._client(tmp_path, {sid: self._entry(sid, str(media))})
+        full = client.get(f"/v1/media/{sid}", headers=headers)
+        assert full.status_code == 200
+        assert full.content == media.read_bytes()
+        ranged = client.get(f"/v1/media/{sid}", headers={**headers, "Range": "bytes=0-9"})
+        assert ranged.status_code == 206
+        assert ranged.content == b"0123456789"
+
+    def test_bytes_404_when_not_ready(self, tmp_path: Path) -> None:
+        sid = hashlib.sha256(b"yt2").hexdigest()
+        url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+        client, headers = self._client(tmp_path, {sid: self._entry(sid, url)})
+        assert client.get(f"/v1/media/{sid}", headers=headers).status_code == 404

@@ -216,7 +216,8 @@ def build_chapter_body(
             ts = fmt_time(p["start"])
             prefix = _speaker_prefix(p, last_speaker)
             last_speaker = p.get("speaker")
-            parts.append(f'<p>{prefix}<span class="ts">{ts}</span> {p["text"]}</p>')
+            attrs = f' data-start="{p["start"]:.3f}" data-end="{p["end"]:.3f}"'
+            parts.append(f'<p{attrs}>{prefix}<span class="ts">{ts}</span> {p["text"]}</p>')
         return "\n".join(parts)
 
     sorted_chapters = sorted(chapters, key=lambda c: c["start"])
@@ -232,7 +233,8 @@ def build_chapter_body(
             section_class += " no-gutter"
         label = TYPE_LABELS.get(ch["type"])
         badge_html = f' <span class="badge badge-{ch["type"]}">{label}</span>' if label else ""
-        parts.append(f'<section id="{anchor}" class="{section_class}">')
+        sec_start = f"{ch['start']:.3f}"
+        parts.append(f'<section id="{anchor}" class="{section_class}" data-start="{sec_start}">')
         parts.append('<div class="chapter-main">')
         parts.append(
             f'<h2><span class="ts">{fmt_time(ch["start"])}</span> {ch["title"]}{badge_html}</h2>'
@@ -275,7 +277,8 @@ def build_chapter_body(
 
             prefix = _speaker_prefix(p, last_speaker)
             last_speaker = p.get("speaker")
-            parts.append(f'<p>{prefix}<span class="ts">{ts}</span> {text}</p>')
+            attrs = f' data-start="{p["start"]:.3f}" data-end="{p["end"]:.3f}"'
+            parts.append(f'<p{attrs}>{prefix}<span class="ts">{ts}</span> {text}</p>')
 
         parts.append("</div>")  # close chapter-main
 
@@ -581,6 +584,13 @@ footer {
   border-radius: 50%;
 }
 
+/* ---- MEDIA SYNC (active passage highlight; inert without a host player) ---- */
+.sync-active {
+  background: rgba(123, 155, 229, 0.18);
+  border-radius: 4px;
+  transition: background 0.2s ease;
+}
+
 /* ---- RESPONSIVE ---- */
 @media (max-width: 1200px) {
   .chapter-section { grid-template-columns: minmax(0, 56rem); }
@@ -633,6 +643,62 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 """
 
+# Bidirectional transcript<->media sync (media-playback). Inert when the
+# artifact is opened standalone (no parent player): the very first guard
+# returns, so a directly-opened file behaves exactly as before. Inside the
+# app's Reader the artifact runs in an opaque-origin sandboxed iframe, so it
+# can only reach the host player over postMessage. Active-passage selection is
+# gap-free: the current passage is the last `[data-start]` element whose start
+# is <= the playback position, so silence between passages never drops the
+# highlight (per design F6). The channel tag `pr-sync` lets the host
+# distinguish these from the YouTube iframe's own control messages.
+_SYNC_SCRIPT = """\
+(function() {
+  if (window.parent === window) return;
+  var CH = 'pr-sync';
+  // Only <p> passages are sync targets — NOT the chapter <section> containers
+  // (which also carry data-start as anchors). Including a section would let the
+  // highlight/seek land on a whole-chapter container instead of a passage.
+  var nodes = Array.prototype.slice.call(document.querySelectorAll('p[data-start]'));
+  var items = nodes.map(function(el) {
+    return { el: el, start: parseFloat(el.getAttribute('data-start')) };
+  }).filter(function(it) { return !isNaN(it.start); });
+  if (!items.length) return;
+  items.sort(function(a, b) { return a.start - b.start; });
+
+  items.forEach(function(it) {
+    it.el.style.cursor = 'pointer';
+    it.el.addEventListener('click', function(e) {
+      e.stopPropagation();
+      window.parent.postMessage({ ch: CH, type: 'seek', t: it.start }, '*');
+    });
+  });
+
+  var active = null;
+  function highlight(t) {
+    var found = null;
+    for (var i = 0; i < items.length; i++) {
+      if (items[i].start <= t) { found = items[i]; } else { break; }
+    }
+    if (found === active) return;
+    if (active) active.el.classList.remove('sync-active');
+    active = found;
+    if (active) {
+      active.el.classList.add('sync-active');
+      active.el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }
+  }
+
+  window.addEventListener('message', function(e) {
+    var d = e.data;
+    if (!d || d.ch !== CH) return;
+    if (d.type === 'time' && typeof d.t === 'number') highlight(d.t);
+  });
+
+  window.parent.postMessage({ ch: CH, type: 'ready' }, '*');
+})();
+"""
+
 
 def build_html(
     segments: list[dict[str, Any]],
@@ -652,7 +718,11 @@ def build_html(
     stylesheet = _STYLESHEET + _SPEAKER_STYLESHEET if has_speakers else _STYLESHEET
     sidebar_html = build_sidebar_nav(chapters) if chapters else ""
     body = build_chapter_body(segments, chapters or [], sentences_per_para)
-    script_tag = f"<script>\n{_SCROLL_SCRIPT}</script>" if chapters else ""
+    # The sidebar scroll script is chapter-gated; the media-sync script is
+    # always present (it keys off [data-start] passages, which exist in both
+    # paths) and is inert when the file is opened standalone.
+    scroll_tag = f"<script>\n{_SCROLL_SCRIPT}</script>\n" if chapters else ""
+    script_tag = f"{scroll_tag}<script>\n{_SYNC_SCRIPT}</script>"
 
     # Use string concatenation instead of f-string to avoid CSS brace escaping
     parts = [

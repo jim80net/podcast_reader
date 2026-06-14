@@ -426,6 +426,111 @@ a.card:hover {
   background: #ffffff;
 }
 
+/* ---- floating media player (media-playback) --------------------------- */
+
+/* The slot is an empty anchor in the Reader flow; the panel itself floats. */
+.media-slot {
+  display: contents;
+}
+
+.media-preparing {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+/* position:fixed matches the geometry clamp (window.innerWidth/innerHeight). */
+.media-player {
+  position: fixed;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  min-width: 160px;
+  min-height: 90px;
+  background: var(--bg, #1c1c1e);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+}
+
+.media-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.35rem 0.5rem;
+  cursor: move;
+  user-select: none;
+  background: rgba(127, 127, 127, 0.15);
+  border-bottom: 1px solid var(--border);
+}
+
+.media-title {
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.media-minimize {
+  line-height: 1;
+  padding: 0 0.45rem;
+  cursor: pointer;
+}
+
+.media-body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  background: #000;
+}
+
+.media-video,
+.media-youtube {
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
+.media-audio {
+  width: 100%;
+  align-self: center;
+}
+
+.media-youtube-fallback {
+  margin: auto;
+  color: #fff;
+}
+
+/* Minimized: collapse to the header strip ("pill"), freeing the transcript. */
+.media-player.minimized {
+  height: auto !important;
+  min-height: 0;
+}
+
+.media-player.minimized .media-body,
+.media-player.minimized .media-resize {
+  display: none;
+}
+
+.media-resize {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 16px;
+  height: 16px;
+  cursor: nwse-resize;
+  background: linear-gradient(
+    135deg,
+    transparent 50%,
+    var(--border) 50%,
+    var(--border) 60%,
+    transparent 60%,
+    transparent 70%,
+    var(--border) 70%,
+    var(--border) 80%,
+    transparent 80%
+  );
+}
+
 /* ---- packs (setup wizard + Settings Packs section) --------------------- */
 
 .setup-intro,

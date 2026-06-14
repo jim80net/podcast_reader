@@ -140,6 +140,7 @@ def default_settings(base: Path) -> EngineSettings:
         chapter_provider="anthropic",
         custom_provider_url="",
         diarize=False,
+        media_cache_max_bytes=5 * 1024**3,  # 5 GiB LRU cap for the lazy media cache
     )
 
 

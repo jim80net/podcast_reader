@@ -288,6 +288,13 @@ footer {
   border-radius: 50%;
 }
 
+/* ---- MEDIA SYNC (active passage highlight; inert without a host player) ---- */
+.sync-active {
+  background: rgba(123, 155, 229, 0.18);
+  border-radius: 4px;
+  transition: background 0.2s ease;
+}
+
 /* ---- RESPONSIVE ---- */
 @media (max-width: 1200px) {
   .chapter-section { grid-template-columns: minmax(0, 56rem); }
@@ -314,25 +321,25 @@ footer {
   <div class="meta">Auto-transcribed with test</div>
 </header>
 <main>
-<section id="ch-introduction" class="chapter-section type-intro no-gutter">
+<section id="ch-introduction" class="chapter-section type-intro no-gutter" data-start="0.000">
 <div class="chapter-main">
 <h2><span class="ts">00:00:00</span> Introduction <span class="badge badge-intro">Intro</span></h2>
 <div class="chapter-abstract">
 <h3 class="chapter-abstract-heading">Summary</h3>
 <p>The host introduces the episode.</p>
 </div>
-<p><span class="ts">00:00:00</span> Welcome to the show. I'm your host. Today we're talking about Python packaging.</p>
+<p data-start="0.000" data-end="10.000"><span class="ts">00:00:00</span> Welcome to the show. I'm your host. Today we're talking about Python packaging.</p>
 </div>
 </section>
-<section id="ch-python-packaging" class="chapter-section type-content">
+<section id="ch-python-packaging" class="chapter-section type-content" data-start="10.000">
 <div class="chapter-main">
 <h2><span class="ts">00:00:10</span> Python Packaging</h2>
 <div class="chapter-abstract">
 <h3 class="chapter-abstract-heading">Summary</h3>
 <p>Discussion of modern Python packaging with pyproject.toml.</p>
 </div>
-<p><span class="ts">00:00:10</span> First, let's discuss pyproject.toml files. They replace setup.py and setup.cfg.</p>
-<p><span class="ts">00:00:20</span> The build backend is usually hatchling.</p>
+<p data-start="10.000" data-end="20.000"><span class="ts">00:00:10</span> First, let's discuss pyproject.toml files. They replace setup.py and setup.cfg.</p>
+<p data-start="20.000" data-end="25.000"><span class="ts">00:00:20</span> The build backend is usually hatchling.</p>
 </div>
 <div class="chapter-gutter">
 <div class="key-points">
@@ -344,14 +351,14 @@ footer {
 </div>
 </div>
 </section>
-<section id="ch-closing" class="chapter-section type-outro no-gutter">
+<section id="ch-closing" class="chapter-section type-outro no-gutter" data-start="25.000">
 <div class="chapter-main">
 <h2><span class="ts">00:00:25</span> Closing <span class="badge badge-outro">Outro</span></h2>
 <div class="chapter-abstract">
 <h3 class="chapter-abstract-heading">Summary</h3>
 <p>The host signs off.</p>
 </div>
-<p><span class="ts">00:00:25</span> Thanks for listening to the show today.</p>
+<p data-start="25.000" data-end="30.000"><span class="ts">00:00:25</span> Thanks for listening to the show today.</p>
 </div>
 </section>
 </main>
@@ -380,6 +387,52 @@ document.addEventListener('DOMContentLoaded', function() {
 
   sections.forEach(function(s) { observer.observe(s); });
 });
+</script>
+<script>
+(function() {
+  if (window.parent === window) return;
+  var CH = 'pr-sync';
+  // Only <p> passages are sync targets — NOT the chapter <section> containers
+  // (which also carry data-start as anchors). Including a section would let the
+  // highlight/seek land on a whole-chapter container instead of a passage.
+  var nodes = Array.prototype.slice.call(document.querySelectorAll('p[data-start]'));
+  var items = nodes.map(function(el) {
+    return { el: el, start: parseFloat(el.getAttribute('data-start')) };
+  }).filter(function(it) { return !isNaN(it.start); });
+  if (!items.length) return;
+  items.sort(function(a, b) { return a.start - b.start; });
+
+  items.forEach(function(it) {
+    it.el.style.cursor = 'pointer';
+    it.el.addEventListener('click', function(e) {
+      e.stopPropagation();
+      window.parent.postMessage({ ch: CH, type: 'seek', t: it.start }, '*');
+    });
+  });
+
+  var active = null;
+  function highlight(t) {
+    var found = null;
+    for (var i = 0; i < items.length; i++) {
+      if (items[i].start <= t) { found = items[i]; } else { break; }
+    }
+    if (found === active) return;
+    if (active) active.el.classList.remove('sync-active');
+    active = found;
+    if (active) {
+      active.el.classList.add('sync-active');
+      active.el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }
+  }
+
+  window.addEventListener('message', function(e) {
+    var d = e.data;
+    if (!d || d.ch !== CH) return;
+    if (d.type === 'time' && typeof d.t === 'number') highlight(d.t);
+  });
+
+  window.parent.postMessage({ ch: CH, type: 'ready' }, '*');
+})();
 </script>
 </body>
 </html>

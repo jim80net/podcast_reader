@@ -78,14 +78,15 @@ For speaker diarization, set `HF_TOKEN` and accept model terms at:
 | `src/podcast_reader/engine/settings.py` | Data dir, engine state (port/token), user settings persistence |
 | `src/podcast_reader/engine/library.py` | Managed transcript library: source-identity keys, atomic index, staged writes |
 | `src/podcast_reader/engine/jobs.py` | Persistent job journal, FIFO single-worker execution; publishes into the shared EventBus |
-| `src/podcast_reader/engine/events.py` | `EventBus` — public event-publish seam (SSE fan-out) shared by the job store and pack manager |
+| `src/podcast_reader/engine/events.py` | `EventBus` — public event-publish seam (SSE fan-out) shared by the job store, pack manager, and media manager |
 | `src/podcast_reader/engine/packs.py` | Built-in pack registry (pinned CUDA wheels, HF model snapshots, unpublished diarization), manifest types, compat/integrity pure functions |
 | `src/podcast_reader/engine/pack_manager.py` | Pack downloads (Range resume, sha256-named staging, fail-closed verify) + `PackManager` installer thread (atomic install, manifest-first uninstall) |
 | `src/podcast_reader/engine/hardware.py` | `nvidia-smi` GPU probe (cached) + hardware-derived pack recommendations |
+| `src/podcast_reader/engine/media.py` | Floating-player media core (`MediaManager`): source→kind classification (YouTube via `extract_video_id`, local, remote), `ffmpeg`-only probe (no ffprobe), lazy single-flight download (reuses `ytdlp.download_video`) + bounded LRU cache (`.part` staging, partials never served, atomic commit), `media_state`/`media_progress` events (carry `source_id`, never `job_id`) |
 | `src/podcast_reader/engine/managed_tools.py` | Bundle tool-seed reconciliation into `<data_dir>/tools` (newer wins), `PODCAST_READER_TOOLS_DIR` export, scheduled yt-dlp self-update |
 | `src/podcast_reader/engine/pairing.py` | In-memory pairing-code state: mint (6-char unambiguous alphabet, 300 s TTL, replaces prior), claim (constant-time, single-use, 5-failed-attempt budget, uniform rejection); never persisted or logged |
 | `src/podcast_reader/engine/cookies.py` | Netscape cookie-jar validation (domain suffix-match, 1 MB cap) + storage at `<data_dir>/cookies/<domain>.txt` (atomic 0600, dir 0700); metadata-only listing, delete |
-| `src/podcast_reader/engine/app.py` | FastAPI app: bearer auth (single exemption: `POST /v1/pair/claim`), jobs (incl. confirm/dismiss of awaiting-confirmation), events, library, settings, keys (push + test), providers, packs (list/install/uninstall), pair (mint/claim), cookies (put/list/delete), health, shutdown routes |
+| `src/podcast_reader/engine/app.py` | FastAPI app: bearer auth (single exemption: `POST /v1/pair/claim`), jobs (incl. confirm/dismiss of awaiting-confirmation), events, library, media (`/v1/media/{id}/info` + Range byte-serving), settings, keys (push + test), providers, packs (list/install/uninstall), pair (mint/claim), cookies (put/list/delete), health, shutdown routes |
 | `src/podcast_reader/engine/process.py` | Pre-bound socket handshake, discovery file, child reaping, `serve` |
 | `spike/` | Packaging spike evidence (PyInstaller onedir prototype, SPIKE_REPORT.md) |
 | `packaging/engine.spec` + `build_engine.py` | Production frozen engine onedir: engine + whisper-worker entry points, MERGE/COLLECT, `copy_metadata("podcast-reader")`, ctranslate2/faster_whisper hooks (`hooks/`), tool seeds + flat `tools-manifest.json` into `_internal/tools/` |
@@ -93,7 +94,7 @@ For speaker diarization, set `HF_TOKEN` and accept model terms at:
 | `packaging/diarization.spec` + `build_diarization_pack.py` | Diarization worker pack build (CPU-torch venv per `DIARIZATION_SMOKE.md`, offline community-1 cache, tar.gz + manifest); release job in `pack-diarization.yml` is HF_TOKEN-gated |
 | `src/podcast_reader/providers.py` | Chapter LLM provider registry (base URL, default model, key env, max_tokens) + custom-URL validation |
 | `src/podcast_reader/chapters.py` | Generate chapter markers via any registry provider's OpenAI-compatible `/chat/completions`; `verify_key` minimal round-trip backs `POST /v1/keys/test` |
-| `src/podcast_reader/html.py` | Convert whisper JSON to styled HTML with TOC, key points, pull quotes; optional speaker attribution (byte-identical without speakers) |
+| `src/podcast_reader/html.py` | Convert whisper JSON to styled HTML with TOC, key points, pull quotes; optional speaker attribution; per-passage `data-start`/`data-end` + an inert-when-standalone `pr-sync` script for media↔transcript playback sync |
 | `pyproject.toml` | Dependencies, entry point, tool configuration |
 
 ### Desktop app (`app/` — independent npm package, see `app/README.md`)
@@ -105,20 +106,23 @@ For speaker diarization, set `HF_TOKEN` and accept model terms at:
 | `app/src/main/engine-manager.ts` + `quit.ts` | Composition root: push-keys-before-ready ordering, status broadcast, quit sequence (abort SSE → `POST /v1/shutdown` → bounded wait → force-kill) |
 | `app/src/main/vault.ts` | safeStorage-encrypted key vault (session-memory fallback when encryption unavailable) |
 | `app/src/main/ipc.ts` + `protocol.ts` | Typed IPC handlers; `podcast-reader://` URL validation (confirm-before-run) |
+| `app/src/main/media-protocol.ts` | `app://media/<source_id>` privileged-scheme handler: sha256-id validation (no SSRF/traversal), adds the bearer token (renderer never holds it), forwards `Range`, returns the engine `Response` verbatim (streamed) |
 | `app/src/main/updater.ts` | electron-updater orchestration: full-download GitHub Releases, consent, engine-quit-before-install; gated off in dev/unsigned |
 | `app/src/main/app-config.ts` | App-side config under userData (`first_run_complete` — the setup wizard's gate) |
 | `app/src/preload/index.ts` | contextBridge `window.api` — the credential-free renderer's only door |
-| `app/src/renderer/` | Vanilla-TS views (Library/Reader/New/Settings + first-run Setup wizard) + hash router + jobs/packs stores |
+| `app/src/renderer/` | Vanilla-TS views (Library/Reader/New/Settings + first-run Setup wizard) + hash router + jobs/packs stores; Reader hosts the floating `media-player.ts` (video/audio/`youtube-nocookie` raw-postMessage embed) wired to the transcript iframe by `sync-bridge.ts` (`pr-sync`, dual source+channel filter) |
 | `app/src/shared/types.ts` | TS mirrors of the Python boundary types (key-set parity enforced by the e2e integration smoke) |
 | `app/tests/mock-engine/` + `app/tests/e2e/` | Scriptable mock engine (separate process, real handshake) + Playwright suites |
 | `app/electron-builder.config.cjs` + `app/scripts/dist.mjs` | Packaging: NSIS/dmg+zip, protocol registration, `--engine-dir` extraResources input |
 
 Engine `/v1` surface the app consumes: `health`, `shutdown`, `jobs` (+
 `{id}`, `{id}/confirm`, `DELETE {id}`), `events` (SSE; job events carry
-`data.job_id`, pack events carry `data.pack_id` and never `job_id`),
-`library`, `transcripts/{id}.html`, `settings`, `keys`, `keys/test`,
-`providers`, `packs` (+ `POST {id}/install`, `DELETE {id}`), `POST pair`
-(mint a pairing code), `cookies` (metadata list + `DELETE {domain}`).
+`data.job_id`, pack events carry `data.pack_id`, media events carry
+`data.source_id`, and only job events carry `job_id`), `library`,
+`transcripts/{id}.html`, `media/{id}/info` + `media/{id}` (Range bytes via
+the `app://media` proxy), `settings`, `keys`, `keys/test`, `providers`,
+`packs` (+ `POST {id}/install`, `DELETE {id}`), `POST pair` (mint a pairing
+code), `cookies` (metadata list + `DELETE {domain}`).
 
 ### Chrome extension (`extension/` — independent npm package, see `extension/README.md`)
 
@@ -146,7 +150,9 @@ unauthenticated route — code → token), `health`, `POST jobs`
 3. **Local file** → `transcribe.py` runs whisper → whisper JSON
 4. `diarize.py` → segments enriched with `speaker` labels (engine jobs with the `diarize` setting on and the diarization pack installed; skipped with a warning otherwise — CLI diarization stays whisper-ctranslate2 `--hf_token`)
 5. `chapters.py` → `<stem>_chapters.json` (if an API key for the selected chapter provider is available — CLI: the provider's env var; engine: pushed key with env fallback)
-6. `html.py` → `<stem>.html` (styled transcript with TOC, key points, pull quotes, speaker attribution when present)
+6. `html.py` → `<stem>.html` (styled transcript with TOC, key points, pull quotes, speaker attribution when present; per-passage `data-start`/`data-end` + an inert-standalone `pr-sync` script so the desktop Reader's floating media player can sync)
+
+Floating media player (engine jobs / desktop app only): the app's Reader fetches `GET /v1/media/{source_id}/info` for the player kind, then plays YouTube via a `youtube-nocookie` embed (no download) or local/remote media streamed through the `app://media` → `GET /v1/media/{source_id}` Range proxy (remote sources lazily downloaded into a bounded LRU cache, `EngineSettings.media_cache_max_bytes`, default 5 GiB). Click a passage to seek; the current passage highlights and follows playback.
 
 ## Development
 

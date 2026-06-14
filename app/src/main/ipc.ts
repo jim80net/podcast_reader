@@ -60,6 +60,9 @@ export function registerIpcHandlers(
   ipcMain.handle(CHANNELS.libraryTranscript, (_e, sourceId: string) =>
     client().transcriptHtml(sourceId)
   )
+  // Media metadata only — bytes load via the app:// scheme (media-protocol.ts),
+  // never over IPC, so the token never reaches the renderer (app-shell spec).
+  ipcMain.handle(CHANNELS.mediaInfo, (_e, sourceId: string) => client().mediaInfo(sourceId))
 
   ipcMain.handle(CHANNELS.settingsGet, () => client().getSettings())
   ipcMain.handle(CHANNELS.settingsPut, (_e, settings: SettingsUpdate) =>

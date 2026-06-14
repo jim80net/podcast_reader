@@ -102,6 +102,21 @@ describe('EngineClient', () => {
     expect(JSON.parse(calls[0]?.body ?? '')).toEqual({ provider: 'openai' })
   })
 
+  it('fetches media info from /v1/media/{id}/info, URL-encoding the id', async () => {
+    const info = {
+      kind: 'video',
+      youtube_id: '',
+      duration_s: 123.4,
+      status: 'ready',
+      progress: 1
+    }
+    const { calls, client: c } = client(() => json(info))
+    await expect(c.mediaInfo('a/b c')).resolves.toEqual(info)
+    expect(calls[0]?.method).toBe('GET')
+    expect(calls[0]?.url).toBe('http://127.0.0.1:51234/v1/media/a%2Fb%20c/info')
+    expect(calls[0]?.headers['authorization']).toBe('Bearer tok-123')
+  })
+
   it('lists packs from /v1/packs', async () => {
     const payload = { hardware: { platform: 'win32', nvidia_gpu: true, gpu_names: [] }, packs: [] }
     const { calls, client: c } = client(() => json(payload))

@@ -71,6 +71,7 @@ test('engine bearer token is unreachable from the renderer', async ({ harness })
       'dismissJob',
       'listLibrary',
       'transcriptHtml',
+      'mediaInfo',
       'getSettings',
       'putSettings',
       'putKey',

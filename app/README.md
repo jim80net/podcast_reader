@@ -149,13 +149,39 @@ port polling. An engine reporting a health version older than
 `MIN_ENGINE_VERSION` (`src/main/version.ts`) is stopped and respawned; a
 newer one is adopted (per P3/Q1).
 
+## Floating media player
+
+The Reader hosts a draggable, resizable floating player synced to the
+transcript. It asks the engine `GET /v1/media/{source_id}/info` for the player
+kind and plays accordingly:
+
+- **YouTube** → an embedded `youtube-nocookie` iframe driven by the *raw*
+  YouTube iframe `postMessage` protocol. The YouTube JS API is deliberately
+  **not** loaded — third-party script must never run in the `window.api`
+  context — so the only CSP allowance is `frame-src`, no `script-src`.
+- **Local / remote** → the `<video>`/`<audio>` element loads
+  `app://media/<source_id>`, an internal privileged scheme handled in the main
+  process (`media-protocol.ts`). The handler validates the sha256 `source_id`,
+  adds the engine bearer token (which the renderer never holds), forwards the
+  `Range` header, and returns the engine response verbatim — so seeking works
+  and the renderer stays credential-free. Remote sources are lazily downloaded
+  by the engine into a bounded LRU cache on first play.
+
+Sync is bidirectional over `postMessage` (channel `pr-sync`): click a
+transcript passage to seek; the current passage highlights and scrolls as
+media plays. Because the transcript runs in an opaque-origin sandboxed iframe
+(and the YouTube iframe posts its own control messages), every sync message is
+validated by **both** the `pr-sync` channel tag and `event.source` identity.
+The `app://` scheme is registered privileged (standard/secure/stream) at
+module load, before `app.whenReady`.
+
 ## Layout
 
 | Path | Purpose |
 |------|---------|
-| `src/main/` | Main process: engine supervision, engine client/SSE, key vault, IPC, protocol handler, auto-update |
+| `src/main/` | Main process: engine supervision, engine client/SSE, key vault, IPC, deep-link + `app://media` protocol handlers, auto-update |
 | `src/preload/` | contextBridge API (`window.api`) — the renderer's only door |
-| `src/renderer/` | Renderer (vanilla TS): Library / Reader / New / Settings views, hash router |
+| `src/renderer/` | Renderer (vanilla TS): Library / Reader / New / Settings views, hash router; Reader's floating `media-player` + `sync-bridge` |
 | `src/shared/` | Types mirrored from `podcast_reader/types.py` + the IPC contract |
 | `tests/mock-engine/` | Scriptable `/v1` mock server (separate process; honors the real handshake) |
 | `tests/e2e/` | Playwright specs: mock-engine e2e + the real-engine integration smoke |
