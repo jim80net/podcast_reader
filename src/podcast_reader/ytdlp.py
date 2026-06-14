@@ -196,16 +196,45 @@ def _download_once_audio(url: str, output_dir: Path, cookies: Path | None) -> Pa
     return audio_path
 
 
+#: Media container suffixes yt-dlp can emit (merged mp4, or the audio-only
+#: fallback's single stream — F7). The picker matches only these so a sidecar
+#: (.info.json, .jpg/.webp thumbnail, .part) written with a newer mtime can
+#: never be mistaken for the media file (a fixed glob can't be used because the
+#: output extension varies, unlike the audio path's *.mp3).
+_MEDIA_SUFFIXES = frozenset(
+    {
+        ".mp4",
+        ".mkv",
+        ".webm",
+        ".mov",
+        ".m4v",
+        ".avi",
+        ".ts",
+        ".flv",
+        ".3gp",  # video
+        ".m4a",
+        ".mp3",
+        ".opus",
+        ".ogg",
+        ".oga",
+        ".wav",
+        ".flac",
+        ".aac",  # audio
+    }
+)
+
+
 def _download_once_video(url: str, output_dir: Path, cookies: Path | None) -> Path:
     """One video attempt: run yt-dlp, locate the newest produced media file.
 
     The format selector may yield an ``.mp4`` (merged) or, for audio-only
-    sources (F7), a single-stream container, so the newest non-marker file in
-    *output_dir* is returned rather than a fixed extension.
+    sources (F7), a single-stream container, so the newest file whose suffix is
+    a known media container is returned — sidecar files (metadata/thumbnail/
+    partials) are ignored even if newer.
     """
     _run_download(build_video_args(url, output_dir, cookies))
     produced = sorted(
-        (p for p in output_dir.iterdir() if p.is_file() and p.suffix != ".ytdlp"),
+        (p for p in output_dir.iterdir() if p.is_file() and p.suffix.lower() in _MEDIA_SUFFIXES),
         key=lambda p: p.stat().st_mtime,
         reverse=True,
     )
