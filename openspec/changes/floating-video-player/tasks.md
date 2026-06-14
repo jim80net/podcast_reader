@@ -4,19 +4,19 @@ TDD throughout: write the failing test first, then the implementation. Run `uv r
 
 ## 1. Types & settings (boundary-first)
 
-- [ ] 1.1 Add `MediaInfo` TypedDict and `media_cache_max_bytes: int` to `EngineSettings` in `src/podcast_reader/types.py`; default the new setting (5 GiB) in `engine/settings.py`. Tests for settings round-trip with the new field.
-- [ ] 1.2 Mirror `MediaInfo` and the settings field in `app/src/shared/types.ts`; the integration smoke enforces key-set parity.
+- [x] 1.1 Add `MediaInfo` TypedDict and `media_cache_max_bytes: int` to `EngineSettings` in `src/podcast_reader/types.py`; default the new setting (5 GiB) in `engine/settings.py`. Tests for settings round-trip with the new field.
+- [x] 1.2 Mirror `MediaInfo` and the settings field in `app/src/shared/types.ts`; the integration smoke enforces key-set parity.
 
 ## 2. Engine media core (`engine/media.py`)
 
-- [ ] 2.1 Source classification → `kind` (`youtube`/`video`/`audio`/`unavailable`) reusing the existing YouTube-vs-yt-dlp routing; extract `youtube_id`. Unit tests across URL/local/unknown.
-- [ ] 2.2 `ffmpeg`-based probe (duration, has-video-track) for local + cached files — no `ffprobe`. Subprocess mocked. Test video/audio/garbage.
-- [ ] 2.3 Cache module: path layout under the data dir, LRU eviction against `media_cache_max_bytes` (enforced on insert), `.part` identity-bound staging, discard-on-failure. Unit tests for eviction order and partial cleanup.
-- [ ] 2.4 Single-flight lazy acquisition keyed by `source_id` (in-process future-map, independent of the job worker); concurrent joiners share one download. Test the join + the restart-clean path.
+- [x] 2.1 Source classification → `kind` (`youtube`/`video`/`audio`/`unavailable`) reusing the existing YouTube-vs-yt-dlp routing; extract `youtube_id`. Unit tests across URL/local/unknown.
+- [x] 2.2 `ffmpeg`-based probe (duration, has-video-track) for local + cached files — no `ffprobe`. Subprocess mocked. Test video/audio/garbage.
+- [x] 2.3 Cache module: path layout under the data dir, LRU eviction against `media_cache_max_bytes` (enforced on insert), `.part` identity-bound staging, discard-on-failure. Unit tests for eviction order and partial cleanup.
+- [x] 2.4 Single-flight lazy acquisition keyed by `source_id` (in-process future-map, independent of the job worker); concurrent joiners share one download. Test the join + the restart-clean path.
 
 ## 3. yt-dlp video variant (`ytdlp.py`)
 
-- [ ] 3.1 Add a video-download path (format `bv*+ba/b`, ffmpeg merge) alongside the existing audio `-x` path; preserve the structured `download_failed`/`download_auth_required` codes and the managed-copy self-heal. Test the arg builder and the audio-only fallback.
+- [x] 3.1 Add a video-download path (format `bv*+ba/b`, ffmpeg merge) alongside the existing audio `-x` path; preserve the structured `download_failed`/`download_auth_required` codes and the managed-copy self-heal. Test the arg builder and the audio-only fallback.
 
 ## 4. Engine routes + events (`engine/app.py`)
 

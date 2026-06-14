@@ -36,6 +36,12 @@ from podcast_reader.types import PipelineError, PipelineEvent
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    #: One download attempt: locate-and-return the produced media path, or raise
+    #: a structured :class:`PipelineError`. The audio and video paths each bind
+    #: their own (url, output_dir, cookies); :func:`_download_with_self_heal`
+    #: drives the managed-copy ``-U`` retry around whichever one it is given.
+    DownloadAttempt = Callable[[], Path]
+
 #: yt-dlp's actual auth-failure phrasings (per V6), matched case-insensitively.
 #: Anchored phrases, not bare substrings: "login"/"auth" alone misrouted
 #: extractor noise like "author info" or "OAuth" to download_auth_required,
@@ -55,12 +61,26 @@ _AUTH_STDERR_MARKERS = (
 
 def build_download_args(url: str, output_dir: Path, cookies: Path | None = None) -> list[str]:
     """Build the yt-dlp command-line arguments for audio extraction."""
-    args = [
-        resolve_tool("yt-dlp"),
-        "-x",
-        "--audio-format",
-        "mp3",
-    ]
+    return _build_args(url, output_dir, cookies, ["-x", "--audio-format", "mp3"])
+
+
+def build_video_args(url: str, output_dir: Path, cookies: Path | None = None) -> list[str]:
+    """Build the yt-dlp command-line arguments for video acquisition.
+
+    Format selector ``bv*+ba/b`` is best-video + best-audio, **falling back to
+    the best single stream** (``/b``) when there is no separate video track —
+    so audio-only remote posts still resolve (F7). ``--merge-output-format mp4``
+    muxes the separate streams with the bundled ffmpeg (the same tool diarize.py
+    resolves); a single-stream fallback is left in its native container.
+    """
+    return _build_args(url, output_dir, cookies, ["-f", "bv*+ba/b", "--merge-output-format", "mp4"])
+
+
+def _build_args(
+    url: str, output_dir: Path, cookies: Path | None, mode_args: list[str]
+) -> list[str]:
+    """Assemble a yt-dlp command: tool, mode-specific flags, cookies, output, url."""
+    args = [resolve_tool("yt-dlp"), *mode_args]
     if cookies is not None:
         args.extend(["--cookies", str(cookies)])
     args.extend(["-o", str(output_dir / "%(id)s.%(ext)s"), url])
@@ -97,8 +117,44 @@ def download_audio(
     the structured error; there are no further retries, and
     ``download_auth_required`` never retries at all.
     """
+    return _download_with_self_heal(
+        lambda: _download_once_audio(url, output_dir, cookies), on_event
+    )
+
+
+def download_video(
+    url: str,
+    output_dir: Path,
+    cookies: Path | None = None,
+    on_event: Callable[[PipelineEvent], None] | None = None,
+) -> Path:
+    """Download video (or the audio-only fallback) as a single media file.
+
+    The video twin of :func:`download_audio` (floating-video-player): same
+    structured ``download_failed`` / ``download_auth_required`` codes and the
+    same managed-copy ``-U``-and-retry self-heal, via the shared
+    :func:`_download_with_self_heal` wrapper. Returns the path to whichever
+    media file yt-dlp produced — an ``.mp4`` for a merged video, or the
+    native single-stream container for an audio-only fallback (F7).
+    """
+    return _download_with_self_heal(
+        lambda: _download_once_video(url, output_dir, cookies), on_event
+    )
+
+
+def _download_with_self_heal(
+    attempt: DownloadAttempt,
+    on_event: Callable[[PipelineEvent], None] | None,
+) -> Path:
+    """Run one download *attempt*, with the managed-copy ``-U``-and-retry heal.
+
+    Shared by audio and video (per Q3/S7): a first ``download_failed`` against
+    the managed user-data yt-dlp triggers a single ``yt-dlp -U`` + one retry
+    with a warning event; ``download_auth_required`` (and any non-managed copy)
+    surfaces immediately with no update and no retry.
+    """
     try:
-        return _download_once(url, output_dir, cookies)
+        return attempt()
     except PipelineError as exc:
         if exc.code != "download_failed":
             # download_auth_required (per U2): a yt-dlp update cannot conjure
@@ -123,24 +179,12 @@ def download_audio(
             # Keep the recorded version current so a later, older bundle seed
             # never clobbers the self-updated copy (newer-wins seeding).
             record_ytdlp_update(data_dir_path(), version, time.time())
-        return _download_once(url, output_dir, cookies)
+        return attempt()
 
 
-def _download_once(url: str, output_dir: Path, cookies: Path | None) -> Path:
-    """One download attempt: run yt-dlp, locate the mp3, write the URL marker."""
-    args = build_download_args(url, output_dir, cookies)
-    result = run_child(args)
-    if result.returncode != 0:
-        stderr = result.stderr.strip()
-        # Auth-detected failures get the distinct code with a neutral message
-        # and NO hint (per U2) — the face authors its own affordances. The
-        # detection anchors on yt-dlp's actual phrasings (per V6).
-        stderr_lower = stderr.lower()
-        auth_required = any(marker in stderr_lower for marker in _AUTH_STDERR_MARKERS)
-        code = "download_auth_required" if auth_required else "download_failed"
-        raise PipelineError(code, f"yt-dlp failed: {stderr}", "")
-
-    # Find the downloaded mp3 file
+def _download_once_audio(url: str, output_dir: Path, cookies: Path | None) -> Path:
+    """One audio attempt: run yt-dlp, locate the mp3, write the URL marker."""
+    _run_download(build_download_args(url, output_dir, cookies))
     mp3_files = sorted(output_dir.glob("*.mp3"), key=lambda p: p.stat().st_mtime, reverse=True)
     if not mp3_files:
         raise RuntimeError(f"yt-dlp completed but no mp3 file found in {output_dir}")
@@ -149,5 +193,38 @@ def _download_once(url: str, output_dir: Path, cookies: Path | None) -> Path:
     # Write a marker so cache lookup can identify yt-dlp downloads unambiguously
     marker = audio_path.with_suffix(".ytdlp")
     marker.write_text(url)
-
     return audio_path
+
+
+def _download_once_video(url: str, output_dir: Path, cookies: Path | None) -> Path:
+    """One video attempt: run yt-dlp, locate the newest produced media file.
+
+    The format selector may yield an ``.mp4`` (merged) or, for audio-only
+    sources (F7), a single-stream container, so the newest non-marker file in
+    *output_dir* is returned rather than a fixed extension.
+    """
+    _run_download(build_video_args(url, output_dir, cookies))
+    produced = sorted(
+        (p for p in output_dir.iterdir() if p.is_file() and p.suffix != ".ytdlp"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    if not produced:
+        raise RuntimeError(f"yt-dlp completed but no media file found in {output_dir}")
+    return produced[0]
+
+
+def _run_download(args: list[str]) -> None:
+    """Run a yt-dlp download, raising the structured error on a non-zero exit.
+
+    Auth-detected failures get the distinct ``download_auth_required`` code with
+    a neutral, hint-free message (per U2) — the face authors its own
+    affordances — anchored on yt-dlp's actual phrasings (per V6); everything
+    else is ``download_failed``.
+    """
+    result = run_child(args)
+    if result.returncode != 0:
+        stderr = result.stderr.strip()
+        auth_required = any(marker in stderr.lower() for marker in _AUTH_STDERR_MARKERS)
+        code = "download_auth_required" if auth_required else "download_failed"
+        raise PipelineError(code, f"yt-dlp failed: {stderr}", "")
