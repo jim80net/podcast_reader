@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   GEOMETRY_KEY,
+  YOUTUBE_IFRAME_SANDBOX,
   clampGeometry,
   loadGeometry,
   saveGeometry,
@@ -21,13 +22,26 @@ import {
 describe('youtubeEmbedUrl', () => {
   it('builds a youtube-nocookie embed with the JS-API flag enabled', () => {
     const url = youtubeEmbedUrl('dQw4w9WgXcQ')
-    expect(url).toBe(
-      'https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ?enablejsapi=1&origin=null'
-    )
+    expect(url).toBe('https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ?enablejsapi=1')
+  })
+
+  it('omits the origin param so inbound infoDelivery is not origin-pinned away', () => {
+    // origin=null (or any bogus origin) makes the player target outbound
+    // infoDelivery at that origin and our time-sync handler never receives it.
+    expect(youtubeEmbedUrl('dQw4w9WgXcQ')).not.toContain('origin=')
   })
 
   it('encodes the video id (defense-in-depth, ids are alnum/-/_ in practice)', () => {
     expect(youtubeEmbedUrl('a b')).toContain('/embed/a%20b?')
+  })
+})
+
+describe('YOUTUBE_IFRAME_SANDBOX', () => {
+  it('grants the cross-origin embed scripts + its own origin, locked against drift', () => {
+    // allow-same-origin is intentional and safe: the embed is cross-origin
+    // youtube-nocookie, so this grants it YouTube's origin (needed for the
+    // player), not the renderer's app:// origin. No JS IFrame API is loaded.
+    expect(YOUTUBE_IFRAME_SANDBOX).toBe('allow-scripts allow-same-origin allow-presentation')
   })
 })
 

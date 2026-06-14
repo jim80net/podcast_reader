@@ -79,10 +79,19 @@ export function clampGeometry(g: Geometry, viewW: number, viewH: number): Geomet
 // ---- YouTube raw iframe postMessage control protocol (design F1) ------------
 
 /** The youtube-nocookie embed URL with the JS-API flag (postMessage) enabled. */
+// Sandbox for the cross-origin YouTube embed (see buildYoutubeSurface for the
+// allow-same-origin rationale). Exported so a unit test can lock it against
+// drift — this attribute is security-relevant.
+export const YOUTUBE_IFRAME_SANDBOX = 'allow-scripts allow-same-origin allow-presentation'
+
 export function youtubeEmbedUrl(youtubeId: string): string {
-  // origin=null is the opaque-origin renderer's own origin; the nocookie host
-  // accepts it for the raw postMessage protocol.
-  return `https://www.youtube-nocookie.com/embed/${encodeURIComponent(youtubeId)}?enablejsapi=1&origin=null`
+  // Only enablejsapi=1 (per the design). We deliberately omit the `origin`
+  // param: the renderer's origin is the custom app:// scheme, and pinning a
+  // bogus origin (e.g. "null") makes the player target its outbound
+  // infoDelivery messages at that origin, so our inbound time-sync handler —
+  // which drives the highlight — would never receive them. Without `origin`
+  // the player broadcasts infoDelivery and our `message` listener gets it.
+  return `https://www.youtube-nocookie.com/embed/${encodeURIComponent(youtubeId)}?enablejsapi=1`
 }
 
 /** The handshake that subscribes us to the iframe's infoDelivery stream. */
@@ -246,8 +255,16 @@ function buildYoutubeSurface(
       src: youtubeEmbedUrl(youtubeId),
       title: 'YouTube player',
       allow: 'autoplay; encrypted-media; picture-in-picture',
-      // No allow-same-origin: the cross-origin embed reaches nothing of ours.
-      sandbox: 'allow-scripts allow-same-origin allow-presentation'
+      // allow-same-origin is required AND safe here: the iframe loads
+      // cross-origin youtube-nocookie content, so allow-same-origin grants it
+      // *YouTube's* own origin (needed for its player + the postMessage
+      // protocol), NOT the renderer's app:// origin. The same-origin policy
+      // still walls it off from our DOM/storage/window.api — design F1's
+      // "no third-party JS in our context" is satisfied by never loading the
+      // YouTube JS API (we use the raw postMessage protocol below). Dropping
+      // allow-same-origin gives the embed an opaque origin and breaks the
+      // player. The value is locked by a unit test so it can't drift.
+      sandbox: YOUTUBE_IFRAME_SANDBOX
     }
   })
   const fallback = el(

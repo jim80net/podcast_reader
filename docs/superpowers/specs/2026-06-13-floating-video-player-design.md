@@ -281,3 +281,11 @@ from being confused, since both arrive as `message` events on the renderer `wind
    `unsafe-inline` (decision 8 bonus).
 2. Optional separate always-on-top PiP window.
 3. Settings UI surfacing media-cache usage + a clear-cache action.
+4. **Cookie-gated remote video.** The lazy media download does not thread the
+   stored per-domain cookie jar (the job/transcription pipeline does). So an
+   auth-gated source (e.g. an X/Twitter post whose transcript was produced with
+   cookies) reports `download_auth_required` → the player shows `unavailable`
+   while the transcript still reads fine — a graceful degrade, not a break.
+   Threading the cookie jar into `media._run_download` (mirroring the job path)
+   is deferred with the rest of the credentialed work; the `unavailable` UX is
+   already in place.

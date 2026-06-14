@@ -363,6 +363,31 @@ class TestLazyDownload:
         path = mgr.ready_path("g" * 64)
         assert path == local
 
+    def test_just_committed_file_over_cap_is_not_self_evicted(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A single media file larger than the whole cap must survive its own
+        # commit — else `ready` fires for media `ready_path` can't serve.
+        url = "https://x.com/user/status/6"
+        sid = "a1" * 32
+
+        def fake_download(
+            u: str, out_dir: object, cookies: object = None, on_event: object = None
+        ) -> object:
+            produced = Path(str(out_dir)) / "big.mp4"
+            produced.write_bytes(b"\x00" * 50)  # 50 bytes > 10-byte cap
+            return produced
+
+        monkeypatch.setattr("podcast_reader.engine.media.download_video", fake_download)
+        monkeypatch.setattr(
+            "podcast_reader.engine.media.run_child",
+            lambda _args: _ffmpeg_completed(_FFMPEG_VIDEO_STDERR),
+        )
+        mgr = _manager(tmp_path, cache_max_bytes=10, get_entry=lambda s: _entry(url, s))
+        mgr.media_info(sid)
+        mgr.join_downloads(2)
+        assert mgr.ready_path(sid) is not None
+
 
 class TestCacheEviction:
     def test_insert_evicts_lru_to_stay_under_cap(

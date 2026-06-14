@@ -323,7 +323,11 @@ class MediaManager:
         shutil.copy2(produced, tmp)
         os.replace(tmp, destination)
         self._touch(source_id)
-        self._evict()
+        # Protect the just-committed file: a single media file larger than the
+        # whole cap must not evict itself (which would fire `ready` for media
+        # that `ready_path` then can't serve). It stays, over cap, until the
+        # next commit displaces it as the least-recently-used.
+        self._evict(protect=source_id)
 
     # -- cache + access tracking -----------------------------------------
 
@@ -342,8 +346,13 @@ class MediaManager:
             access[source_id] = self._clock()
             self._save_access(access)
 
-    def _evict(self) -> None:
-        """Drop least-recently-used cache files until within the byte cap."""
+    def _evict(self, protect: str | None = None) -> None:
+        """Drop least-recently-used cache files until within the byte cap.
+
+        *protect* is never evicted even if it is the LRU victim — used to keep a
+        just-committed file that alone exceeds the cap (it stays over cap rather
+        than firing a `ready` for media that cannot then be served).
+        """
         with self._lock:
             cache_dir = self._cache_dir()
             sizes = {
@@ -352,7 +361,11 @@ class MediaManager:
                 if p.is_file() and p.name != ACCESS_FILE and not p.name.endswith(PARTIAL_SUFFIX)
             }
             access = self._load_access()
-            victims = eviction_victims(sizes, access, cap=self._cache_max_bytes)
+            victims = [
+                sid
+                for sid in eviction_victims(sizes, access, cap=self._cache_max_bytes)
+                if sid != protect
+            ]
             for sid in victims:
                 (cache_dir / sid).unlink(missing_ok=True)
                 access.pop(sid, None)
