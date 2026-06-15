@@ -6,6 +6,10 @@
 **Review history:** v1 — approved. Direction chosen from rendered mockups: **A, Editorial /
 Reader** (warm paper, serif display titles, list-led, calm palette, sparing accent). Applies
 cohesively across Library / Reader / New / Settings (+ first-run Setup) in light and dark.
+v2 — design-review: keep `--accent` in the **brand-blue** family (matching the shipped app
+icon), not the warm red-brown used in the mockup logo — the editorial feel comes from the
+warm paper + serif + list layout, and a single brand accent must stay consistent with the
+icon. (Flagged to Jim; revisit the icon too only if a warm accent is actually wanted.)
 
 ## Problem
 
@@ -53,9 +57,9 @@ chosen editorial direction.
 
 Extend the existing token set (don't fork it): warm paper light palette (`--bg` warm
 off-white, `--surface` white, `--fg` near-black warm, `--muted`, hairline `--border`), a calm
-dark palette, the accent retained (consider a slightly warmer accent to match the editorial
-mockup — confirmed acceptable since it stays a single `--accent` token used everywhere),
-plus new tokens: `--serif`, type-scale sizes, spacing scale (`--space-*`), `--radius-*`, and
+dark palette, and `--accent` kept in the **brand-blue family** (light/dark variants as
+today) so it matches the shipped blue app icon — the warm red in the mockup logo is not
+adopted as the accent. Plus new tokens: `--serif`, type-scale sizes, spacing scale (`--space-*`), `--radius-*`, and
 a restrained `--shadow-sm` for the few elevated elements. Every component reads tokens, so
 light/dark and future tweaks are one place.
 
