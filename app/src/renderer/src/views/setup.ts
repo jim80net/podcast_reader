@@ -422,7 +422,7 @@ function buildChapterSection(isDisposed: () => boolean): ChapterSection {
   providerSelect.addEventListener('change', syncProviderUi)
 
   testButton.addEventListener('click', () => {
-    if (degraded) return
+    if (degraded || providers.length === 0) return
     testButton.disabled = true
     keyResult.textContent = 'Testing…'
     const entered = keyInput.value
@@ -442,6 +442,9 @@ function buildChapterSection(isDisposed: () => boolean): ChapterSection {
   })
 
   saveButton.addEventListener('click', () => {
+    // Don't submit when the section never loaded its providers (degraded /
+    // transient failure): the provider select would be empty/stale (cubic).
+    if (degraded || providers.length === 0) return
     const plan = planChapterSave({
       provider: providerSelect.value,
       key: keyInput.value,
@@ -469,7 +472,10 @@ function buildChapterSection(isDisposed: () => boolean): ChapterSection {
   })
 
   async function load(): Promise<void> {
-    if (isDisposed() || degraded) return
+    // Re-attemptable: a transient failure must NOT permanently disable the
+    // section (cubic) — load() is re-invoked on engine-ready/hydration, so it
+    // never early-returns on `degraded`; a later success recovers it.
+    if (isDisposed()) return
     try {
       const [providerList, settings] = await Promise.all([
         window.api.listProviders(),
@@ -477,9 +483,10 @@ function buildChapterSection(isDisposed: () => boolean): ChapterSection {
       ])
       if (isDisposed()) return
       providers = providerList
+      degraded = false // recovered: re-enable Save/Test, clear the degrade note
       renderOptions(settings.chapter_provider)
       customUrlInput.value = settings.custom_provider_url
-      syncProviderUi()
+      syncProviderUi() // sets keyResult back to '' (clears any degrade message)
     } catch {
       // Degrade gracefully — never trap the wizard (design error handling).
       degrade('AI setup is unavailable right now — you can set this up later in Settings.')

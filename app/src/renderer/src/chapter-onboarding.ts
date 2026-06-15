@@ -48,11 +48,14 @@ export interface ChapterSavePlan {
 }
 
 export function planChapterSave(input: ChapterSaveInput): ChapterSavePlan {
+  // Trim the key (like customUrl): a whitespace-only entry is "no key", not a
+  // bogus key that would save and then fail auth (OCR).
+  const key = input.key.trim()
   return {
     settings: {
       chapter_provider: input.provider,
       custom_provider_url: input.customUrl.trim()
     },
-    key: input.key === '' ? null : { provider: input.provider, value: input.key }
+    key: key === '' ? null : { provider: input.provider, value: key }
   }
 }

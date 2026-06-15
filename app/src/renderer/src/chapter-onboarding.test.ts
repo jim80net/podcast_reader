@@ -49,9 +49,14 @@ describe('planChapterSave', () => {
     expect(plan.key).toBeNull()
   })
 
-  it('routes an entered key to putKey under the chosen provider, verbatim', () => {
-    const plan = planChapterSave({ provider: 'openai', key: 'sk-test-123', customUrl: '' })
+  it('routes an entered key to putKey under the chosen provider, trimmed', () => {
+    const plan = planChapterSave({ provider: 'openai', key: '  sk-test-123  ', customUrl: '' })
     expect(plan.key).toEqual({ provider: 'openai', value: 'sk-test-123' })
     expect(plan.settings.chapter_provider).toBe('openai')
+  })
+
+  it('treats a whitespace-only key as no key (not a bogus saved key)', () => {
+    const plan = planChapterSave({ provider: 'openai', key: '   ', customUrl: '' })
+    expect(plan.key).toBeNull()
   })
 })
