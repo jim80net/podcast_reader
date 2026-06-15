@@ -1,4 +1,5 @@
 import { el } from '../dom'
+import { emptyLibraryState } from '../empty-state'
 import { extractEngineDetail } from '../engine-error'
 import { formatDate, sourceLabel } from '../job-view'
 import { LatestGate } from '../latest-gate'
@@ -9,7 +10,8 @@ import type { LibraryEntry } from '../../../shared/types'
 /**
  * Library view (app-views spec): cards (title, source, date) from
  * `GET /v1/library`, refreshed on `job_done` events and on hydration so a
- * completing job appears without a restart; empty state points at New.
+ * completing job appears without a restart; empty state is a branded
+ * first-transcript call-to-action toward New.
  */
 export function mountLibrary(container: HTMLElement): ViewCleanup {
   const status = el('p', { class: 'view-status', text: 'Loading library…' })
@@ -40,15 +42,18 @@ export function mountLibrary(container: HTMLElement): ViewCleanup {
     status.classList.remove('error-text')
     list.replaceChildren()
     if (entries.length === 0) {
+      const content = emptyLibraryState()
       list.append(
         el(
           'div',
           { class: 'empty-state' },
-          el('p', { text: 'Nothing here yet.' }),
+          el('div', { class: 'empty-mark', text: content.mark, attrs: { 'aria-hidden': 'true' } }),
+          el('p', { class: 'empty-title', text: content.title }),
+          el('p', { class: 'empty-lead', text: content.lead }),
           el('a', {
-            class: 'button-link',
-            text: 'Transcribe your first episode',
-            attrs: { href: hrefFor({ view: 'new' }) }
+            class: 'button-link button-cta',
+            text: content.cta.label,
+            attrs: { href: content.cta.href }
           })
         )
       )

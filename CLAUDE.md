@@ -109,11 +109,14 @@ For speaker diarization, set `HF_TOKEN` and accept model terms at:
 | `app/src/main/media-protocol.ts` | `app://media/<source_id>` privileged-scheme handler: sha256-id validation (no SSRF/traversal), adds the bearer token (renderer never holds it), forwards `Range`, returns the engine `Response` verbatim (streamed) |
 | `app/src/main/updater.ts` | electron-updater orchestration: full-download GitHub Releases, consent, engine-quit-before-install; gated off in dev/unsigned |
 | `app/src/main/app-config.ts` | App-side config under userData (`first_run_complete` — the setup wizard's gate) |
+| `app/src/main/index.ts` | Main entry: lifecycle glue; window creation passes the branded `icon:` resolved packaged (`<resources>/icon.png`) vs dev (`<app>/build/icon.png`) |
 | `app/src/preload/index.ts` | contextBridge `window.api` — the credential-free renderer's only door |
 | `app/src/renderer/` | Vanilla-TS views (Library/Reader/New/Settings + first-run Setup wizard) + hash router + jobs/packs stores; Reader hosts the floating `media-player.ts` (video/audio/`youtube-nocookie` raw-postMessage embed) wired to the transcript iframe by `sync-bridge.ts` (`pr-sync`, dual source+channel filter) |
 | `app/src/shared/types.ts` | TS mirrors of the Python boundary types (key-set parity enforced by the e2e integration smoke) |
 | `app/tests/mock-engine/` + `app/tests/e2e/` | Scriptable mock engine (separate process, real handshake) + Playwright suites |
-| `app/electron-builder.config.cjs` + `app/scripts/dist.mjs` | Packaging: NSIS/dmg+zip, protocol registration, `--engine-dir` extraResources input |
+| `app/electron-builder.config.cjs` + `app/scripts/dist.mjs` | Packaging: NSIS/dmg+zip, protocol registration, `--engine-dir` extraResources input, branded `build/icon.png` (electron-builder derives `.icns`/`.ico`; runtime window icon shipped via extraResources) |
+| `app/scripts/build-icons.mjs` + `app/build/icon.{svg,png}` | Committed icon source + 1024 render; `build-icons` (dev step, not CI) renders via rsvg-convert with PNG magic/dimension asserts |
+| `app/src/renderer/src/empty-state.ts` | Branded library empty-state copy + first-transcript CTA href (pure; rendered by `views/library.ts`) |
 
 Engine `/v1` surface the app consumes: `health`, `shutdown`, `jobs` (+
 `{id}`, `{id}/confirm`, `DELETE {id}`), `events` (SSE; job events carry

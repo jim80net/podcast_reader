@@ -23,7 +23,11 @@ const { join, resolve } = require('node:path')
 
 const extraResources = [
   { from: '../LICENSE', to: 'LICENSE.podcast-reader.txt' },
-  { from: 'build/ATTRIBUTIONS.md', to: 'ATTRIBUTIONS.md' }
+  { from: 'build/ATTRIBUTIONS.md', to: 'ATTRIBUTIONS.md' },
+  // The runtime BrowserWindow icon (main/index.ts) loads this at
+  // `<resources>/icon.png` packaged; macOS uses the bundle .icns instead, but
+  // shipping it once covers the Linux/Windows window + taskbar mark uniformly.
+  { from: 'build/icon.png', to: 'icon.png' }
 ]
 
 const engineDir = process.env.PODCAST_READER_ENGINE_DIR
@@ -52,7 +56,17 @@ module.exports = {
   // Installer-level protocol registration (design decision 7): NSIS registry
   // keys on Windows, CFBundleURLTypes on macOS.
   protocols: [{ name: 'Podcast Reader', schemes: ['podcast-reader'] }],
+  // Branding icon (native-app-first-impression, v2 icon pipeline): the single
+  // committed master `build/icon.png` (rendered from `build/icon.svg` by
+  // `npm run build-icons`) is what electron-builder 26 derives every platform
+  // format from — `.icns` (macOS .app/dmg), `.ico` (Windows/NSIS) — at
+  // packaging time. electron-builder auto-discovers `build/icon.*`; the
+  // per-platform `icon` fields below just make that intent explicit. NSIS
+  // `installerIcon`/`uninstallerIcon` and the dmg volume icon are deliberately
+  // NOT set: they require a committed `.ico`/`.icns`, which the v2 pipeline
+  // avoids (electron-builder uses the derived app icon for the installer).
   win: {
+    icon: 'build/icon.png',
     target: [{ target: 'nsis', arch: ['x64'] }]
   },
   nsis: {
@@ -63,11 +77,13 @@ module.exports = {
     license: '../LICENSE'
   },
   mac: {
+    icon: 'build/icon.png',
     // dmg for first install; zip is the target electron-updater requires.
     target: [{ target: 'dmg' }, { target: 'zip' }],
     category: 'public.app-category.productivity'
   },
   linux: {
+    icon: 'build/icon.png',
     // Not a ship target — `--linux dir` exists so the packaging pipeline is
     // provable on Linux dev hosts and CI without a Windows/macOS runner.
     target: [{ target: 'dir' }]

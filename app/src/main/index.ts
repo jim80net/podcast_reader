@@ -204,11 +204,25 @@ function setupUpdater(): UpdaterAccess {
   }
 }
 
+/**
+ * Resolve the branded window icon (native-app-first-impression). Packaged: the
+ * `build/icon.png` shipped via extraResources sits at `<resources>/icon.png`.
+ * Dev/unpackaged: it is `<app>/build/icon.png` (getAppPath() is the app/ dir).
+ * macOS draws the dock/window from the bundle `.icns` and ignores this, so it
+ * mainly brands the Linux/Windows window + taskbar and every dev run.
+ */
+function windowIconPath(): string {
+  return app.isPackaged
+    ? join(process.resourcesPath, 'icon.png')
+    : join(app.getAppPath(), 'build', 'icon.png')
+}
+
 function createWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1100,
     height: 750,
     show: false,
+    icon: windowIconPath(),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       // Credential-free renderer (design decision 7): isolated, sandboxed,
