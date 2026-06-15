@@ -7,6 +7,11 @@
 impression. Focus chosen: the install → launch → first-transcript journey. Icon direction
 chosen: **B (play + transcript lines)**. Code signing / notarization (the only thing
 blocking a literally-zero-warning install) is out of scope — credentialed, owned by Jim.
+v2 — systems-review of the icon pipeline: electron-builder 26.15.2 bundles `app-builder-bin`,
+which generates `.icns`/`.ico` from a single 1024 `build/icon.png` reliably and
+cross-platform, and ImageMagick's `.icns` output is unreliable (its `.ico` is fine).
+Therefore commit **only `icon.svg` + `icon.png` (1024)** and let electron-builder derive
+the platform icons — no hand-generated `.icns`, no rsvg/ImageMagick dependency in CI.
 
 ## Problem
 
@@ -40,20 +45,18 @@ the first impression compelling without touching the credentialed signing path.
 
 ## Components
 
-### Icon source + build pipeline
+### Icon source + build pipeline (v2)
 - Commit the chosen mark as `app/build/icon.svg` (1024×1024, the "play + lines" concept on
-  the brand-blue squircle).
-- `app/scripts/build-icons.mjs` (new): renders the SVG to the icon set with the tooling on
-  hand (`rsvg-convert` for SVG→PNG; ImageMagick for `.ico`/`.icns` assembly), producing:
-  - `build/icon.png` (1024 — Linux + the canonical source electron-builder can derive from),
-  - `build/icon.ico` (multi-size 16–256 — Windows / NSIS),
-  - `build/icon.icns` (macOS).
-  The script is idempotent and validated (asserts each output exists and is a non-trivial,
-  correctly-typed file). It runs as a `predist`/documented step, not on every build, since
-  the rendered binaries are committed.
-- **Decision (for systems-review to confirm):** commit the *generated* `icon.png/ico/icns`
-  (so CI packaging needs no rsvg/IM), with the SVG + script as the reproducible source —
-  rather than generating during the build (which would add native deps to CI).
+  the brand-blue squircle) — the reproducible source.
+- `app/scripts/build-icons.mjs` (new): renders `icon.svg` → **`build/icon.png` (1024)** via
+  `rsvg-convert`, asserting the output exists and is a valid PNG of the right dimensions.
+  This is the only generated artifact; it is committed.
+- **electron-builder derives the rest:** version 26 (`app-builder-bin`) generates `.icns`
+  (macOS) and `.ico` (Windows/NSIS) from `build/icon.png` at packaging time, reliably and
+  cross-platform — so we do **not** hand-generate or commit `.icns`/`.ico` (ImageMagick's
+  `.icns` is unreliable; avoiding it removes a whole class of malformed-icon risk and keeps
+  CI free of rsvg/ImageMagick). `build-icons.mjs` is a documented dev step, not a build/CI
+  dependency, because `icon.png` is committed.
 
 ### electron-builder wiring (`electron-builder.config.cjs`)
 - Point mac/win/linux at the generated icons (electron-builder auto-discovers `build/icon.*`
@@ -80,9 +83,10 @@ the first impression compelling without touching the credentialed signing path.
 
 ## Testing
 
-- **Icon pipeline:** a Node test (or the build-icons script's own asserts) verifies the
-  generated `icon.png/ico/icns` exist with valid magic bytes and the expected sizes;
-  `npm run build` stays green with the icons in place.
+- **Icon pipeline:** `build-icons.mjs` asserts `build/icon.png` exists, has the PNG magic
+  bytes, and is 1024×1024; a committed-asset check confirms `icon.svg` + `icon.png` are
+  present (electron-builder generates `.icns`/`.ico` from `icon.png` — not our artifacts to
+  validate). `npm run build` stays green with the icon in place.
 - **Renderer:** vitest for any new pure logic (empty-state CTA wiring, setup copy/step
   helpers); the existing view tests stay green.
 - **e2e:** the first-run and library-empty Playwright paths still pass (and assert the
@@ -94,8 +98,8 @@ the first impression compelling without touching the credentialed signing path.
 
 | Risk | Mitigation |
 |------|-----------|
-| `.icns`/`.ico` generated off-host are malformed | validate magic bytes + sizes in the build-icons asserts; commit generated files so CI doesn't depend on rsvg/IM |
-| CI lacks rsvg/ImageMagick | don't generate in CI — commit the binaries; SVG+script are the reproducible source |
+| `.icns`/`.ico` generated off-host are malformed | don't generate them at all — electron-builder 26 derives both from the committed `icon.png` reliably; ImageMagick `.icns` avoided entirely |
+| CI lacks rsvg/ImageMagick | CI needs neither — only `icon.png` is committed (rendered locally by the documented `build-icons.mjs`); electron-builder handles the platform formats |
 | Window icon path differs packaged vs dev | resolve via app root / `resourcesPath` with a dev fallback, mirroring the engine-resolution pattern |
 | Scope creep into a full UI redesign | explicitly first-impression-only; broader uplift is a separate increment |
 | First-run polish changing pack-install behavior | presentation-only; the `first_run_complete` gate and pack logic are untouched |
