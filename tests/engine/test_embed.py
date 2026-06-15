@@ -45,7 +45,11 @@ class TestBuildEmbedPage:
 
     def test_escapes_a_crafted_id_as_defense_in_depth(self) -> None:
         # Even though the route validates first, the id is HTML/quote-escaped so
-        # a stray quote can't break out of the JS string literal.
-        page = build_embed_page('a"b')
-        assert 'a"b' not in page
+        # a crafted value can't break out of the JS string literal or inject
+        # markup. Covers ", <, >, & (html.escape with quote=True).
+        page = build_embed_page("a\"<b>&'c")
+        assert "a\"<b>&'c" not in page
         assert "&quot;" in page
+        assert "&lt;" in page
+        assert "&gt;" in page
+        assert "&amp;" in page

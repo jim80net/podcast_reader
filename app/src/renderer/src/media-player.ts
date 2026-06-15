@@ -107,8 +107,16 @@ export function createMediaPlayer(
 
   return {
     el: panel,
-    seekTo: (t) => surface.seekTo(t),
+    // Guard the seek input once for every surface: a non-finite t (NaN/Infinity
+    // from a malformed passage timestamp) must never reach a media element's
+    // currentTime or the YouTube seek command.
+    seekTo: (t) => {
+      if (Number.isFinite(t)) surface.seekTo(Math.max(0, t))
+    },
     onTime: (cb) => timeListeners.push(cb),
+    // NOTE: destroy() tears down listeners/timers but does NOT remove `el` from
+    // the DOM — the Reader owns that node (it replaceChildren()s the slot on
+    // remount and the view container on teardown).
     destroy: () => surface.destroy()
   }
 }
@@ -199,7 +207,12 @@ function buildYoutubeSurface(
   }
 
   const onMessage = (event: MessageEvent): void => {
+    // Identity: the message must come from OUR embed iframe's window. The
+    // engine page is same-(loopback)-origin, so we also require a loopback
+    // origin as defense in depth (rejects any other frame that somehow forged
+    // the source tag).
     if (event.source !== iframe.contentWindow) return
+    if (!isLoopbackOrigin(event.origin)) return
     const ev = parseEmbedEvent(event.data)
     if (ev === null) return
     if (ev.type === 'ready') {
@@ -212,6 +225,10 @@ function buildYoutubeSurface(
     }
   }
   win.addEventListener('message', onMessage)
+  // Belt-and-suspenders: the native iframe `error` event is unreliable for
+  // cross-origin loads, so the real failure path is the embed page's `error`
+  // postMessage (handled above) plus the no-`ready` timeout; this just covers
+  // an outright load failure of the engine page itself.
   iframe.addEventListener('error', showFallback)
 
   // Resolve the loopback embed URL (engine may not be ready → fallback).
@@ -236,6 +253,11 @@ function buildYoutubeSurface(
 }
 
 // ---- helpers ----------------------------------------------------------------
+
+/** The engine embed page is served from the loopback http origin. */
+function isLoopbackOrigin(origin: string): boolean {
+  return origin.startsWith('http://127.0.0.1') || origin.startsWith('http://localhost')
+}
 
 function mediaTitle(kind: MediaInfo['kind']): string {
   switch (kind) {

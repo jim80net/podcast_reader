@@ -77,6 +77,11 @@ if TYPE_CHECKING:
 #: traversal — defense in depth atop the app-side app:// scheme validation.
 _SOURCE_ID_RE = re.compile(r"^[0-9a-f]{64}$")
 
+#: The tokenless GET exemption matches the embed route EXACTLY (valid id only),
+#: so a path like /v1/embed/ or /v1/embed/a/b never bypasses auth — minimizing
+#: the unauthenticated surface as routes are added under the prefix.
+_EMBED_PATH = re.compile(r"^/v1/embed/[A-Za-z0-9_-]{1,32}$")
+
 
 class JobSubmission(BaseModel):
     """Body of ``POST /v1/jobs``.
@@ -266,7 +271,7 @@ def create_app(
         #    http origin (the Error 152/153 fix).
         if request.method == "POST" and request.url.path == "/v1/pair/claim":
             return await call_next(request)
-        if request.method == "GET" and request.url.path.startswith("/v1/embed/"):
+        if request.method == "GET" and _EMBED_PATH.match(request.url.path):
             return await call_next(request)
         # RFC 7235: the scheme token is case-insensitive; only the credentials
         # are secret, so the constant-time comparison covers just the token.

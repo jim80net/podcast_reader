@@ -49,11 +49,18 @@ def build_embed_page(video_id: str) -> str:
     # The id is embedded as a JSON string literal in the script; json-style
     # escaping plus the alnum/-/_ validation upstream makes injection moot.
     js_id = f'"{safe_id}"'
-    return _PAGE_TEMPLATE.replace("__VIDEO_ID__", js_id)
+    # The protocol source tags are injected from the constants (single source of
+    # truth) rather than hardcoded in the JS, so the two can't drift.
+    return (
+        _PAGE_TEMPLATE.replace("__VIDEO_ID__", js_id)
+        .replace("__EVENT_SOURCE__", f'"{EMBED_EVENT_SOURCE}"')
+        .replace("__COMMAND_SOURCE__", f'"{EMBED_COMMAND_SOURCE}"')
+    )
 
 
 # Kept as a plain string (no f-string) to avoid brace-escaping the JS. The only
-# substitution is the JSON-quoted, validated video id at __VIDEO_ID__.
+# substitutions are the JSON-quoted video id (__VIDEO_ID__) and the protocol
+# source tags (__EVENT_SOURCE__ / __COMMAND_SOURCE__).
 _PAGE_TEMPLATE = """<!doctype html>
 <html lang="en">
 <head>
@@ -70,10 +77,11 @@ _PAGE_TEMPLATE = """<!doctype html>
 <script>
 (function () {
   var VIDEO_ID = __VIDEO_ID__;
-  var EVENT_SOURCE = "pr-embed";
-  var COMMAND_SOURCE = "pr-embed-cmd";
+  var EVENT_SOURCE = __EVENT_SOURCE__;
+  var COMMAND_SOURCE = __COMMAND_SOURCE__;
   var player = null;
   var timer = null;
+  var lastPosted = null;
 
   function post(msg) {
     msg.source = EVENT_SOURCE;
@@ -85,12 +93,19 @@ _PAGE_TEMPLATE = """<!doctype html>
     timer = setInterval(function () {
       if (player && typeof player.getCurrentTime === "function") {
         var t = player.getCurrentTime();
-        if (typeof t === "number" && isFinite(t)) post({ type: "time", seconds: t });
+        // Only post when the time actually changed — no per-tick message flood.
+        if (typeof t === "number" && isFinite(t) && t !== lastPosted) {
+          lastPosted = t;
+          post({ type: "time", seconds: t });
+        }
       }
     }, 250);
   }
 
   window.addEventListener("message", function (e) {
+    // Commands must come from our embedder (the Reader) and carry the command
+    // source tag — defense in depth around the player control surface.
+    if (e.source !== window.parent) return;
     var d = e.data;
     if (!d || d.source !== COMMAND_SOURCE) return;
     if (d.type === "seek" && player && typeof player.seekTo === "function") {
