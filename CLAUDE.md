@@ -107,6 +107,7 @@ For speaker diarization, set `HF_TOKEN` and accept model terms at:
 | `app/src/main/vault.ts` | safeStorage-encrypted key vault (session-memory fallback when encryption unavailable) |
 | `app/src/main/ipc.ts` + `protocol.ts` | Typed IPC handlers; `podcast-reader://` URL validation (confirm-before-run) |
 | `app/src/main/media-protocol.ts` | `app://media/<source_id>` privileged-scheme handler: sha256-id validation (no SSRF/traversal), adds the bearer token (renderer never holds it), forwards `Range`, returns the engine `Response` verbatim (streamed) |
+| `app/src/main/external-links.ts` | External-navigation + YouTube-embed policy for the `file://` renderer: `isExternalWebUrl` (http/https → `shell.openExternal`, wired in index.ts via `setWindowOpenHandler`/`will-navigate`) and the host-scoped `Referer` injection that fixes YouTube embed Error 153 (a `file://` origin sends no usable referer) |
 | `app/src/main/updater.ts` | electron-updater orchestration: full-download GitHub Releases, consent, engine-quit-before-install; gated off in dev/unsigned |
 | `app/src/main/app-config.ts` | App-side config under userData (`first_run_complete` — the setup wizard's gate) |
 | `app/src/main/index.ts` | Main entry: lifecycle glue; window creation passes the branded `icon:` resolved packaged (`<resources>/icon.png`) vs dev (`<app>/build/icon.png`) |

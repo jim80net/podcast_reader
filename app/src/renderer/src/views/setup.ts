@@ -410,11 +410,13 @@ function buildChapterSection(isDisposed: () => boolean): ChapterSection {
       docsLink.removeAttribute('href')
       docsLink.textContent = ''
     } else {
-      // No external-link affordance exists in window.api (preload bridge);
-      // render the URL as selectable text rather than fabricate behavior.
+      // A real link: the main process routes target="_blank" http(s) opens to
+      // the OS default browser (where the user is signed in), never an in-app
+      // window.
       docsLink.hidden = false
-      docsLink.removeAttribute('href')
-      docsLink.textContent = `How do I get a key? ${url}`
+      docsLink.setAttribute('href', url)
+      docsLink.setAttribute('target', '_blank')
+      docsLink.textContent = 'How do I get a key?'
     }
     keyResult.textContent = ''
   }
@@ -428,12 +430,35 @@ function buildChapterSection(isDisposed: () => boolean): ChapterSection {
     const entered = keyInput.value
     window.api
       .testKey(providerSelect.value, entered === '' ? undefined : entered)
-      .then((result) => {
-        keyResult.textContent = result.ok
-          ? 'Key works.'
-          : `Key test failed: ${result.detail ?? 'unknown error'}`
+      .then(async (result) => {
+        if (!result.ok) {
+          keyResult.textContent = `Key test failed: ${result.detail ?? 'unknown error'}`
+          return
+        }
+        // A working key the user just entered is one they want to use: persist
+        // it (and set it as the chapter provider) right away rather than
+        // stranding them at "Key works." with nothing saved. Testing the
+        // already-stored key (empty field) has nothing to persist.
+        if (entered === '') {
+          keyResult.textContent = 'Saved key works.'
+          return
+        }
+        // Persist in its own try/catch: a save failure must NOT be reported as
+        // a test failure (the key is valid), and must be surfaced — silently
+        // dropping a validated key is the exact bug this auto-save fixes.
+        try {
+          await persistChapterConfig(entered)
+        } catch (err) {
+          if (isDisposed()) return
+          keyResult.textContent = `Key works, but saving it failed: ${extractEngineDetail(err)}`
+          return
+        }
+        if (isDisposed()) return
+        keyInput.value = ''
+        keyResult.textContent = 'Key works — saved and set as your chapter provider.'
       })
       .catch((err: unknown) => {
+        if (isDisposed()) return
         keyResult.textContent = `Key test failed: ${extractEngineDetail(err)}`
       })
       .finally(() => {
@@ -441,25 +466,29 @@ function buildChapterSection(isDisposed: () => boolean): ChapterSection {
       })
   })
 
+  // Persist the chosen provider (+ custom URL) and, if a key was entered, push
+  // it — the one routing shared by Test-on-success and the Save button.
+  async function persistChapterConfig(key: string): Promise<void> {
+    const plan = planChapterSave({
+      provider: providerSelect.value,
+      key,
+      customUrl: customUrlInput.value
+    })
+    const settings = await window.api.getSettings()
+    await window.api.putSettings({ ...settings, ...plan.settings })
+    if (plan.key !== null) await window.api.putKey(plan.key.provider, plan.key.value)
+  }
+
   saveButton.addEventListener('click', () => {
     // Don't submit when the section never loaded its providers (degraded /
     // transient failure): the provider select would be empty/stale (cubic).
     if (degraded || providers.length === 0) return
-    const plan = planChapterSave({
-      provider: providerSelect.value,
-      key: keyInput.value,
-      customUrl: customUrlInput.value
-    })
     saveButton.disabled = true
     keyResult.textContent = 'Saving…'
     void (async () => {
       try {
-        const settings = await window.api.getSettings()
-        await window.api.putSettings({ ...settings, ...plan.settings })
-        if (plan.key !== null) {
-          await window.api.putKey(plan.key.provider, plan.key.value)
-          keyInput.value = ''
-        }
+        await persistChapterConfig(keyInput.value)
+        keyInput.value = ''
         if (isDisposed()) return
         keyResult.textContent = 'Saved.'
       } catch (err) {

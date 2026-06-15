@@ -1,11 +1,12 @@
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 
-import { BrowserWindow, app, dialog, ipcMain, protocol, safeStorage } from 'electron'
+import { BrowserWindow, app, dialog, ipcMain, protocol, safeStorage, shell } from 'electron'
 import { autoUpdater } from 'electron-updater'
 
 import { AppConfigStore } from './app-config'
 import { broadcastTo } from './broadcast'
+import { YOUTUBE_REFERER, YOUTUBE_URL_FILTER, isExternalWebUrl } from './external-links'
 import { resolveDataDir } from './data-dir'
 import { defaultSupervisorDeps, ensureEngine } from './engine'
 import { EngineClient, EventStream } from './engine-client'
@@ -219,8 +220,12 @@ function windowIconPath(): string {
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({
-    width: 1100,
-    height: 750,
+    // Wide enough that the Reader's full editorial layout — chapter-nav
+    // sidebar + transcript + key-points gutter — clears the artifact's 1200px
+    // gutter breakpoint out of the box (the gutter hides below it).
+    width: 1360,
+    height: 860,
+    minWidth: 720,
     show: false,
     icon: windowIconPath(),
     webPreferences: {
@@ -236,6 +241,33 @@ function createWindow(): void {
   mainWindow.on('closed', () => {
     mainWindow = null
   })
+
+  // External links (the "Watch on YouTube" fallback, provider key-docs links)
+  // open in the OS default browser — where the user is logged in — never a
+  // chromeless in-app window. window.open (target="_blank") is denied here and
+  // handed to the shell; top-level navigations to web URLs are caught too, so
+  // the single file:// document can never navigate away from the app.
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (isExternalWebUrl(url)) void shell.openExternal(url)
+    return { action: 'deny' }
+  })
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    if (isExternalWebUrl(url)) {
+      event.preventDefault()
+      void shell.openExternal(url)
+    }
+  })
+
+  // YouTube's embedded player rejects requests without a valid HTTP Referer
+  // (Error 153, enforced late 2025). The file:// renderer sends none, so inject
+  // one on YouTube-bound requests only — scoped by host filter so engine
+  // (127.0.0.1) and app://media traffic are never given a spoofed Referer.
+  mainWindow.webContents.session.webRequest.onBeforeSendHeaders(
+    YOUTUBE_URL_FILTER,
+    (details, callback) => {
+      callback({ requestHeaders: { ...details.requestHeaders, Referer: YOUTUBE_REFERER } })
+    }
+  )
 
   if (!app.isPackaged && process.env['ELECTRON_RENDERER_URL'] !== undefined) {
     void mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])

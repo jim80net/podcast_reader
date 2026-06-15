@@ -1,6 +1,7 @@
 import { mountCookiesSection } from './cookies-section'
 import { mountPacksSection } from './packs-section'
 import { mountPairingSection } from './pairing-section'
+import { planChapterSave } from '../chapter-onboarding'
 import { el } from '../dom'
 import { extractEngineDetail, settingsErrorField } from '../engine-error'
 import { keyPlaceholder, modelPlaceholder, toSettingsUpdate } from '../settings-form'
@@ -162,12 +163,43 @@ export function mountSettings(container: HTMLElement): ViewCleanup {
       const entered = keyInput.value
       window.api
         .testKey(providerSelect.value, entered === '' ? undefined : entered)
-        .then((result) => {
-          keyResult.textContent = result.ok
-            ? 'Key works.'
-            : `Key test failed: ${result.detail ?? 'unknown error'}`
+        .then(async (result) => {
+          if (!result.ok) {
+            keyResult.textContent = `Key test failed: ${result.detail ?? 'unknown error'}`
+            return
+          }
+          // A working key the user just entered is one they want to use:
+          // persist it (and set it as the chapter provider) immediately rather
+          // than leaving them at "Key works." with nothing saved. Testing the
+          // already-stored key (empty field) has nothing to persist.
+          if (entered === '') {
+            keyResult.textContent = 'Saved key works.'
+            return
+          }
+          // Persist in its own try/catch: a save failure must NOT be reported
+          // as a test failure (the key is valid), and must be surfaced — never
+          // silently drop a validated key.
+          try {
+            const plan = planChapterSave({
+              provider: providerSelect.value,
+              key: entered,
+              customUrl: customUrlInput.value
+            })
+            const current = await window.api.getSettings()
+            await window.api.putSettings({ ...current, ...plan.settings })
+            if (plan.key !== null) await window.api.putKey(plan.key.provider, plan.key.value)
+            keyInput.value = ''
+            await refreshProviders()
+          } catch (err) {
+            if (disposed) return
+            keyResult.textContent = `Key works, but saving it failed: ${extractEngineDetail(err)}`
+            return
+          }
+          if (disposed) return
+          keyResult.textContent = 'Key works — saved and set as your chapter provider.'
         })
         .catch((err: unknown) => {
+          if (disposed) return
           keyResult.textContent = `Key test failed: ${extractEngineDetail(err)}`
         })
         .finally(() => {
@@ -226,14 +258,21 @@ export function mountSettings(container: HTMLElement): ViewCleanup {
     libraryDirInput.value = settings.library_dir
 
     // -- save -------------------------------------------------------------
-    const saveButton = el('button', { text: 'Save', attrs: { type: 'submit' } })
+    // The submit button lives in a sticky action bar pinned to the bottom of
+    // the page (below), not sandwiched inside the form between the Output
+    // fields and the Packs section — so `form="settings-form"` ties the
+    // out-of-form button back to the form it submits.
+    const saveButton = el('button', {
+      text: 'Save',
+      attrs: { type: 'submit', form: 'settings-form' }
+    })
     const saveStatus = el('span', { class: 'key-result', attrs: { role: 'status' } })
     const generalError = el('p', { class: 'error-text', attrs: { role: 'alert' } })
     generalError.hidden = true
 
     const form = el(
       'form',
-      { class: 'settings-form' },
+      { class: 'settings-form', attrs: { id: 'settings-form' } },
       el('h3', { text: 'Chapters' }),
       field('chapter_provider', 'Provider', providerSelect),
       customUrlField,
@@ -252,7 +291,6 @@ export function mountSettings(container: HTMLElement): ViewCleanup {
       el('h3', { text: 'Output' }),
       sentencesField,
       field('library_dir', 'Library directory', libraryDirInput),
-      el('div', { class: 'form-actions' }, saveButton, saveStatus),
       generalError
     )
     keyInput.id = 'settings-api-key'
@@ -284,6 +322,10 @@ export function mountSettings(container: HTMLElement): ViewCleanup {
     container.append(pairingContainer, cookiesContainer)
     pairingSection = mountPairingSection(pairingContainer)
     cookiesSection = mountCookiesSection(cookiesContainer)
+
+    // Sticky action bar, pinned to the bottom of the page so Save is always
+    // reachable and never buried between the form and the Packs section.
+    container.append(el('div', { class: 'form-actions settings-actions' }, saveButton, saveStatus))
 
     form.addEventListener('submit', (event) => {
       event.preventDefault()
