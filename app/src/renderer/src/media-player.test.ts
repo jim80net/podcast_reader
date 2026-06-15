@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { YOUTUBE_IFRAME_SANDBOX } from './media-player'
+import { YOUTUBE_IFRAME_SANDBOX, isLoopbackOrigin } from './media-player'
 
 /**
  * The player's DOM (inline panel render, per-kind surfaces, YouTube embed +
@@ -17,5 +17,21 @@ describe('YOUTUBE_IFRAME_SANDBOX', () => {
     expect(YOUTUBE_IFRAME_SANDBOX).toBe(
       'allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox allow-presentation'
     )
+  })
+})
+
+describe('isLoopbackOrigin', () => {
+  it('accepts only exact loopback http origins', () => {
+    expect(isLoopbackOrigin('http://127.0.0.1:8000')).toBe(true)
+    expect(isLoopbackOrigin('http://localhost:5173')).toBe(true)
+  })
+
+  it('rejects look-alike and non-loopback origins (no startsWith bypass)', () => {
+    expect(isLoopbackOrigin('http://127.0.0.1.evil.com')).toBe(false)
+    expect(isLoopbackOrigin('http://localhost.evil.com')).toBe(false)
+    expect(isLoopbackOrigin('https://127.0.0.1')).toBe(false) // not http
+    expect(isLoopbackOrigin('http://10.0.0.1')).toBe(false)
+    expect(isLoopbackOrigin('null')).toBe(false)
+    expect(isLoopbackOrigin('')).toBe(false)
   })
 })

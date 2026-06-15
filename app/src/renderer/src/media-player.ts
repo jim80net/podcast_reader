@@ -254,9 +254,20 @@ function buildYoutubeSurface(
 
 // ---- helpers ----------------------------------------------------------------
 
-/** The engine embed page is served from the loopback http origin. */
-function isLoopbackOrigin(origin: string): boolean {
-  return origin.startsWith('http://127.0.0.1') || origin.startsWith('http://localhost')
+/**
+ * The engine embed page is served from the loopback http origin. Parse and
+ * match the hostname EXACTLY — a `startsWith` check would also accept
+ * `http://127.0.0.1.evil.com` (cubic). Exported for the unit test that pins
+ * this bypass-resistance.
+ */
+export function isLoopbackOrigin(origin: string): boolean {
+  let url: URL
+  try {
+    url = new URL(origin)
+  } catch {
+    return false
+  }
+  return url.protocol === 'http:' && (url.hostname === '127.0.0.1' || url.hostname === 'localhost')
 }
 
 function mediaTitle(kind: MediaInfo['kind']): string {
