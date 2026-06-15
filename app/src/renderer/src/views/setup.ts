@@ -1,3 +1,4 @@
+import { customUrlVisible, planChapterSave, providerDocsUrl } from '../chapter-onboarding'
 import { el } from '../dom'
 import { extractEngineDetail } from '../engine-error'
 import { LatestGate } from '../latest-gate'
@@ -13,8 +14,9 @@ import {
   setupNeeded
 } from '../packs-store'
 import { navigate } from '../router'
+import { keyPlaceholder } from '../settings-form'
 import type { ViewCleanup } from '../store'
-import type { HardwareInfo, PackStatus } from '../../../shared/types'
+import type { HardwareInfo, PackStatus, ProviderInfo } from '../../../shared/types'
 
 /**
  * First-run setup wizard (app-setup-ui spec, task 6.2): hardware summary and
@@ -82,10 +84,12 @@ export function mountSetup(container: HTMLElement): ViewCleanup {
     }),
     list
   )
+  const chapter = buildChapterSection(() => disposed)
   container.append(
     hero,
     hardwareSection,
     componentsSection,
+    chapter.section,
     el('div', { class: 'form-actions setup-actions' }, installButton, finishButton, skipButton),
     actionError
   )
@@ -248,6 +252,10 @@ export function mountSetup(container: HTMLElement): ViewCleanup {
   skipButton.addEventListener('click', complete)
 
   void load()
+  // The chapter-provider section loads its own providers list independently of
+  // pack state — a failure degrades the section to "set this up later" and
+  // never blocks Finish/Skip (the no-block guarantee).
+  void chapter.load()
   const unsubscribers = [
     window.api.onPipelineEvent((event) => {
       const result = applyPackEvent(packs, event)
@@ -262,7 +270,10 @@ export function mountSetup(container: HTMLElement): ViewCleanup {
       if (loaded) void load()
     }),
     window.api.onEngineStatus((engineStatus) => {
-      if (engineStatus.state === 'ready' && !loaded) void load()
+      if (engineStatus.state === 'ready' && !loaded) {
+        void load()
+        void chapter.load()
+      }
     })
   ]
 
@@ -270,4 +281,217 @@ export function mountSetup(container: HTMLElement): ViewCleanup {
     disposed = true
     for (const unsubscribe of unsubscribers) unsubscribe()
   }
+}
+
+interface ChapterSection {
+  section: HTMLElement
+  load(): Promise<void>
+}
+
+/**
+ * Optional "AI model" onboarding section (wizard-chapter-provider design):
+ * value-prop copy + benefits, a provider dropdown from `GET /v1/providers`
+ * (built-ins + `custom`), a custom base-URL field shown only for `custom`, a
+ * masked write-only key field with engine-side Test, and a Save that pushes
+ * the key (only if entered) and sets the default provider — mirroring the
+ * Settings provider/key flow without adding any IPC. It NEVER gates the
+ * wizard: Finish/Skip work untouched, and a providers/save failure degrades to
+ * an inline "set this up later in Settings" message.
+ */
+function buildChapterSection(isDisposed: () => boolean): ChapterSection {
+  const providerSelect = el('select', { attrs: { id: 'setup-chapter-provider' } })
+  const docsLink = el('a', { class: 'button-link chapter-docs', attrs: { rel: 'noreferrer' } })
+  const customUrlInput = el('input', {
+    attrs: {
+      type: 'text',
+      id: 'setup-chapter-custom-url',
+      placeholder: 'https://… (or http on localhost)'
+    }
+  })
+  const customUrlField = el(
+    'div',
+    { class: 'field' },
+    el('label', { text: 'Custom provider base URL', attrs: { for: 'setup-chapter-custom-url' } }),
+    customUrlInput
+  )
+  // Hidden until the providers load resolves the selected provider; only the
+  // legacy `custom` slot reveals it.
+  customUrlField.hidden = true
+  const keyInput = el('input', {
+    attrs: { type: 'password', autocomplete: 'off', id: 'setup-chapter-key', placeholder: 'no key set' }
+  })
+  const testButton = el('button', {
+    text: 'Test',
+    class: 'button-secondary',
+    attrs: { type: 'button' }
+  })
+  const saveButton = el('button', {
+    text: 'Save & continue',
+    attrs: { type: 'button', id: 'setup-chapter-save' }
+  })
+  const keyResult = el('span', { class: 'key-result chapter-result', attrs: { role: 'status' } })
+
+  const benefit = (lead: string, rest: string): HTMLElement =>
+    el(
+      'li',
+      { class: 'chapter-benefit' },
+      el('span', { class: 'chapter-tick', text: '✓', attrs: { 'aria-hidden': 'true' } }),
+      el('div', {}, el('strong', { text: lead }), document.createTextNode(` — ${rest}`))
+    )
+
+  const section = el(
+    'section',
+    { class: 'setup-section chapter-section' },
+    el(
+      'div',
+      { class: 'chapter-head' },
+      el('h3', { class: 'setup-section-title', text: 'Make it smarter with an AI model' }),
+      el('span', { class: 'chapter-optional', text: 'Optional' })
+    ),
+    el('p', {
+      class: 'setup-section-note',
+      text: 'Transcription already works on its own. Connect an AI language model and your transcripts gain:'
+    }),
+    el(
+      'ul',
+      { class: 'chapter-benefits' },
+      benefit('Chapter markers', 'jump to topics, with a summary per section.'),
+      benefit('Real paragraphs', 'grouped by idea, not chopped by sentence count.'),
+      benefit('Key points & pull quotes', 'surfaced as you read.')
+    ),
+    el(
+      'div',
+      { class: 'field' },
+      el('label', { text: 'Provider', attrs: { for: 'setup-chapter-provider' } }),
+      providerSelect,
+      docsLink
+    ),
+    customUrlField,
+    el(
+      'div',
+      { class: 'field' },
+      el('label', { text: 'API key', attrs: { for: 'setup-chapter-key' } }),
+      keyInput,
+      el('div', { class: 'key-actions' }, testButton, keyResult)
+    ),
+    el('p', {
+      class: 'chapter-reassure',
+      text:
+        "Stored encrypted on this device. It's sent only to the provider you choose, " +
+        'never to us.'
+    }),
+    el('div', { class: 'form-actions chapter-actions' }, saveButton)
+  )
+
+  let providers: ProviderInfo[] = []
+  let degraded = false
+
+  function degrade(message: string): void {
+    degraded = true
+    keyResult.textContent = message
+  }
+
+  function renderOptions(selected: string): void {
+    providerSelect.replaceChildren()
+    for (const provider of providers) {
+      const label = provider.id + (provider.key_available ? ' • key set' : '')
+      providerSelect.append(el('option', { text: label, attrs: { value: provider.id } }))
+    }
+    if (providers.some((p) => p.id === selected)) providerSelect.value = selected
+  }
+
+  function syncProviderUi(): void {
+    const provider = providerSelect.value
+    customUrlField.hidden = !customUrlVisible(provider)
+    keyInput.placeholder = keyPlaceholder(providers, provider)
+    const url = providerDocsUrl(provider)
+    if (url === null) {
+      docsLink.hidden = true
+      docsLink.removeAttribute('href')
+      docsLink.textContent = ''
+    } else {
+      // No external-link affordance exists in window.api (preload bridge);
+      // render the URL as selectable text rather than fabricate behavior.
+      docsLink.hidden = false
+      docsLink.removeAttribute('href')
+      docsLink.textContent = `How do I get a key? ${url}`
+    }
+    keyResult.textContent = ''
+  }
+
+  providerSelect.addEventListener('change', syncProviderUi)
+
+  testButton.addEventListener('click', () => {
+    if (degraded || providers.length === 0) return
+    testButton.disabled = true
+    keyResult.textContent = 'Testing…'
+    const entered = keyInput.value
+    window.api
+      .testKey(providerSelect.value, entered === '' ? undefined : entered)
+      .then((result) => {
+        keyResult.textContent = result.ok
+          ? 'Key works.'
+          : `Key test failed: ${result.detail ?? 'unknown error'}`
+      })
+      .catch((err: unknown) => {
+        keyResult.textContent = `Key test failed: ${extractEngineDetail(err)}`
+      })
+      .finally(() => {
+        testButton.disabled = false
+      })
+  })
+
+  saveButton.addEventListener('click', () => {
+    // Don't submit when the section never loaded its providers (degraded /
+    // transient failure): the provider select would be empty/stale (cubic).
+    if (degraded || providers.length === 0) return
+    const plan = planChapterSave({
+      provider: providerSelect.value,
+      key: keyInput.value,
+      customUrl: customUrlInput.value
+    })
+    saveButton.disabled = true
+    keyResult.textContent = 'Saving…'
+    void (async () => {
+      try {
+        const settings = await window.api.getSettings()
+        await window.api.putSettings({ ...settings, ...plan.settings })
+        if (plan.key !== null) {
+          await window.api.putKey(plan.key.provider, plan.key.value)
+          keyInput.value = ''
+        }
+        if (isDisposed()) return
+        keyResult.textContent = 'Saved.'
+      } catch (err) {
+        if (isDisposed()) return
+        keyResult.textContent = extractEngineDetail(err)
+      } finally {
+        saveButton.disabled = false
+      }
+    })()
+  })
+
+  async function load(): Promise<void> {
+    // Re-attemptable: a transient failure must NOT permanently disable the
+    // section (cubic) — load() is re-invoked on engine-ready/hydration, so it
+    // never early-returns on `degraded`; a later success recovers it.
+    if (isDisposed()) return
+    try {
+      const [providerList, settings] = await Promise.all([
+        window.api.listProviders(),
+        window.api.getSettings()
+      ])
+      if (isDisposed()) return
+      providers = providerList
+      degraded = false // recovered: re-enable Save/Test, clear the degrade note
+      renderOptions(settings.chapter_provider)
+      customUrlInput.value = settings.custom_provider_url
+      syncProviderUi() // sets keyResult back to '' (clears any degrade message)
+    } catch {
+      // Degrade gracefully — never trap the wizard (design error handling).
+      degrade('AI setup is unavailable right now — you can set this up later in Settings.')
+    }
+  }
+
+  return { section, load }
 }

@@ -156,6 +156,28 @@ test.describe('setup wizard (first run)', () => {
     await expect(wizardHeading(harness)).toHaveCount(0)
   })
 
+  test('optional AI-model section renders, custom reveals the URL field, and Skip finishes with no key', async ({
+    harness
+  }) => {
+    await expectWizardOpen(harness)
+
+    // The optional chapter-provider section is offered with a provider
+    // dropdown (built-ins + custom) fed by GET /v1/providers.
+    const provider = harness.window.locator('#setup-chapter-provider')
+    await expect(provider).toBeVisible()
+    await expect(provider.locator('option')).toHaveCount(6)
+    // The base-URL field is hidden until the custom provider is chosen.
+    await expect(harness.window.locator('#setup-chapter-custom-url')).toBeHidden()
+    await provider.selectOption('custom')
+    await expect(harness.window.locator('#setup-chapter-custom-url')).toBeVisible()
+
+    // Skip still completes setup with NO key set — the no-block guarantee.
+    await harness.window.locator('#setup-skip').click()
+    await expect(harness.window.locator('h2', { hasText: 'Library' })).toBeVisible()
+    const log = await harness.mock.log()
+    expect(log.some((entry) => entry.kind === 'keys-put')).toBe(false)
+  })
+
   test('install progress survives navigation away and back (hydrated from GET /v1/packs)', async ({
     harness
   }) => {
