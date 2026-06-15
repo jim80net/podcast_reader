@@ -20,7 +20,7 @@ const WIZARD_SEED = {
 }
 
 const wizardHeading = (harness: Harness) =>
-  harness.window.locator('h2', { hasText: 'Set up Podcast Reader' })
+  harness.window.locator('h2', { hasText: 'Welcome to Podcast Reader' })
 
 async function expectWizardOpen(harness: Harness): Promise<void> {
   await expectEngineState(harness.window, 'ready')

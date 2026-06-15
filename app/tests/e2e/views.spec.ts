@@ -56,6 +56,21 @@ test('Library lists entries as cards and opens the Reader', async ({ harness }) 
   ).toHaveText('episode two transcript')
 })
 
+test('Library empty state shows a branded first-transcript CTA routing to New', async ({
+  harness
+}) => {
+  await expectEngineState(harness.window, 'ready')
+  // Default mock library is empty (no seed): the branded empty state renders.
+  const empty = harness.window.locator('.empty-state')
+  await expect(empty).toBeVisible()
+  await expect(empty.locator('.empty-title')).toBeVisible()
+  const cta = empty.locator('a.button-cta')
+  await expect(cta).toHaveText('Transcribe your first episode')
+  await cta.click()
+  await expect(harness.window).toHaveURL(/#\/new$/)
+  await expect(harness.window.locator('#new-source')).toBeVisible()
+})
+
 test('New: pasted URL submits and shows live step progress, failure shows the hint', async ({
   harness
 }) => {

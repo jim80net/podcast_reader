@@ -271,10 +271,55 @@ a.card:hover {
 .empty-state {
   text-align: center;
   color: var(--muted);
-  padding: 2.5rem 1rem;
+  padding: 3rem 1.5rem;
   border: 1px dashed var(--border);
-  border-radius: 10px;
+  border-radius: 12px;
   grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.empty-mark {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  margin-bottom: 0.4rem;
+  border-radius: 16px;
+  background: linear-gradient(180deg, var(--accent), color-mix(in srgb, var(--accent) 65%, #000));
+  color: #fff;
+  font-size: 1.6rem;
+  /* Nudge the play glyph toward optical center within the squircle. */
+  padding-left: 0.18em;
+}
+
+.empty-title {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--fg);
+}
+
+.empty-lead {
+  margin: 0;
+  max-width: 28rem;
+}
+
+.button-cta {
+  margin-top: 0.8rem;
+  padding: 0.5rem 1rem;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.button-cta:hover {
+  filter: brightness(1.05);
 }
 
 /* ---- New view ---------------------------------------------------------- */
@@ -533,7 +578,55 @@ a.card:hover {
 
 /* ---- packs (setup wizard + Settings Packs section) --------------------- */
 
-.setup-intro,
+/* First-run wizard polish (native-app-first-impression): hero + sectioning.
+   Presentation only — the wizard's behavior is unchanged. */
+.setup-hero {
+  text-align: center;
+  padding: 1rem 1rem 1.5rem;
+}
+
+.setup-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 72px;
+  height: 72px;
+  margin-bottom: 0.6rem;
+  border-radius: 18px;
+  background: linear-gradient(180deg, var(--accent), color-mix(in srgb, var(--accent) 65%, #000));
+  color: #fff;
+  font-size: 1.9rem;
+  padding-left: 0.18em;
+}
+
+.setup-title {
+  margin: 0 0 0.4rem;
+}
+
+.setup-intro {
+  max-width: 34rem;
+  margin: 0 auto;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.setup-section {
+  margin: 1.25rem 0;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+}
+
+.setup-section-title {
+  margin: 0 0 0.4rem;
+  font-size: 0.95rem;
+}
+
+.setup-section-note {
+  margin: 0 0 0.5rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
 .hardware-summary,
 .device-note {
   margin: 0 0 0.5rem;

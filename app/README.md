@@ -76,6 +76,27 @@ The payload is real now: build it with `packaging/build_engine.py` (see
 end-to-end on ubuntu + windows). Builds without `--engine-dir` are valid:
 the app falls back to the spawn chain above.
 
+## Icon / branding
+
+The app icon (the "play + transcript lines" mark) lives as a single committed
+source: `build/icon.svg` and a rendered `build/icon.png` (1024×1024). Only those
+two are committed — **electron-builder 26 derives the platform `.icns` (macOS)
+and `.ico` (Windows/NSIS) from `build/icon.png` at packaging time**, so no
+`.icns`/`.ico` are hand-generated or committed, and CI needs neither
+`rsvg-convert` nor ImageMagick.
+
+```bash
+npm run build-icons   # re-render build/icon.png from build/icon.svg (dev step)
+```
+
+`build-icons` (`scripts/build-icons.mjs`) spawns `rsvg-convert` and asserts the
+output is a valid 1024×1024 PNG. It is a **documented dev step, not a build/CI
+dependency** (`icon.png` is committed) — run it only when the mark changes or a
+designer drops in a replacement 1024px source. The per-platform `icon` fields in
+`electron-builder.config.cjs` point at `build/icon.png` explicitly; the runtime
+`BrowserWindow` icon ships via extraResources (`<resources>/icon.png` packaged,
+`build/icon.png` in dev). No signing/notarize fields are involved.
+
 ## First run: setup wizard & packs
 
 The packaged engine downloads its heavyweight runtime pieces as *packs*
@@ -215,7 +236,9 @@ module load, before `app.whenReady`.
 | `tests/mock-engine/` | Scriptable `/v1` mock server (separate process; honors the real handshake) |
 | `tests/e2e/` | Playwright specs: mock-engine e2e + the real-engine integration smoke |
 | `scripts/dist.mjs` | Installer build wrapper (`--engine-dir` input → extraResources) |
-| `electron-builder.config.cjs` | Packaging config: NSIS/dmg+zip targets, protocol registration, publish |
+| `scripts/build-icons.mjs` | Dev step: render `build/icon.svg` → `build/icon.png` (1024) via rsvg-convert; PNG magic + dimension asserts |
+| `build/icon.svg` + `build/icon.png` | Committed icon source + render; electron-builder derives `.icns`/`.ico` |
+| `electron-builder.config.cjs` | Packaging config: icon, NSIS/dmg+zip targets, protocol registration, publish |
 
 Linux note: this app ships for Windows + macOS; on headless/dev Linux,
 `safeStorage` may be unavailable, in which case API keys are held in memory

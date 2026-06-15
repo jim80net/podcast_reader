@@ -47,18 +47,45 @@ export function mountSetup(container: HTMLElement): ViewCleanup {
     class: 'button-secondary',
     attrs: { type: 'button', id: 'setup-skip' }
   })
-  container.append(
-    el('h2', { text: 'Set up Podcast Reader' }),
+  // Presentation-only sectioning (native-app-first-impression): a welcoming
+  // hero, then a clearly-labelled hardware section and a components section.
+  // The flow — hardware summary, recommended-pack selection, install with
+  // progress, the first-run gate — is unchanged from below.
+  const hero = el(
+    'div',
+    { class: 'setup-hero' },
+    el('div', { class: 'setup-mark', text: '▶', attrs: { 'aria-hidden': 'true' } }),
+    el('h2', { class: 'setup-title', text: 'Welcome to Podcast Reader' }),
     el('p', {
       class: 'setup-intro',
       text:
-        'Podcast Reader downloads its transcription components on first run. ' +
-        'Everything here can be changed later under Settings → Packs.'
-    }),
+        'Transcription runs entirely on your machine. To get started, Podcast Reader ' +
+        'downloads the components matched to your hardware — a one-time setup you can ' +
+        'change anytime under Settings → Packs.'
+    })
+  )
+  const hardwareSection = el(
+    'section',
+    { class: 'setup-section' },
+    el('h3', { class: 'setup-section-title', text: 'Your hardware' }),
     status,
     hardwareLine,
-    deviceLine,
-    list,
+    deviceLine
+  )
+  const componentsSection = el(
+    'section',
+    { class: 'setup-section' },
+    el('h3', { class: 'setup-section-title', text: 'Components to install' }),
+    el('p', {
+      class: 'setup-section-note',
+      text: 'Recommended components are pre-selected. Sizes are shown so you can choose.'
+    }),
+    list
+  )
+  container.append(
+    hero,
+    hardwareSection,
+    componentsSection,
     el('div', { class: 'form-actions setup-actions' }, installButton, finishButton, skipButton),
     actionError
   )
