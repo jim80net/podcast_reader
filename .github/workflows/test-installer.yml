@@ -1,0 +1,65 @@
+# Unsigned Windows test installer — for hands-on testing, NOT a release.
+#
+# Manual-only (workflow_dispatch). Builds the real frozen engine + the NSIS
+# installer on a Windows runner and uploads the .exe as a downloadable
+# workflow ARTIFACT — it never publishes a GitHub Release and never signs.
+# This respects the app-packaging rule "unsigned artifacts must never be
+# published as release installers": a workflow artifact is a test build you
+# fetch from the run, not a published release. A warning-free *release*
+# installer still requires signing (issue #20 / release.yml).
+#
+# The installed app WILL trip Windows SmartScreen once (unsigned) — click
+# "More info" -> "Run anyway". The bundled frozen engine means it runs with no
+# Python/uv on the test machine.
+name: Test installer (unsigned, Windows)
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Branch/tag/sha to build (default: the selected ref)'
+        required: false
+        default: ''
+
+jobs:
+  windows-test-installer:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: '3.10'
+      # Real frozen engine onedir (same recipe as the frozen-smoke CI job):
+      # engine + whisper-worker entry points, tool seeds (yt-dlp/ffmpeg) staged
+      # into _internal/tools/ so the installed app is self-contained.
+      - name: Build frozen engine
+        run: |
+          uv venv packaging/.venv-engine --python 3.10
+          VENV_PY=packaging/.venv-engine/Scripts/python.exe
+          uv pip install --python "$VENV_PY" '.[worker]' pyinstaller
+          "$VENV_PY" packaging/build_engine.py
+      - name: Install app deps
+        run: npm ci
+        working-directory: app
+      # No --publish: build the NSIS installer locally into app/dist/. No
+      # signing secrets are referenced, so the build is unsigned (test only).
+      - name: Build unsigned NSIS installer
+        run: npm run dist -- --engine-dir ../packaging/dist/engine --win
+        working-directory: app
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: podcast-reader-windows-unsigned-${{ github.sha }}
+          path: app/dist/*.exe
+          retention-days: 14
+          if-no-files-found: error
