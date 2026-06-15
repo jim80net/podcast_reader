@@ -51,10 +51,12 @@ jobs:
       - name: Install app deps
         run: npm ci
         working-directory: app
-      # No --publish: build the NSIS installer locally into app/dist/. No
-      # signing secrets are referenced, so the build is unsigned (test only).
+      # --publish never: build the NSIS installer locally into app/dist/ and do
+      # NOT publish. electron-builder otherwise auto-publishes in CI when a
+      # `publish` config is present (failing on the missing GH_TOKEN). No signing
+      # secrets are referenced either, so the build is unsigned (test only).
       - name: Build unsigned NSIS installer
-        run: npm run dist -- --engine-dir ../packaging/dist/engine --win
+        run: npm run dist -- --engine-dir ../packaging/dist/engine --win --publish never
         working-directory: app
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
