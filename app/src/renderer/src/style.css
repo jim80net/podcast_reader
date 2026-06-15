@@ -265,6 +265,13 @@ a {
   max-width: 30rem;
 }
 
+/* The author `display:flex` above would otherwise defeat the `hidden`
+   attribute's UA `display:none`; honor `hidden` for toggled fields (e.g. the
+   custom-provider base-URL row shown only for the custom provider). */
+.field[hidden] {
+  display: none;
+}
+
 .field label {
   font-size: var(--text-xs);
   font-weight: 600;
@@ -826,6 +833,62 @@ a.card:hover .card-title {
   margin: 0 0 var(--space-2);
   font-size: var(--text-sm);
   color: var(--muted);
+}
+
+/* ---- setup: optional AI-model (chapter provider) section ------------- */
+
+.chapter-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.chapter-head .setup-section-title {
+  margin: 0;
+}
+
+.chapter-optional {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--accent);
+  background: var(--accent-soft);
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+}
+
+.chapter-benefits {
+  list-style: none;
+  margin: var(--space-3) 0;
+  padding: var(--space-3) var(--space-4);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.chapter-benefit {
+  display: flex;
+  gap: var(--space-2);
+  align-items: flex-start;
+  padding: var(--space-1) 0;
+  font-size: var(--text-sm);
+}
+
+.chapter-tick {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.chapter-reassure {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--muted);
+  line-height: var(--leading-snug);
+}
+
+.chapter-docs {
+  word-break: break-word;
 }
 
 .hardware-summary,

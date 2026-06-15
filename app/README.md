@@ -152,7 +152,15 @@ stream as job events. App-side:
   detected hardware, pre-checks recommended packs with sizes, sets
   `whisper_device` from detected hardware (cuda iff Windows + NVIDIA with
   the CUDA pack available), installs with live progress, resumes interrupted
-  downloads, and is re-runnable from Settings → "Run setup again".
+  downloads, and is re-runnable from Settings → "Run setup again". It also
+  hosts an **optional "AI model" section** (after Components) that mirrors the
+  Settings chapter-provider/key flow — provider dropdown from
+  `GET /v1/providers` (built-ins + `custom`), a custom base-URL field shown
+  only for `custom`, a masked write-only key with engine-side Test, a static
+  per-provider "How do I get a key?" hint, and Save → `PUT /v1/keys` (only if
+  a key was entered) + `PUT /v1/settings` (default provider). It never gates
+  the wizard: Finish/Skip work with or without a key, and a providers/save
+  failure degrades to an inline "set this up later in Settings" message.
 - **Settings → Packs** (`src/renderer/src/views/packs-section.ts`): per-pack
   state/version/size/progress, install/uninstall (engine 409 reasons
   surfaced inline), re-download for `incompatible`/`failed` packs, license
