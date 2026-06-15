@@ -237,7 +237,7 @@ module load, before `app.whenReady`.
 | `tests/e2e/` | Playwright specs: mock-engine e2e + the real-engine integration smoke |
 | `scripts/dist.mjs` | Installer build wrapper (`--engine-dir` input → extraResources) |
 | `scripts/build-icons.mjs` | Dev step: render `build/icon.svg` → `build/icon.png` (1024) via rsvg-convert; PNG magic + dimension asserts |
-| `build/icon.svg` + `icon.png` | Committed icon source + render; electron-builder derives `.icns`/`.ico` |
+| `build/icon.svg` + `build/icon.png` | Committed icon source + render; electron-builder derives `.icns`/`.ico` |
 | `electron-builder.config.cjs` | Packaging config: icon, NSIS/dmg+zip targets, protocol registration, publish |
 
 Linux note: this app ships for Windows + macOS; on headless/dev Linux,

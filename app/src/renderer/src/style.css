@@ -289,7 +289,7 @@ a.card:hover {
   height: 64px;
   margin-bottom: 0.4rem;
   border-radius: 16px;
-  background: linear-gradient(180deg, #5aa2ff, #0b5cad);
+  background: linear-gradient(180deg, var(--accent), color-mix(in srgb, var(--accent) 65%, #000));
   color: #fff;
   font-size: 1.6rem;
   /* Nudge the play glyph toward optical center within the squircle. */
@@ -593,7 +593,7 @@ a.card:hover {
   height: 72px;
   margin-bottom: 0.6rem;
   border-radius: 18px;
-  background: linear-gradient(180deg, #5aa2ff, #0b5cad);
+  background: linear-gradient(180deg, var(--accent), color-mix(in srgb, var(--accent) 65%, #000));
   color: #fff;
   font-size: 1.9rem;
   padding-left: 0.18em;

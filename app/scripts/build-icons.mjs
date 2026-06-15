@@ -36,6 +36,11 @@ function assertPng() {
   if (!bytes.subarray(0, 4).equals(PNG_MAGIC)) {
     throw new Error(`${PNG_PATH} is not a PNG (bad magic bytes)`)
   }
+  // Need ≥24 bytes before reading IHDR width/height (offsets 16/20), so a
+  // truncated file gives a clear error rather than an out-of-bounds read.
+  if (bytes.length < 24) {
+    throw new Error(`${PNG_PATH} is truncated (${bytes.length} bytes, need ≥24)`)
+  }
   // PNG: 8-byte signature, then the IHDR chunk (length+type+data); width and
   // height are the first two big-endian uint32s of the IHDR data at offsets
   // 16 and 20.
