@@ -211,6 +211,17 @@ export function mountSettings(container: HTMLElement): ViewCleanup {
     langInput.value = settings.whisper_lang
     const sentencesInput = el('input', { attrs: { type: 'number', min: '1', step: '1' } })
     sentencesInput.value = String(settings.sentences)
+    // The setting key stays `sentences`; the label and note explain that this
+    // length is only the fallback when no AI chapter model groups paragraphs.
+    const sentencesField = field('sentences', 'Fallback paragraph length', sentencesInput)
+    sentencesField.append(
+      el('p', {
+        class: 'field-note',
+        text:
+          'Used only when no AI chapter model is set. With an AI model, ' +
+          'paragraphs follow the actual ideas.'
+      })
+    )
     const libraryDirInput = el('input', { attrs: { type: 'text' } })
     libraryDirInput.value = settings.library_dir
 
@@ -239,7 +250,7 @@ export function mountSettings(container: HTMLElement): ViewCleanup {
       field('whisper_device', 'Device', deviceSelect),
       field('whisper_lang', 'Language', langInput),
       el('h3', { text: 'Output' }),
-      field('sentences', 'Sentences per paragraph', sentencesInput),
+      sentencesField,
       field('library_dir', 'Library directory', libraryDirInput),
       el('div', { class: 'form-actions' }, saveButton, saveStatus),
       generalError

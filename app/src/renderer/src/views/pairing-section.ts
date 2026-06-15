@@ -49,6 +49,12 @@ export function mountPairingSection(container: HTMLElement): PairingSection {
     el('p', {
       class: 'section-note',
       text:
+        'Capture pages straight from Chrome. Coming to the Chrome Web Store; ' +
+        'once installed, pair it here under Settings → Pairing.'
+    }),
+    el('p', {
+      class: 'section-note',
+      text:
         'Pair the Chrome extension to transcribe pages and share logins. ' +
         'The code below is single-use and expires after five minutes.'
     }),
