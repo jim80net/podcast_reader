@@ -93,6 +93,16 @@
   box-sizing: border-box;
 }
 
+/* The `hidden` attribute must always win, even over a component's `display:`
+ * rule. Without this, a class like `.drop-hint { display: flex }` or
+ * `.field { display: flex }` overrides the UA `[hidden] { display: none }`,
+ * leaving the element visible when JS set `.hidden = true` (this caused the
+ * full-screen drop overlay to cover the New form, and custom-URL fields to
+ * always show). One global rule fixes the whole class. */
+[hidden] {
+  display: none !important;
+}
+
 body {
   margin: 0;
   background: var(--bg);
@@ -263,13 +273,6 @@ a {
   gap: var(--space-1);
   margin-bottom: var(--space-4);
   max-width: 30rem;
-}
-
-/* The author `display:flex` above would otherwise defeat the `hidden`
-   attribute's UA `display:none`; honor `hidden` for toggled fields (e.g. the
-   custom-provider base-URL row shown only for the custom provider). */
-.field[hidden] {
-  display: none;
 }
 
 .field label {

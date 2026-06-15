@@ -69,6 +69,11 @@ test('Library empty state shows a branded first-transcript CTA routing to New', 
   await cta.click()
   await expect(harness.window).toHaveURL(/#\/new$/)
   await expect(harness.window.locator('#new-source')).toBeVisible()
+  // The full-screen drop overlay must be hidden unless dragging — otherwise it
+  // (position:fixed; inset:0) visually covers the URL field. `toBeVisible()` on
+  // the input can't catch this (pointer-events:none lets it pass), so assert the
+  // overlay is hidden by default.
+  await expect(harness.window.locator('.drop-hint')).toBeHidden()
 })
 
 test('New: pasted URL submits and shows live step progress, failure shows the hint', async ({
