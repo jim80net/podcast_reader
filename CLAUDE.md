@@ -86,7 +86,8 @@ For speaker diarization, set `HF_TOKEN` and accept model terms at:
 | `src/podcast_reader/engine/managed_tools.py` | Bundle tool-seed reconciliation into `<data_dir>/tools` (newer wins), `PODCAST_READER_TOOLS_DIR` export, scheduled yt-dlp self-update |
 | `src/podcast_reader/engine/pairing.py` | In-memory pairing-code state: mint (6-char unambiguous alphabet, 300 s TTL, replaces prior), claim (constant-time, single-use, 5-failed-attempt budget, uniform rejection); never persisted or logged |
 | `src/podcast_reader/engine/cookies.py` | Netscape cookie-jar validation (domain suffix-match, 1 MB cap) + storage at `<data_dir>/cookies/<domain>.txt` (atomic 0600, dir 0700); metadata-only listing, delete |
-| `src/podcast_reader/engine/app.py` | FastAPI app: bearer auth (single exemption: `POST /v1/pair/claim`), jobs (incl. confirm/dismiss of awaiting-confirmation), events, library, media (`/v1/media/{id}/info` + Range byte-serving), settings, keys (push + test), providers, packs (list/install/uninstall), pair (mint/claim), cookies (put/list/delete), health, shutdown routes |
+| `src/podcast_reader/engine/app.py` | FastAPI app: bearer auth (exemptions: `POST /v1/pair/claim`, `GET /v1/embed/{id}`), jobs (incl. confirm/dismiss of awaiting-confirmation), events, library, media (`/v1/media/{id}/info` + Range byte-serving), YouTube embed (`/v1/embed/{id}`), settings, keys (push + test), providers, packs (list/install/uninstall), pair (mint/claim), cookies (put/list/delete), health, shutdown routes |
+| `src/podcast_reader/engine/embed.py` | Tokenless YouTube embed page served from the loopback http origin (the Error 152/153 fix — a `file://` renderer isn't a valid embedding origin): hosts the YouTube IFrame API + a `pr-embed`/`pr-embed-cmd` postMessage protocol (ready/time/error ↔ seek), validated video id, shared with `app/src/renderer/src/embed-protocol.ts` |
 | `src/podcast_reader/engine/process.py` | Pre-bound socket handshake, discovery file, child reaping, `serve` |
 | `spike/` | Packaging spike evidence (PyInstaller onedir prototype, SPIKE_REPORT.md) |
 | `packaging/engine.spec` + `build_engine.py` | Production frozen engine onedir: engine + whisper-worker entry points, MERGE/COLLECT, `copy_metadata("podcast-reader")`, ctranslate2/faster_whisper hooks (`hooks/`), tool seeds + flat `tools-manifest.json` into `_internal/tools/` |
@@ -112,7 +113,7 @@ For speaker diarization, set `HF_TOKEN` and accept model terms at:
 | `app/src/main/app-config.ts` | App-side config under userData (`first_run_complete` — the setup wizard's gate) |
 | `app/src/main/index.ts` | Main entry: lifecycle glue; window creation passes the branded `icon:` resolved packaged (`<resources>/icon.png`) vs dev (`<app>/build/icon.png`) |
 | `app/src/preload/index.ts` | contextBridge `window.api` — the credential-free renderer's only door |
-| `app/src/renderer/` | Vanilla-TS views (Library/Reader/New/Settings + first-run Setup wizard, whose optional "AI model" section reuses the Settings chapter-provider/key flow via `chapter-onboarding.ts` — provider→docs-URL map, custom-URL toggle, putKey/putSettings save plan — and never gates Finish/Skip) + hash router + jobs/packs stores; Reader hosts the floating `media-player.ts` (video/audio/`youtube-nocookie` raw-postMessage embed) wired to the transcript iframe by `sync-bridge.ts` (`pr-sync`, dual source+channel filter) |
+| `app/src/renderer/` | Vanilla-TS views (Library/Reader/New/Settings + first-run Setup wizard, whose optional "AI model" section reuses the Settings chapter-provider/key flow via `chapter-onboarding.ts` — provider→docs-URL map, custom-URL toggle, putKey/putSettings save plan — and never gates Finish/Skip) + hash router + jobs/packs stores; Reader hosts the inline (docked, non-overlapping) `media-player.ts` (video/audio via `app://media`; YouTube via an iframe loading the engine's loopback `/v1/embed/{id}` page, `embed-protocol.ts` postMessage sync, with a "Watch on YouTube" browser fallback on embed error) wired to the transcript iframe by `sync-bridge.ts` (`pr-sync`, dual source+channel filter) |
 | `app/src/renderer/src/style.css` | Editorial / Reader design system: token-driven (`--serif`/type scale/`--space-*`/`--radius-*`/`--shadow-sm`), warm-paper light + calm dark palettes, system-serif display titles over `system-ui` body, list-led Library, one warm red-brown `--accent` (light `#9a3b2e` / dark `#e0876f`, matching the icon); no bundled font, AA contrast, reduced-motion guarded. Restyle-only — never touches the sandboxed `html.py` artifact |
 | `app/src/shared/types.ts` | TS mirrors of the Python boundary types (key-set parity enforced by the e2e integration smoke) |
 | `app/tests/mock-engine/` + `app/tests/e2e/` | Scriptable mock engine (separate process, real handshake) + Playwright suites |
@@ -125,7 +126,10 @@ Engine `/v1` surface the app consumes: `health`, `shutdown`, `jobs` (+
 `data.job_id`, pack events carry `data.pack_id`, media events carry
 `data.source_id`, and only job events carry `job_id`), `library`,
 `transcripts/{id}.html`, `media/{id}/info` + `media/{id}` (Range bytes via
-the `app://media` proxy), `settings`, `keys`, `keys/test`, `providers`,
+the `app://media` proxy), `embed/{video_id}` (tokenless YouTube embed page,
+loaded directly by the Reader iframe over the loopback origin — not via
+`window.api`; main builds the URL from the engine coordinates), `settings`,
+`keys`, `keys/test`, `providers`,
 `packs` (+ `POST {id}/install`, `DELETE {id}`), `POST pair` (mint a pairing
 code), `cookies` (metadata list + `DELETE {domain}`).
 
@@ -155,9 +159,9 @@ unauthenticated route — code → token), `health`, `POST jobs`
 3. **Local file** → `transcribe.py` runs whisper → whisper JSON
 4. `diarize.py` → segments enriched with `speaker` labels (engine jobs with the `diarize` setting on and the diarization pack installed; skipped with a warning otherwise — CLI diarization stays whisper-ctranslate2 `--hf_token`)
 5. `chapters.py` → `<stem>_chapters.json` (if an API key for the selected chapter provider is available — CLI: the provider's env var; engine: pushed key with env fallback)
-6. `html.py` → `<stem>.html` (styled transcript with TOC, key points, pull quotes, speaker attribution when present; per-passage `data-start`/`data-end` + an inert-standalone `pr-sync` script so the desktop Reader's floating media player can sync)
+6. `html.py` → `<stem>.html` (styled transcript with TOC, key points, pull quotes, speaker attribution when present; per-passage `data-start`/`data-end` + an inert-standalone `pr-sync` script so the desktop Reader's inline media player can sync)
 
-Floating media player (engine jobs / desktop app only): the app's Reader fetches `GET /v1/media/{source_id}/info` for the player kind, then plays YouTube via a `youtube-nocookie` embed (no download) or local/remote media streamed through the `app://media` → `GET /v1/media/{source_id}` Range proxy (remote sources lazily downloaded into a bounded LRU cache, `EngineSettings.media_cache_max_bytes`, default 5 GiB). Click a passage to seek; the current passage highlights and follows playback.
+Inline media player (engine jobs / desktop app only): the app's Reader fetches `GET /v1/media/{source_id}/info` for the player kind, then plays YouTube via an iframe loading the engine's loopback `GET /v1/embed/{video_id}` page (real http origin, the Error 152/153 fix; "Watch on YouTube" browser fallback on embed error) or local/remote media streamed through the `app://media` → `GET /v1/media/{source_id}` Range proxy (remote sources lazily downloaded into a bounded LRU cache, `EngineSettings.media_cache_max_bytes`, default 5 GiB). The player docks inline above the transcript (never overlapping it); click a passage to seek; the current passage highlights and follows playback.
 
 ## Development
 

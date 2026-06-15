@@ -72,6 +72,7 @@ test('engine bearer token is unreachable from the renderer', async ({ harness })
       'listLibrary',
       'transcriptHtml',
       'mediaInfo',
+      'youtubeEmbedUrl',
       'getSettings',
       'putSettings',
       'putKey',

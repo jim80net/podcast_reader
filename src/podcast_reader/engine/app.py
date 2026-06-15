@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING
 
 import httpx
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, Response, status
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from podcast_reader.chapters import verify_key
@@ -34,6 +34,7 @@ from podcast_reader.engine.cookies import (
     store_jar,
     validate_jar,
 )
+from podcast_reader.engine.embed import build_embed_page, is_valid_video_id
 from podcast_reader.engine.jobs import JobStateError
 from podcast_reader.engine.library import get_entry, list_entries
 from podcast_reader.engine.pack_manager import (
@@ -75,6 +76,11 @@ if TYPE_CHECKING:
 #: routes validate against it so a path param can never reach a cache path as
 #: traversal — defense in depth atop the app-side app:// scheme validation.
 _SOURCE_ID_RE = re.compile(r"^[0-9a-f]{64}$")
+
+#: The tokenless GET exemption matches the embed route EXACTLY (valid id only),
+#: so a path like /v1/embed/ or /v1/embed/a/b never bypasses auth — minimizing
+#: the unauthenticated surface as routes are added under the prefix.
+_EMBED_PATH = re.compile(r"^/v1/embed/[A-Za-z0-9_-]{1,32}$")
 
 
 class JobSubmission(BaseModel):
@@ -255,11 +261,17 @@ def create_app(
     async def _require_bearer_token(
         request: Request, call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:
-        # The engine's single unauthenticated route: POST /v1/pair/claim
-        # exists precisely to issue the token to a not-yet-authenticated
-        # extension. The exemption matches (method, path) exactly — any other
-        # method on the claim path still requires the bearer token (per U5).
+        # The engine's unauthenticated routes:
+        #  - POST /v1/pair/claim issues the token to a not-yet-authenticated
+        #    extension (matched exactly — any other method still needs the token).
+        #  - GET /v1/embed/<id> serves a YouTube embed page loaded by the Reader
+        #    iframe, which holds no token; it returns only a static, video-id-
+        #    parameterized page (no secrets, no library/job data) so it is safe
+        #    to expose, and it MUST be tokenless so YouTube sees the loopback
+        #    http origin (the Error 152/153 fix).
         if request.method == "POST" and request.url.path == "/v1/pair/claim":
+            return await call_next(request)
+        if request.method == "GET" and _EMBED_PATH.match(request.url.path):
             return await call_next(request)
         # RFC 7235: the scheme token is case-insensitive; only the credentials
         # are secret, so the constant-time comparison covers just the token.
@@ -447,6 +459,17 @@ def create_app(
         if not _SOURCE_ID_RE.match(source_id):
             raise HTTPException(status_code=404, detail="media not found")
         return source_id
+
+    @app.get("/v1/embed/{video_id}")
+    def youtube_embed(video_id: str) -> HTMLResponse:
+        """Tokenless YouTube embed page (loaded by the Reader iframe).
+
+        Served from the loopback origin so the player gets a valid http origin
+        (the Error 152/153 fix). Returns only a static, id-parameterized page.
+        """
+        if not is_valid_video_id(video_id):
+            raise HTTPException(status_code=404, detail="invalid video id")
+        return HTMLResponse(build_embed_page(video_id))
 
     @app.get("/v1/media/{source_id}/info")
     def media_info(source_id: str) -> MediaInfo:

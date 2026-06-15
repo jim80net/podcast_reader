@@ -29,6 +29,7 @@ export const CHANNELS = {
   libraryList: 'library:list',
   libraryTranscript: 'library:transcript',
   mediaInfo: 'media:info',
+  youtubeEmbedUrl: 'media:youtube-embed-url',
   settingsGet: 'settings:get',
   settingsPut: 'settings:put',
   keysPut: 'keys:put',
@@ -131,6 +132,13 @@ export interface PodcastReaderApi {
    * the renderer solely through the main-mediated `app://media/<id>` scheme.
    */
   mediaInfo(sourceId: string): Promise<MediaInfo>
+  /**
+   * The loopback URL of the engine-hosted YouTube embed page for `videoId`
+   * (`http://127.0.0.1:<port>/v1/embed/<id>`), or null when the engine isn't
+   * ready. Loaded as the Reader's YouTube iframe `src` so the player gets a
+   * real http origin (YouTube rejects the file:// renderer — Error 152/153).
+   */
+  youtubeEmbedUrl(videoId: string): Promise<string | null>
   getSettings(): Promise<EngineSettings>
   putSettings(settings: SettingsUpdate): Promise<EngineSettings>
   /** Write-only: stores in the vault and pushes to the engine ("" clears). */

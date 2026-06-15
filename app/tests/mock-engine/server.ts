@@ -563,10 +563,20 @@ async function handleControl(
 // ---- /v1 surface ----------------------------------------------------------------
 
 async function handleV1(req: IncomingMessage, res: ServerResponse, path: string): Promise<void> {
-  // (method, path) auth exemption exactly like the real middleware (per U5):
-  // only POST /v1/pair/claim bypasses the bearer check.
+  // (method, path) auth exemptions exactly like the real middleware (per U5):
+  // POST /v1/pair/claim and GET /v1/embed/<id> (the tokenless YouTube embed
+  // page the Reader iframe loads) bypass the bearer check.
   if (req.method === 'POST' && path === '/v1/pair/claim') {
     return handlePairClaim(req, res)
+  }
+  if (req.method === 'GET' && path.startsWith('/v1/embed/')) {
+    res.writeHead(200, { 'content-type': 'text/html' })
+    res.end(
+      `<!doctype html><meta charset="utf-8"><script>` +
+        `window.parent.postMessage({source:'pr-embed',type:'error',code:150},'*');` +
+        `</script>`
+    )
+    return
   }
   const auth = req.headers.authorization ?? ''
   if (auth !== `Bearer ${token}`) {

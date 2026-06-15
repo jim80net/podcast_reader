@@ -128,6 +128,26 @@ test('audio entry gets the compact audio skin and still syncs', async ({ harness
     .toBe(5)
 })
 
+test('youtube entry mounts the embed iframe and falls back to a link on embed error', async ({
+  harness
+}) => {
+  await expectEngineState(harness.window, 'ready')
+  const id = createHash('sha256').update('youtube-entry').digest('hex')
+  await seedReader(harness, id, 'youtube')
+  await openReader(harness, id)
+
+  const panel = harness.window.locator('.media-player')
+  await expect(panel).toBeVisible()
+  await expect(panel).toHaveAttribute('data-kind', 'youtube')
+  // The iframe loads the engine-hosted embed page (loopback http origin). The
+  // mock embed page posts an `error`, so the app reveals the "Watch on
+  // YouTube" link (opens the OS browser) instead of a dead black box.
+  const fallback = panel.locator('a.media-youtube-fallback')
+  await expect(fallback).toBeVisible()
+  await expect(fallback).toHaveAttribute('href', /youtube\.com\/watch\?v=/)
+  await expect(panel.locator('iframe.media-youtube')).toBeHidden()
+})
+
 test('unavailable media leaves the Reader transcript-only', async ({ harness }) => {
   await expectEngineState(harness.window, 'ready')
   const id = createHash('sha256').update('unavailable-entry').digest('hex')

@@ -27,6 +27,7 @@ const api: PodcastReaderApi = {
   listLibrary: () => ipcRenderer.invoke(CHANNELS.libraryList),
   transcriptHtml: (sourceId) => ipcRenderer.invoke(CHANNELS.libraryTranscript, sourceId),
   mediaInfo: (sourceId) => ipcRenderer.invoke(CHANNELS.mediaInfo, sourceId),
+  youtubeEmbedUrl: (videoId) => ipcRenderer.invoke(CHANNELS.youtubeEmbedUrl, videoId),
   getSettings: () => ipcRenderer.invoke(CHANNELS.settingsGet),
   putSettings: (settings: SettingsUpdate) => ipcRenderer.invoke(CHANNELS.settingsPut, settings),
   putKey: (provider, apiKey) => ipcRenderer.invoke(CHANNELS.keysPut, provider, apiKey),
