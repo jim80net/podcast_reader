@@ -6,7 +6,7 @@ The app's in-app visual design is the default GitHub-Primer-ish theme (`system-u
 
 ## What Changes
 
-- An **editorial design system** in `style.css`: a type scale (system **serif** display titles + `system-ui` UI/body — no bundled font, so no `font-src`/CSP change and no licensing), warm light + calm dark palettes, spacing/radius tokens, dividers-over-boxes, and sparing accent. `--accent` stays in the **brand-blue** family to match the shipped app icon.
+- An **editorial design system** in `style.css`: a type scale (system **serif** display titles + `system-ui` UI/body — no bundled font, so no `font-src`/CSP change and no licensing), warm light + calm dark palettes, spacing/radius tokens, dividers-over-boxes, and sparing accent. `--accent` is a single **warm red-brown** (light `#9a3b2e` / dark `#e0876f`, both AA); the shipped app icon is recolored to the same warm gradient so brand + accent stay unified.
 - Every view restyled to the system via its **existing semantic classes** — Library (list-led rows with serif titles + muted metadata + right-aligned date), Reader (calm app chrome around the unchanged artifact iframe), New (editorial form + progress), Settings (consistent form controls + sectioning), first-run Setup (aligned to the tokens), and shared chrome (top bar/nav, buttons, chips, focus rings).
 - **No DOM/text restructuring:** element roles, headings, and visible text are preserved so the existing Playwright selectors keep passing; a selector is updated only if a string is intentionally changed.
 - Light **and** dark first-class; AA contrast, visible focus, `prefers-reduced-motion` honored.

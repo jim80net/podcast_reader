@@ -8,8 +8,8 @@ Full design (tokens, typography decision, per-view application, a11y, risks) is 
 - **Typography:** system serif stack (`Georgia, …, serif`) for display + `system-ui` for
   UI/body. No bundled font → no `font-src`/CSP change, no licensing. Georgia ships on both
   target OSes (Windows + macOS); Linux is dev/CI-only.
-- **Accent:** stays brand-blue (matches the shipped app icon); the mockup's warm logo color
-  is not adopted as the accent.
+- **Accent:** a single warm red-brown (light `#9a3b2e` / dark `#e0876f`, both AA); the
+  shipped app icon is recolored to the same warm gradient so brand + accent stay unified.
 - **Hard constraint:** restyle existing semantic classes — preserve DOM roles/headings/text
   so the existing Playwright selectors keep passing.
 - **Out of scope:** the `html.py` transcript artifact in the sandboxed iframe (only the app
