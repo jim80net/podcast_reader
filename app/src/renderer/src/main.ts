@@ -183,6 +183,10 @@ let cleanup: ViewCleanup | null = null
 function render(route: Route): void {
   cleanup?.()
   viewContainer.replaceChildren()
+  // Most views read best at a column width (`.view` caps at 760px); the Reader
+  // hosts a full self-laid-out artifact whose chapter-nav sidebar + key-points
+  // gutter only appear past ~1200px, so it opts into full window width.
+  viewContainer.className = route.view === 'reader' ? 'view view-reader' : 'view'
   for (const [view, link] of navLinks) {
     if (view === route.view) link.setAttribute('aria-current', 'page')
     else link.removeAttribute('aria-current')

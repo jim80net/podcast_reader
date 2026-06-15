@@ -255,6 +255,16 @@ a {
   box-sizing: border-box;
 }
 
+/* The Reader fills the window so the artifact's own responsive 3-column layout
+   (sidebar + transcript + key-points gutter) can render; the 760px reading
+   column would collapse it to a single column (gutter hidden < 1200px,
+   sidebar < 900px). Slim side padding maximizes the content width. */
+.view-reader {
+  max-width: none;
+  width: 100%;
+  padding: var(--space-4) var(--space-4) 0;
+}
+
 .view-status {
   color: var(--muted);
 }
@@ -364,6 +374,17 @@ button.button-secondary:hover:not(:disabled) {
   gap: var(--space-2);
   margin-top: var(--space-2);
   flex-wrap: wrap;
+}
+
+/* Settings Save bar: pinned to the bottom of the scroll region so it's always
+   reachable, never sandwiched between the form and the Packs section. */
+.settings-actions {
+  position: sticky;
+  bottom: 0;
+  margin-top: var(--space-5);
+  padding: var(--space-3) 0;
+  background: linear-gradient(to top, var(--bg) 70%, transparent);
+  z-index: 1;
 }
 
 .key-result {

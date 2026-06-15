@@ -162,13 +162,19 @@ test('Settings: round-trip save, engine-side key test, inline validation error',
   await expect(provider.locator('option')).toHaveCount(6)
 
   // Engine-side key test: the key goes to the engine, the verdict comes back.
+  // A working entered key is persisted immediately (no separate Save needed) —
+  // the result message confirms it, and the key reaches the vault-and-push.
   await harness.window.locator('#settings-api-key').fill('sk-test-123')
   await harness.window.getByRole('button', { name: 'Test key' }).click()
-  await expect(harness.window.locator('.key-result').first()).toHaveText('Key works.')
+  await expect(harness.window.locator('.key-result').first()).toHaveText(
+    'Key works — saved and set as your chapter provider.'
+  )
   const log = await harness.mock.log()
   expect(log.some((entry) => entry.kind === 'keys-test' && entry.detail === 'anthropic')).toBe(
     true
   )
+  // The successful Test auto-saved the key (keys-put), not just validated it.
+  expect(log.some((entry) => entry.kind === 'keys-put' && entry.detail === 'anthropic')).toBe(true)
 
   // Save: settings PUT first, then the key goes through vault-and-push.
   await harness.window.locator('#settings-sentences').fill('7')
