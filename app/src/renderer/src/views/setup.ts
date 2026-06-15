@@ -59,9 +59,9 @@ export function mountSetup(container: HTMLElement): ViewCleanup {
     el('p', {
       class: 'setup-intro',
       text:
-        'Transcription runs entirely on your machine. To get started, Podcast Reader ' +
-        'downloads the components matched to your hardware — a one-time setup you can ' +
-        'change anytime under Settings → Packs.'
+        'Everything runs on your computer — your audio never leaves it. First, ' +
+        "let's download the speech model that fits your hardware. (Want chapter " +
+        'markers and clean, idea-based paragraphs? Add an AI model in Settings — optional.)'
     })
   )
   const hardwareSection = el(
@@ -129,14 +129,24 @@ export function mountSetup(container: HTMLElement): ViewCleanup {
         ? 'Transcription will use your NVIDIA GPU (device: cuda).'
         : 'Transcription will run on the CPU (device: cpu).'
     renderList()
+    // Install and Finish are mutually exclusive by state: an install in
+    // progress shows an "Installing…" affordance with Finish hidden; once
+    // everything selected is installed (or setup isn't needed at all) Install
+    // disappears and Finish takes its place. "Skip for now" stays available
+    // until either Finish or Skip completes the wizard.
     const installing = packs.some((pack) => pack.state === 'installing')
+    const done = selectionInstalled(packs, selection) || !setupNeeded(packs)
+    installButton.textContent = installing ? 'Installing…' : 'Install selected'
     installButton.disabled =
       installing ||
       ![...selection].some((id) => {
         const pack = packs.find((entry) => entry.id === id)
         return pack !== undefined && installableNow(pack.state)
       })
-    finishButton.hidden = !(selectionInstalled(packs, selection) || !setupNeeded(packs))
+    // Hide Install once there is nothing left to install; never show Finish
+    // while an install is still running.
+    installButton.hidden = done && !installing
+    finishButton.hidden = installing || !done
   }
 
   function renderList(): void {

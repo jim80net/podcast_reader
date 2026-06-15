@@ -244,7 +244,7 @@ test.describe('Settings packs section', () => {
     // with no actions (per S5).
     await expect(harness.window.locator('.packs-section .pack-row')).toHaveCount(6)
     const diarization = packRow(harness, 'diarization')
-    await expect(diarization.locator('.pack-state')).toHaveText('unavailable')
+    await expect(diarization.locator('.pack-state')).toHaveText('Coming soon')
     await expect(diarization.locator('button')).toHaveCount(0)
 
     // No advisory while the CUDA pack is installed and usable.

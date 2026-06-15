@@ -16,10 +16,11 @@ export function mountNew(container: HTMLElement, store: AppStore): ViewCleanup {
   const formError = el('p', { class: 'error-text', attrs: { role: 'alert' } })
   formError.hidden = true
   const urlInput = el('input', {
+    class: 'new-source-input',
     attrs: {
       type: 'text',
       id: 'new-source',
-      placeholder: 'https://… or drop an audio file anywhere on this page',
+      placeholder: 'Paste a URL (YouTube, X, podcast…) — or drop a file anywhere on this page',
       autocomplete: 'off'
     }
   })
@@ -48,7 +49,7 @@ export function mountNew(container: HTMLElement, store: AppStore): ViewCleanup {
 
   const confirmSection = el('section', { class: 'job-section' })
   const jobsSection = el('section', { class: 'job-section' })
-  const dropHint = el('div', { class: 'drop-hint', text: 'Drop to transcribe' })
+  const dropHint = el('div', { class: 'drop-hint', text: 'Drop an audio or video file' })
   dropHint.hidden = true
   container.append(el('h2', { text: 'New transcript' }), form, confirmSection, jobsSection, dropHint)
 

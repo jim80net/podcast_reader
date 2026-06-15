@@ -100,7 +100,7 @@ export function mountPacksSection(container: HTMLElement, getDevice: () => strin
     )
     const body = el('div', { class: 'pack-row-body' }, head)
     if (pack.state === 'unavailable') {
-      body.append(el('p', { class: 'pack-note', text: 'Not yet available for download.' }))
+      body.append(el('p', { class: 'pack-note', text: 'Coming soon.' }))
     }
     const progress = packProgressBar(pack)
     if (progress !== null) body.append(progress)

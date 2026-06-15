@@ -10,9 +10,11 @@ import type { PackStatus } from '../../shared/types'
 
 /** State badge, styled by data-state like the job badges. */
 export function packStateBadge(pack: PackStatus): HTMLElement {
+  // The unpublished (`unavailable`) pack reads "Coming soon" rather than the
+  // raw state; data-state stays `unavailable` so styling/selectors are intact.
   return el('span', {
     class: 'pack-state',
-    text: pack.state,
+    text: pack.state === 'unavailable' ? 'Coming soon' : pack.state,
     attrs: { 'data-state': pack.state }
   })
 }
