@@ -52,6 +52,48 @@ Tests isolate state per run via `PODCAST_READER_DATA_DIR` and
 `PODCAST_READER_USER_DATA_DIR` (the latter overrides Electron's userData —
 vault location and single-instance lock scope).
 
+## Design system (Editorial / Reader)
+
+The renderer's single stylesheet (`src/renderer/src/style.css`) is a token-driven
+**editorial** design — a warm-paper light palette and a calm dark palette, serif
+display titles over a `system-ui` body, a consistent type/spacing scale, dividers
+over boxes, and a single warm red-brown accent (matching the recolored app icon).
+Both themes are first-class via `prefers-color-scheme`; every component reads the
+tokens, so a palette tweak lives in one place.
+
+- **Typography** — display/titles use a system serif stack
+  (`--serif: Georgia, 'Iowan Old Style', 'Times New Roman', serif`; Georgia ships
+  on Windows + macOS, serif fallback elsewhere). Body, labels, metadata, and form
+  controls stay `--sans` (`system-ui`). **No web font is bundled and there is no
+  `font-src`/CSP change.**
+- **Tokens** (`:root` + the `prefers-color-scheme: dark` block):
+  - Type: `--serif`, `--sans`, `--text-xs … --text-2xl`, `--leading-*`.
+  - Layout: `--space-1 … --space-7`, `--radius-sm/md/lg/pill`, `--shadow-sm`.
+  - Light palette: `--bg #f7f4ee` (warm paper), `--surface #ffffff`,
+    `--surface-muted #f1ede5`, `--fg #20201d`, `--muted #6b6157`,
+    `--border #e3ddd2`, `--border-strong #cfc7b9`.
+  - Dark palette: `--bg #16151a`, `--surface #1e1d23`, `--surface-muted #26252c`,
+    `--fg #ece8e1`, `--muted #a59d92`, `--border #34323b`,
+    `--border-strong #45424c`.
+  - Accent (warm red-brown, one value used for links, active nav, primary
+    buttons, chips, focus rings, and the icon-echo squircles): light
+    `--accent #9a3b2e` with `--accent-fg #ffffff` (6.9:1); dark `--accent #e0876f`
+    with `--accent-fg #1a1206` (6.9:1). `--accent-soft` is the tinted
+    hover/active fill. Status tokens: `--ok`, `--danger`, `--warn`.
+- **Accessibility** — text, muted text, and accent controls meet WCAG AA on both
+  palettes; every interactive element keeps a visible focus ring
+  (`outline: 2px solid var(--accent)`); transitions are confined behind
+  `@media (prefers-reduced-motion: no-preference)`.
+- **Restyle-only** — the uplift restyles the existing semantic classes
+  (`.card`/`.card-title`, `.badge`, `.field`, `.setup-*`, `.pack-*`, …) without
+  changing element roles, headings, or visible text, so the e2e role/text
+  selectors keep resolving. The Reader styles only the app chrome around the
+  transcript; the sandboxed iframe artifact (`html.py` output) is never touched.
+
+The app icon (`build/icon.svg` → `build/icon.png`) uses the same warm gradient
+(`#c96a52` → `#9a3b2e`) with the white play+lines glyph; regenerate the PNG with
+`npm run build-icons` after editing the SVG.
+
 ## Packaging (design decisions 9, 10)
 
 `electron-builder.config.cjs` defines NSIS per-user (Windows), dmg + zip
