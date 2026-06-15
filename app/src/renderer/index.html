@@ -12,18 +12,20 @@
       is contained by the iframe sandbox (allow-scripts only, opaque origin).
       frame-src about: permits the srcdoc frame itself.
 
-      Media playback (floating-video-player): media-src app: permits the
-      <video>/<audio> elements to load engine media via the main-mediated
-      privileged app:// scheme (the renderer never holds the engine token).
-      frame-src youtube-nocookie permits the YouTube embed; there is NO
-      script-src allowance for youtube.com — the embed is driven via the raw
-      cross-origin-iframe postMessage protocol, so no third-party JS runs in
-      this window (design F1). Every delta is inherited by the srcdoc artifact
-      too (CSP is not per-frame, F2); they are kept minimal for that reason.
+      Media playback (media-player): media-src app: permits the <video>/<audio>
+      elements to load engine media via the main-mediated privileged app://
+      scheme (the renderer never holds the engine token). frame-src
+      http://127.0.0.1:* permits the YouTube embed iframe, which loads the
+      engine-hosted embed page over the loopback origin (any port) — the only
+      origin YouTube accepts (the file:// renderer triggers Error 152/153). The
+      YouTube IFrame API JS runs INSIDE that engine-origin frame, never in this
+      window, so no third-party JS runs here (design F1). Every delta is
+      inherited by the srcdoc artifact too (CSP is not per-frame, F2); they are
+      kept minimal for that reason.
     -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; frame-src 'self' about: https://www.youtube-nocookie.com; media-src app:"
+      content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; frame-src 'self' about: http://127.0.0.1:*; media-src app:"
     />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Podcast Reader</title>

@@ -258,11 +258,16 @@ a {
 /* The Reader fills the window so the artifact's own responsive 3-column layout
    (sidebar + transcript + key-points gutter) can render; the 760px reading
    column would collapse it to a single column (gutter hidden < 1200px,
-   sidebar < 900px). Slim side padding maximizes the content width. */
+   sidebar < 900px). Slim side padding maximizes the content width. It is also
+   bounded to the viewport (3.5rem ≈ the sticky app header) so the inline media
+   player docks at the top and the transcript iframe scrolls internally beneath
+   it — the player never scrolls away or covers text. */
 .view-reader {
   max-width: none;
   width: 100%;
   padding: var(--space-4) var(--space-4) 0;
+  height: calc(100vh - 3.5rem);
+  overflow: hidden;
 }
 
 .view-status {
@@ -695,18 +700,18 @@ a.card:hover .card-title {
 .reader-frame {
   flex: 1;
   width: 100%;
-  min-height: 70vh;
+  min-height: 0;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-sm);
   background: #ffffff;
 }
 
-/* ---- floating media player (media-playback) --------------------------- */
+/* ---- inline media player (media-playback) ----------------------------- */
 
-/* The slot is an empty anchor in the Reader flow; the panel itself floats. */
+/* The slot holds the docked player above the transcript; it never grows. */
 .media-slot {
-  display: contents;
+  flex: 0 0 auto;
 }
 
 .media-preparing {
@@ -714,18 +719,17 @@ a.card:hover .card-title {
   font-size: var(--text-base);
 }
 
-/* position:fixed matches the geometry clamp (window.innerWidth/innerHeight). */
+/* Docked inline (NOT floating): a bounded panel above the transcript. */
 .media-player {
-  position: fixed;
-  z-index: 50;
   display: flex;
   flex-direction: column;
-  min-width: 160px;
-  min-height: 90px;
+  width: 100%;
+  max-width: 720px;
+  margin: 0 0 var(--space-4);
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+  box-shadow: var(--shadow-sm);
   overflow: hidden;
 }
 
@@ -735,7 +739,6 @@ a.card:hover .card-title {
   justify-content: space-between;
   gap: var(--space-2);
   padding: 0.35rem 0.5rem;
-  cursor: move;
   user-select: none;
   background: var(--surface-muted);
   border-bottom: 1px solid var(--border);
@@ -753,9 +756,15 @@ a.card:hover .card-title {
 }
 
 .media-body {
-  flex: 1;
   display: flex;
   min-height: 0;
+}
+
+/* video/YouTube get a bounded 16:9 stage; audio is just its control bar. */
+.media-player[data-kind='video'] .media-body,
+.media-player[data-kind='youtube'] .media-body {
+  aspect-ratio: 16 / 9;
+  max-height: 42vh;
   background: #000;
 }
 
@@ -769,42 +778,18 @@ a.card:hover .card-title {
 .media-audio {
   width: 100%;
   align-self: center;
+  padding: var(--space-2);
 }
 
 .media-youtube-fallback {
   margin: auto;
+  padding: var(--space-5);
   color: #fff;
 }
 
-/* Minimized: collapse to the header strip ("pill"), freeing the transcript. */
-.media-player.minimized {
-  height: auto !important;
-  min-height: 0;
-}
-
-.media-player.minimized .media-body,
-.media-player.minimized .media-resize {
+/* Minimized: collapse to the header strip, freeing the reading area. */
+.media-player.minimized .media-body {
   display: none;
-}
-
-.media-resize {
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  width: 16px;
-  height: 16px;
-  cursor: nwse-resize;
-  background: linear-gradient(
-    135deg,
-    transparent 50%,
-    var(--border-strong) 50%,
-    var(--border-strong) 60%,
-    transparent 60%,
-    transparent 70%,
-    var(--border-strong) 70%,
-    var(--border-strong) 80%,
-    transparent 80%
-  );
 }
 
 /* ---- packs (setup wizard + Settings Packs section) -------------------- */

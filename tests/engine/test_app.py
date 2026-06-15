@@ -289,6 +289,27 @@ class TestAuth:
         assert response.status_code == 401
 
 
+class TestYoutubeEmbed:
+    def test_embed_is_tokenless_and_returns_html(self, engine: _Engine) -> None:
+        # The Reader iframe holds no token; the embed page MUST load without one
+        # (and from the loopback http origin — that is the Error 152/153 fix).
+        response = engine.client.get("/v1/embed/dQw4w9WgXcQ")
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/html")
+        assert "dQw4w9WgXcQ" in response.text
+        assert "youtube-nocookie.com" in response.text
+
+    def test_invalid_video_id_is_404(self, engine: _Engine) -> None:
+        response = engine.client.get("/v1/embed/..%2f..%2fetc")
+        assert response.status_code == 404
+
+    def test_only_get_is_exempt_from_auth(self, engine: _Engine) -> None:
+        # The tokenless exemption is GET-only: a POST to the embed path still
+        # requires the bearer token (no auth bypass surface).
+        response = engine.client.post("/v1/embed/dQw4w9WgXcQ")
+        assert response.status_code == 401
+
+
 class TestHealth:
     def test_health_returns_version_and_fingerprint(self, engine: _Engine) -> None:
         response = engine.client.get("/v1/health", headers=engine.headers)

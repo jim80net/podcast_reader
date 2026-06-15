@@ -63,6 +63,14 @@ export function registerIpcHandlers(
   // Media metadata only — bytes load via the app:// scheme (media-protocol.ts),
   // never over IPC, so the token never reaches the renderer (app-shell spec).
   ipcMain.handle(CHANNELS.mediaInfo, (_e, sourceId: string) => client().mediaInfo(sourceId))
+  // The loopback URL of the tokenless engine-hosted YouTube embed page. The
+  // renderer loads it as an iframe src so the player gets a real http origin
+  // (Error 152/153 fix); reuses the engine coordinates the app:// handler uses.
+  ipcMain.handle(CHANNELS.youtubeEmbedUrl, (_e, videoId: string): string | null => {
+    const engine = manager.media
+    if (engine === null) return null
+    return `${engine.baseUrl}/v1/embed/${encodeURIComponent(videoId)}`
+  })
 
   ipcMain.handle(CHANNELS.settingsGet, () => client().getSettings())
   ipcMain.handle(CHANNELS.settingsPut, (_e, settings: SettingsUpdate) =>
