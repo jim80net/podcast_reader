@@ -160,9 +160,14 @@ export function mountSettings(container: HTMLElement): ViewCleanup {
     keyTestButton.addEventListener('click', () => {
       keyTestButton.disabled = true
       keyResult.textContent = 'Testing…'
+      // Snapshot at click time: the dropdown could change during the async test
+      // round-trip, and the key must persist under the provider we tested, not
+      // whatever is selected when the promise resolves (cubic).
       const entered = keyInput.value
+      const provider = providerSelect.value
+      const customUrl = customUrlInput.value
       window.api
-        .testKey(providerSelect.value, entered === '' ? undefined : entered)
+        .testKey(provider, entered === '' ? undefined : entered)
         .then(async (result) => {
           if (!result.ok) {
             keyResult.textContent = `Key test failed: ${result.detail ?? 'unknown error'}`
@@ -180,11 +185,7 @@ export function mountSettings(container: HTMLElement): ViewCleanup {
           // as a test failure (the key is valid), and must be surfaced — never
           // silently drop a validated key.
           try {
-            const plan = planChapterSave({
-              provider: providerSelect.value,
-              key: entered,
-              customUrl: customUrlInput.value
-            })
+            const plan = planChapterSave({ provider, key: entered, customUrl })
             const current = await window.api.getSettings()
             await window.api.putSettings({ ...current, ...plan.settings })
             if (plan.key !== null) await window.api.putKey(plan.key.provider, plan.key.value)

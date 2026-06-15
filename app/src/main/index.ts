@@ -247,14 +247,19 @@ function createWindow(): void {
   // chromeless in-app window. window.open (target="_blank") is denied here and
   // handed to the shell; top-level navigations to web URLs are caught too, so
   // the single file:// document can never navigate away from the app.
+  const openExternal = (url: string): void => {
+    // A rejection (no default browser, handler unavailable) must not become an
+    // unhandled promise rejection — log and move on.
+    shell.openExternal(url).catch((err: unknown) => log(`openExternal failed: ${String(err)}`))
+  }
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    if (isExternalWebUrl(url)) void shell.openExternal(url)
+    if (isExternalWebUrl(url)) openExternal(url)
     return { action: 'deny' }
   })
   mainWindow.webContents.on('will-navigate', (event, url) => {
     if (isExternalWebUrl(url)) {
       event.preventDefault()
-      void shell.openExternal(url)
+      openExternal(url)
     }
   })
 
