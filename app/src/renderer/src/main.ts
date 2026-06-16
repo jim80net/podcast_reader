@@ -1,5 +1,6 @@
 import './style.css'
 
+import { applyThemePref, getThemePref, nextThemePref } from './app-theme'
 import { el } from './dom'
 import { engineStatusView } from './engine-status-view'
 import { createJobsHydrator } from './jobs-hydrator'
@@ -35,6 +36,38 @@ const navLinks = new Map<Route['view'], HTMLAnchorElement>([
   ['settings', el('a', { text: 'Settings', attrs: { href: hrefFor({ view: 'settings' }) } })]
 ])
 
+// Theme toggle: cycles System → Light → Dark, persisted (app-theme.ts). The
+// warm-paper Light palette is the "white and brown" theme; Dark is the calm
+// palette; System follows the OS.
+const THEME_LABEL: Record<string, { glyph: string; name: string }> = {
+  system: { glyph: '🖥', name: 'System' },
+  light: { glyph: '☀', name: 'Light' },
+  dark: { glyph: '🌙', name: 'Dark' }
+}
+let themePref = getThemePref()
+const themeToggle = el('button', {
+  class: 'theme-toggle',
+  attrs: { type: 'button', title: 'Theme' }
+})
+function renderThemeToggle(): void {
+  const { glyph, name } = THEME_LABEL[themePref] ?? { glyph: '🖥', name: 'System' }
+  themeToggle.textContent = glyph
+  themeToggle.setAttribute('aria-label', `Theme: ${name} (click to change)`)
+  themeToggle.setAttribute('title', `Theme: ${name}`)
+}
+themeToggle.addEventListener('click', () => {
+  themePref = nextThemePref(themePref)
+  localStorage.setItem('pr.theme', themePref)
+  applyThemePref(themePref)
+  renderThemeToggle()
+})
+renderThemeToggle()
+applyThemePref(themePref)
+// Follow OS changes while on System.
+window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+  if (themePref === 'system') applyThemePref(themePref)
+})
+
 const enginePill = el('span', {
   class: 'engine-pill',
   text: 'engine starting…',
@@ -55,6 +88,7 @@ root.append(
     { class: 'app-header' },
     el('span', { class: 'app-name', text: 'Podcast Reader' }),
     el('nav', { class: 'app-nav', attrs: { 'aria-label': 'Views' } }, ...navLinks.values()),
+    themeToggle,
     enginePill
   ),
   engineBanner,

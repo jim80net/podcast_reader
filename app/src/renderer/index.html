@@ -29,6 +29,27 @@
     />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Podcast Reader</title>
+    <!--
+      Resolve the saved theme preference before first paint so the palette never
+      flashes. Mirrors app-theme.ts (the module owns runtime changes + the
+      system-change listener). Inline script is permitted by script-src above.
+    -->
+    <script>
+      ;(function () {
+        try {
+          var pref = localStorage.getItem('pr.theme')
+          var resolved =
+            pref === 'light' || pref === 'dark'
+              ? pref
+              : window.matchMedia('(prefers-color-scheme: dark)').matches
+                ? 'dark'
+                : 'light'
+          document.documentElement.dataset.theme = resolved
+        } catch (e) {
+          /* localStorage/matchMedia unavailable: fall back to the CSS media query */
+        }
+      })()
+    </script>
   </head>
   <body>
     <div id="app"></div>
