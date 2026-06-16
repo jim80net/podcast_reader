@@ -697,9 +697,18 @@ a.card:hover .card-title {
   color: var(--accent);
 }
 
+/* Player (left) + transcript (right) fill the Reader height side by side, so
+   no horizontal real estate is wasted. Stacks vertically on narrow windows. */
+.reader-body {
+  display: flex;
+  gap: var(--space-4);
+  flex: 1;
+  min-height: 0;
+}
+
 .reader-frame {
   flex: 1;
-  width: 100%;
+  min-width: 0;
   min-height: 0;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
@@ -709,9 +718,16 @@ a.card:hover .card-title {
 
 /* ---- inline media player (media-playback) ----------------------------- */
 
-/* The slot holds the docked player above the transcript; it never grows. */
+/* Left media column: a bounded share of the width, pinned to the top. An empty
+   slot (transcript-only Reader) collapses so the transcript spans full width. */
 .media-slot {
-  flex: 0 0 auto;
+  flex: 0 0 clamp(320px, 36%, 560px);
+  min-width: 0;
+  align-self: flex-start;
+}
+
+.media-slot:empty {
+  display: none;
 }
 
 .media-preparing {
@@ -719,13 +735,11 @@ a.card:hover .card-title {
   font-size: var(--text-base);
 }
 
-/* Docked inline (NOT floating): a bounded panel above the transcript. */
+/* Docked in the media column (NOT floating): fills the column width. */
 .media-player {
   display: flex;
   flex-direction: column;
   width: 100%;
-  max-width: 720px;
-  margin: 0 0 var(--space-4);
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
@@ -790,6 +804,24 @@ a.card:hover .card-title {
 /* Minimized: collapse to the header strip, freeing the reading area. */
 .media-player.minimized .media-body {
   display: none;
+}
+
+/* Narrow windows: stack the player above the transcript instead of beside it,
+   and cap the stage height so it doesn't swallow the reading area. */
+@media (max-width: 1000px) {
+  .reader-body {
+    flex-direction: column;
+  }
+
+  .media-slot {
+    flex: 0 0 auto;
+    width: 100%;
+  }
+
+  .media-player[data-kind='video'] .media-body,
+  .media-player[data-kind='youtube'] .media-body {
+    max-height: 38vh;
+  }
 }
 
 /* ---- packs (setup wizard + Settings Packs section) -------------------- */
