@@ -1,6 +1,6 @@
 import './style.css'
 
-import { applyThemePref, getThemePref, nextThemePref } from './app-theme'
+import { THEME_KEY, applyThemePref, getThemePref, nextThemePref } from './app-theme'
 import { el } from './dom'
 import { engineStatusView } from './engine-status-view'
 import { createJobsHydrator } from './jobs-hydrator'
@@ -57,7 +57,7 @@ function renderThemeToggle(): void {
 }
 themeToggle.addEventListener('click', () => {
   themePref = nextThemePref(themePref)
-  localStorage.setItem('pr.theme', themePref)
+  localStorage.setItem(THEME_KEY, themePref)
   applyThemePref(themePref)
   renderThemeToggle()
 })

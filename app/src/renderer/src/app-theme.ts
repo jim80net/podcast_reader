@@ -27,6 +27,8 @@ export function resolveTheme(pref: ThemePref, win: Window = window): ResolvedThe
 
 /** The next preference in the System → Light → Dark cycle. */
 export function nextThemePref(pref: ThemePref): ThemePref {
+  // `?? 'system'` satisfies noUncheckedIndexedAccess (array index is T |
+  // undefined); the modulo keeps the index in range, so it never fires at run.
   return ORDER[(ORDER.indexOf(pref) + 1) % ORDER.length] ?? 'system'
 }
 
