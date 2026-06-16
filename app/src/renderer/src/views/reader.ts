@@ -39,8 +39,10 @@ export function mountReader(container: HTMLElement, sourceId: string): ViewClean
       el('a', { text: '← Library', attrs: { href: hrefFor({ view: 'library' }) } })
     ),
     status,
-    mediaSlot,
-    frame
+    // Side-by-side: the player docks in a left column and the transcript fills
+    // the rest at full height (stacks on narrow windows). An empty media slot
+    // collapses, so a transcript-only Reader uses the full width.
+    el('div', { class: 'reader-body' }, mediaSlot, frame)
   )
 
   let disposed = false
