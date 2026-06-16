@@ -57,6 +57,12 @@ export interface CreatePlayerOptions {
   win?: Window
   /** Test seam: resolve the engine embed URL for a YouTube id. */
   getEmbedUrl?: (videoId: string) => Promise<string | null>
+  /**
+   * Hide the player. The Reader owns the media column, so it supplies this to
+   * collapse the whole column (reclaiming the width for the transcript) and to
+   * reveal a "Show video" control; the header's hide button just invokes it.
+   */
+  onHide?: () => void
 }
 
 /**
@@ -78,12 +84,12 @@ export function createMediaPlayer(
   }
 
   const title = el('span', { class: 'media-title', text: mediaTitle(info.kind) })
-  const minimizeBtn = el('button', {
-    class: 'media-minimize',
-    text: '–',
-    attrs: { type: 'button', title: 'Minimize', 'aria-label': 'Minimize player' }
+  const hideBtn = el('button', {
+    class: 'media-hide',
+    text: '✕',
+    attrs: { type: 'button', title: 'Hide player', 'aria-label': 'Hide player' }
   })
-  const header = el('div', { class: 'media-header' }, title, minimizeBtn)
+  const header = el('div', { class: 'media-header' }, title, hideBtn)
   const body = el('div', { class: 'media-body' })
   const panel = el(
     'div',
@@ -97,13 +103,7 @@ export function createMediaPlayer(
 
   const surface = buildSurface(sourceId, info, body, emitTime, win, getEmbedUrl)
 
-  let minimized = false
-  minimizeBtn.addEventListener('click', () => {
-    minimized = !minimized
-    panel.classList.toggle('minimized', minimized)
-    minimizeBtn.textContent = minimized ? '+' : '–'
-    minimizeBtn.setAttribute('aria-label', minimized ? 'Restore player' : 'Minimize player')
-  })
+  hideBtn.addEventListener('click', () => opts.onHide?.())
 
   return {
     el: panel,

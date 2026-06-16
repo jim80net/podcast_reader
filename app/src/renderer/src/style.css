@@ -67,19 +67,43 @@
   font-family: var(--sans);
 }
 
+/* The dark palette applies when explicitly chosen (data-theme="dark") OR when
+   the OS prefers dark and the user hasn't pinned a theme. app-theme.ts resolves
+   `system` to an explicit data-theme at runtime; the media query is the no-JS /
+   pre-paint fallback and is excluded once a theme is pinned. The warm-paper
+   LIGHT palette in :root above is the default. */
+:root[data-theme='dark'] {
+  /* -- dark palette (calm) ---------------------------------------- */
+  --bg: #16151a; /* near-black with a faint warm cast */
+  --surface: #1e1d23;
+  --surface-muted: #26252c;
+  --fg: #ece8e1; /* warm off-white */
+  --muted: #a59d92; /* AA on --bg/--surface */
+  --border: #34323b;
+  --border-strong: #45424c;
+
+  --accent: #e0876f; /* warm terracotta, dark variant (6.8:1 on --bg) */
+  --accent-fg: #1a1206; /* dark text on the terracotta fill (6.9:1) */
+  --accent-soft: rgba(224, 135, 111, 0.16);
+  --ok: #4bb863;
+  --danger: #f0795f;
+  --warn: #d6a440;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4), 0 4px 16px rgba(0, 0, 0, 0.45);
+}
+
 @media (prefers-color-scheme: dark) {
-  :root {
-    /* -- dark palette (calm) ---------------------------------------- */
-    --bg: #16151a; /* near-black with a faint warm cast */
+  :root:not([data-theme='light']):not([data-theme='dark']) {
+    --bg: #16151a;
     --surface: #1e1d23;
     --surface-muted: #26252c;
-    --fg: #ece8e1; /* warm off-white */
-    --muted: #a59d92; /* AA on --bg/--surface */
+    --fg: #ece8e1;
+    --muted: #a59d92;
     --border: #34323b;
     --border-strong: #45424c;
 
-    --accent: #e0876f; /* warm terracotta, dark variant (6.8:1 on --bg) */
-    --accent-fg: #1a1206; /* dark text on the terracotta fill (6.9:1) */
+    --accent: #e0876f;
+    --accent-fg: #1a1206;
     --accent-soft: rgba(224, 135, 111, 0.16);
     --ok: #4bb863;
     --danger: #f0795f;
@@ -196,6 +220,24 @@ a {
   background: var(--accent-soft);
   color: var(--accent);
   font-weight: 600;
+}
+
+/* Right-grouped with the engine pill: the first margin-left:auto in the header
+   row consumes the free space, so the toggle + pill sit together on the right. */
+.theme-toggle {
+  margin-left: auto;
+  font-size: var(--text-base);
+  line-height: 1;
+  padding: var(--space-1) var(--space-2);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  color: var(--fg);
+  cursor: pointer;
+}
+
+.theme-toggle:hover {
+  border-color: var(--accent);
 }
 
 .engine-pill {
@@ -763,10 +805,40 @@ a.card:hover .card-title {
   font-weight: 600;
 }
 
-.media-minimize {
+.media-hide {
   line-height: 1;
   padding: 0 0.45rem;
+  background: transparent;
+  border: 0;
+  color: var(--muted);
   cursor: pointer;
+  font-size: var(--text-sm);
+}
+
+.media-hide:hover {
+  color: var(--accent);
+}
+
+/* Hidden media column: the slot collapses and the transcript spans full width.
+   A "Show video" button (in the reader-back row) restores it. */
+.reader-body.media-hidden .media-slot {
+  display: none;
+}
+
+.media-show {
+  margin-left: var(--space-3);
+  font-size: var(--text-sm);
+  padding: 2px var(--space-2);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.media-show:hover {
+  color: var(--accent);
+  border-color: var(--accent);
 }
 
 .media-body {
@@ -799,11 +871,6 @@ a.card:hover .card-title {
   margin: auto;
   padding: var(--space-5);
   color: #fff;
-}
-
-/* Minimized: collapse to the header strip, freeing the reading area. */
-.media-player.minimized .media-body {
-  display: none;
 }
 
 /* Narrow windows: stack the player above the transcript instead of beside it,

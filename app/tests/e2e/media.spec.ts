@@ -148,6 +148,27 @@ test('youtube entry mounts the embed iframe and falls back to a link on embed er
   await expect(panel.locator('iframe.media-youtube')).toBeHidden()
 })
 
+test('the media column can be hidden and restored', async ({ harness }) => {
+  await expectEngineState(harness.window, 'ready')
+  await seedReader(harness, VIDEO_ID, 'video')
+  await openReader(harness, VIDEO_ID)
+
+  const panel = harness.window.locator('.media-player')
+  await expect(panel).toBeVisible()
+  const showBtn = harness.window.locator('.media-show')
+  await expect(showBtn).toBeHidden()
+
+  // Hide → the player column collapses, the "Show video" control appears.
+  await panel.getByRole('button', { name: 'Hide player' }).click()
+  await expect(panel).toBeHidden()
+  await expect(showBtn).toBeVisible()
+
+  // Show → restored.
+  await showBtn.click()
+  await expect(panel).toBeVisible()
+  await expect(showBtn).toBeHidden()
+})
+
 test('unavailable media leaves the Reader transcript-only', async ({ harness }) => {
   await expectEngineState(harness.window, 'ready')
   const id = createHash('sha256').update('unavailable-entry').digest('hex')

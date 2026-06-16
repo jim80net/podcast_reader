@@ -32,17 +32,35 @@ export function mountReader(container: HTMLElement, sourceId: string): ViewClean
   })
   frame.hidden = true
   const mediaSlot = el('div', { class: 'media-slot' })
+  const readerBody = el('div', { class: 'reader-body' }, mediaSlot, frame)
+  // "Show video" restores a hidden media column (lives outside the column so it
+  // survives the collapse); revealed only once a player is actually mounted.
+  const showMediaBtn = el('button', {
+    class: 'media-show',
+    text: '▸ Show video',
+    attrs: { type: 'button' }
+  })
+  showMediaBtn.hidden = true
+  showMediaBtn.addEventListener('click', () => {
+    readerBody.classList.remove('media-hidden')
+    showMediaBtn.hidden = true
+  })
+  const hideMedia = (): void => {
+    readerBody.classList.add('media-hidden')
+    showMediaBtn.hidden = false
+  }
   container.append(
     el(
       'p',
       { class: 'reader-back' },
-      el('a', { text: '← Library', attrs: { href: hrefFor({ view: 'library' }) } })
+      el('a', { text: '← Library', attrs: { href: hrefFor({ view: 'library' }) } }),
+      showMediaBtn
     ),
     status,
     // Side-by-side: the player docks in a left column and the transcript fills
     // the rest at full height (stacks on narrow windows). An empty media slot
     // collapses, so a transcript-only Reader uses the full width.
-    el('div', { class: 'reader-body' }, mediaSlot, frame)
+    readerBody
   )
 
   let disposed = false
@@ -71,7 +89,7 @@ export function mountReader(container: HTMLElement, sourceId: string): ViewClean
       return
     }
     mediaSlot.replaceChildren()
-    player = createMediaPlayer(sourceId, info)
+    player = createMediaPlayer(sourceId, info, { onHide: hideMedia })
     mediaSlot.append(player.el)
     const frameWindow = frame.contentWindow
     if (frameWindow !== null) {
