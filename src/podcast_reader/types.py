@@ -108,6 +108,17 @@ class JobOverrides(TypedDict, total=False):
     custom_provider_url: str
 
 
+class JobModels(TypedDict):
+    """The models a job actually ran with (recorded at dequeue), so the UI can
+    show what produced a transcript rather than the current default. Whisper is
+    irrelevant for caption sources (YouTube) — the UI derives the transcription
+    source from the step timeline and uses ``whisper_model`` only otherwise."""
+
+    whisper_model: str
+    chapter_provider: str
+    chapter_model: str  # "" means the provider's default
+
+
 class JobRecord(TypedDict):
     id: str
     source: str
@@ -117,6 +128,7 @@ class JobRecord(TypedDict):
     events: list[PipelineEvent]
     result: PipelineResult | None
     overrides: JobOverrides | None
+    models: JobModels | None
     created_at: float
     updated_at: float
 
@@ -172,6 +184,7 @@ def new_job_record(
         events=[],
         result=None,
         overrides=overrides,
+        models=None,
         created_at=0.0,
         updated_at=0.0,
     )

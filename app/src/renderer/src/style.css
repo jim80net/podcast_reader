@@ -674,38 +674,53 @@ a.card:hover .card-title {
   border-color: var(--warn);
 }
 
-.step-list {
-  list-style: none;
-  margin: var(--space-3) 0 0;
-  padding: 0;
-  font-size: var(--text-sm);
-}
-
-.step {
-  display: flex;
-  gap: var(--space-2);
-  flex-wrap: wrap;
-  padding: 0.15rem 0;
-}
-
-.step::before {
-  content: '○';
-  color: var(--accent);
-}
-
-.step[data-status='done']::before {
-  content: '●';
-  color: var(--ok);
-}
-
-.step-name {
+/* Job-card header title (the link to the transcript once done). */
+.job-title {
+  font-family: var(--serif);
   font-weight: 600;
-  min-width: 6.5rem;
+  font-size: var(--text-md);
+  color: var(--fg);
+  text-decoration: none;
+  overflow-wrap: anywhere;
 }
 
-.step-detail {
+a.job-title:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+/* Key/value table: step status + model rows aligned in two columns. */
+.job-rows {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.2rem var(--space-4);
+  margin-top: var(--space-3);
+  font-size: var(--text-sm);
+  align-items: baseline;
+}
+
+.job-row-key {
   color: var(--muted);
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
+.job-row-val {
+  color: var(--fg);
   overflow-wrap: anywhere;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.job-row-val[data-status='running'] {
+  color: var(--muted);
+}
+
+.job-rerun {
+  display: inline-block;
+  margin-top: var(--space-3);
+  font-size: var(--text-sm);
 }
 
 .step-warning {
@@ -761,18 +776,24 @@ a.card:hover .card-title {
 
 /* ---- Reader ----------------------------------------------------------- */
 
-.reader-back {
-  margin: 0 0 var(--space-4);
+.reader-toolbar {
+  margin: 0 0 var(--space-3);
+  min-height: 1.5rem;
 }
 
-.reader-back a {
+.media-toggle {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
   color: var(--muted);
-  text-decoration: none;
   font-size: var(--text-sm);
+  padding: 2px var(--space-3);
+  cursor: pointer;
 }
 
-.reader-back a:hover {
+.media-toggle:hover {
   color: var(--accent);
+  border-color: var(--accent);
 }
 
 /* Player (left) + transcript (right) fill the Reader height side by side, so
@@ -856,25 +877,9 @@ a.card:hover .card-title {
 }
 
 /* Hidden media column: the slot collapses and the transcript spans full width.
-   A "Show video" button (in the reader-back row) restores it. */
+   The permanent toolbar toggle (.media-toggle) restores it. */
 .reader-body.media-hidden .media-slot {
   display: none;
-}
-
-.media-show {
-  margin-left: var(--space-3);
-  font-size: var(--text-sm);
-  padding: 2px var(--space-2);
-  background: transparent;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-pill);
-  color: var(--muted);
-  cursor: pointer;
-}
-
-.media-show:hover {
-  color: var(--accent);
-  border-color: var(--accent);
 }
 
 .media-body {

@@ -53,6 +53,7 @@ interface JobRecord {
   events: PipelineEvent[]
   result: Record<string, unknown> | null
   overrides: Record<string, unknown> | null
+  models: Record<string, unknown> | null
   created_at: number
   updated_at: number
 }
@@ -318,6 +319,7 @@ function makeJob(
     events: [],
     result: null,
     overrides,
+    models: null,
     created_at: nowSeconds(),
     updated_at: nowSeconds()
   }

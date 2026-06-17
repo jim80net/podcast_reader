@@ -2,7 +2,6 @@ import { el } from '../dom'
 import { extractEngineDetail } from '../engine-error'
 import { mediaTerminalState } from '../media-events'
 import { createMediaPlayer } from '../media-player'
-import { hrefFor } from '../router'
 import { createSyncBridge } from '../sync-bridge'
 import type { MediaPlayer } from '../media-player'
 import type { ViewCleanup } from '../store'
@@ -36,30 +35,22 @@ export function mountReader(container: HTMLElement, sourceId: string): ViewClean
   frame.hidden = true
   const mediaSlot = el('div', { class: 'media-slot' })
   const readerBody = el('div', { class: 'reader-body' }, mediaSlot, frame)
-  // "Show video" restores a hidden media column (lives outside the column so it
-  // survives the collapse); revealed only once a player is actually mounted.
-  // The hide/show choice persists (the user "doesn't use the video"), so it
-  // sticks across episodes and launches.
-  const showMediaBtn = el('button', {
-    class: 'media-show',
-    text: '▸ Show video',
-    attrs: { type: 'button' }
-  })
-  showMediaBtn.hidden = true
+  // A permanent video toggle (shown only once a player exists): always visible
+  // so the user can hide/show the video at will. The choice persists ("doesn't
+  // use the video" sticks across episodes and launches).
+  const mediaToggle = el('button', { class: 'media-toggle', attrs: { type: 'button' } })
+  mediaToggle.hidden = true
   const setMediaHidden = (hidden: boolean, persist: boolean): void => {
     readerBody.classList.toggle('media-hidden', hidden)
-    showMediaBtn.hidden = !hidden
+    mediaToggle.textContent = hidden ? '▸ Show video' : '▾ Hide video'
     if (persist) localStorage.setItem(MEDIA_HIDDEN_KEY, hidden ? '1' : '0')
   }
-  showMediaBtn.addEventListener('click', () => setMediaHidden(false, true))
+  mediaToggle.addEventListener('click', () =>
+    setMediaHidden(!readerBody.classList.contains('media-hidden'), true)
+  )
   const hideMedia = (): void => setMediaHidden(true, true)
   container.append(
-    el(
-      'p',
-      { class: 'reader-back' },
-      el('a', { text: '← Library', attrs: { href: hrefFor({ view: 'library' }) } }),
-      showMediaBtn
-    ),
+    el('div', { class: 'reader-toolbar' }, mediaToggle),
     status,
     // Side-by-side: the player docks in a left column and the transcript fills
     // the rest at full height (stacks on narrow windows). An empty media slot
@@ -95,8 +86,10 @@ export function mountReader(container: HTMLElement, sourceId: string): ViewClean
     mediaSlot.replaceChildren()
     player = createMediaPlayer(sourceId, info, { onHide: hideMedia })
     mediaSlot.append(player.el)
-    // Honor the persisted "hidden" preference once a player actually exists.
-    if (localStorage.getItem(MEDIA_HIDDEN_KEY) === '1') setMediaHidden(true, false)
+    // Reveal the permanent toggle + honor the persisted hidden preference now
+    // that a player exists.
+    mediaToggle.hidden = false
+    setMediaHidden(localStorage.getItem(MEDIA_HIDDEN_KEY) === '1', false)
     const frameWindow = frame.contentWindow
     if (frameWindow !== null) {
       bridge = createSyncBridge({ player, frameWindow })

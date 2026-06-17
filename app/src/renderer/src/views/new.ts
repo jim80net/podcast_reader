@@ -1,6 +1,6 @@
 import { el } from '../dom'
 import { extractEngineDetail } from '../engine-error'
-import { deriveProgress, sortJobs } from '../job-view'
+import { deriveProgress, sortJobs, sourceLabel } from '../job-view'
 import { LatestGate } from '../latest-gate'
 import { buildRerunOverrides } from '../rerun-plan'
 import { hrefFor } from '../router'
@@ -58,10 +58,10 @@ export function mountNew(container: HTMLElement, store: AppStore): ViewCleanup {
 
   let disposed = false
   let rerunOpening = false // guards the rerun dialog's pre-append async gap
-  // source → source_id, so a finished job can link straight to its transcript
-  // (the JobRecord has no source_id; the library entry carries both). Refreshed
-  // on job_done — the same trigger the Library view uses.
-  let transcriptBySource = new Map<string, string>()
+  // source → its library entry (id + title), so a finished job can show the
+  // real video title as its header and link straight to the transcript (the
+  // JobRecord carries neither). Refreshed on job_done, like the Library view.
+  let transcriptBySource = new Map<string, { id: string; title: string }>()
   // Several job_done events can fire a burst of loads; the gate drops all but
   // the latest response so a slow one can't clobber a newer map (OCR).
   const libraryGate = new LatestGate()
@@ -70,7 +70,7 @@ export function mountNew(container: HTMLElement, store: AppStore): ViewCleanup {
     try {
       const entries = await window.api.listLibrary()
       if (disposed || !isLatest()) return
-      transcriptBySource = new Map(entries.map((e) => [e.source, e.source_id]))
+      transcriptBySource = new Map(entries.map((e) => [e.source, { id: e.source_id, title: e.title }]))
       renderJobs()
     } catch {
       // Transient/older engine: done jobs simply won't show the link yet. Silent
@@ -203,35 +203,70 @@ export function mountNew(container: HTMLElement, store: AppStore): ViewCleanup {
   }
 
   function jobCard(job: JobRecord): HTMLElement {
-    // Always surface the full source URL (it was effectively lost when only the
-    // host was shown): the heading is the title when present (with the source
-    // beneath it) or the full source itself when untitled.
-    const heading = el('div', { class: 'job-head' })
-    heading.append(
-      el('span', { class: 'job-source', text: job.title ?? job.source }),
-      el('span', { class: 'badge', text: job.state, attrs: { 'data-state': job.state } })
+    const lib = transcriptBySource.get(job.source)
+    const card = el('div', { class: 'card job-card' })
+
+    // Header = the video title (from the library entry once done; else the
+    // job's title or the source). When done, the title IS the link to the
+    // transcript (no separate "View transcript" link).
+    const titleText = lib?.title ?? job.title ?? sourceLabel(job.source)
+    const titleEl =
+      lib !== undefined
+        ? el('a', {
+            class: 'job-title',
+            text: titleText,
+            attrs: { href: hrefFor({ view: 'reader', sourceId: lib.id }) }
+          })
+        : el('span', { class: 'job-title', text: titleText })
+    card.append(
+      el(
+        'div',
+        { class: 'job-head' },
+        titleEl,
+        el('span', { class: 'badge', text: job.state, attrs: { 'data-state': job.state } })
+      ),
+      // The full source URL on the next row down.
+      el('p', { class: 'job-source-full', text: job.source })
     )
-    const card = el('div', { class: 'card job-card' }, heading)
-    if (job.title !== null) {
-      card.append(el('p', { class: 'job-source-full', text: job.source }))
-    }
+
+    // Step status as a 2-column table. The trivial `resolve`/`download` steps
+    // are hidden; `render` shows only when it warned/errored.
     const progress = deriveProgress(job.events)
-    if (progress.steps.length > 0) {
-      const list = el('ul', { class: 'step-list' })
-      for (const step of progress.steps) {
-        const item = el(
-          'li',
-          { class: 'step', attrs: { 'data-status': step.status } },
-          el('span', { class: 'step-name', text: step.step }),
-          el('span', { class: 'step-detail', text: step.detail })
-        )
-        for (const warning of step.warnings) {
-          item.append(el('p', { class: 'step-warning', text: `⚠ ${warning}` }))
-        }
-        list.append(item)
-      }
-      card.append(list)
+    const visibleSteps = progress.steps.filter((s) => {
+      if (s.step === 'resolve' || s.step === 'download') return false
+      if (s.step === 'render') return s.warnings.length > 0
+      return true
+    })
+    const table = el('div', { class: 'job-rows' })
+    for (const step of visibleSteps) {
+      table.append(
+        el('span', { class: 'job-row-key', text: step.step }),
+        el('span', { class: 'job-row-val', attrs: { 'data-status': step.status } }, ...[
+          el('span', { text: step.detail }),
+          ...step.warnings.map((w) => el('span', { class: 'step-warning', text: `⚠ ${w}` }))
+        ])
+      )
     }
+    // Model rows (Transcription + Chapters) — what the job actually ran with.
+    if (job.models !== null) {
+      const usedCaptions = progress.steps.some((s) => s.step === 'captions')
+      const chapterModel = job.models.chapter_model
+      table.append(
+        el('span', { class: 'job-row-key', text: 'transcription' }),
+        el('span', {
+          class: 'job-row-val',
+          text: usedCaptions ? 'YouTube captions' : job.models.whisper_model
+        }),
+        el('span', { class: 'job-row-key', text: 'chapters' }),
+        el('span', {
+          class: 'job-row-val',
+          text:
+            job.models.chapter_provider + (chapterModel !== '' ? ` · ${chapterModel}` : ' · default')
+        })
+      )
+    }
+    if (table.childElementCount > 0) card.append(table)
+
     for (const warning of progress.warnings) {
       card.append(el('p', { class: 'step-warning', text: `⚠ ${warning}` }))
     }
@@ -260,28 +295,18 @@ export function mountNew(container: HTMLElement, store: AppStore): ViewCleanup {
         )
       )
     }
-    // Finished/failed jobs: link to the transcript (done, matched to a library
-    // entry by source) and offer a rerun with a different model.
+    // Rerun is a plain link beside the model rows (finished/failed jobs).
     if (job.state === 'done' || job.state === 'failed') {
-      const actions = el('div', { class: 'job-actions' })
-      const sourceId = transcriptBySource.get(job.source)
-      if (job.state === 'done' && sourceId !== undefined) {
-        actions.append(
-          el('a', {
-            class: 'button-link',
-            text: 'View transcript →',
-            attrs: { href: hrefFor({ view: 'reader', sourceId }) }
-          })
-        )
-      }
-      const rerun = el('button', {
-        class: 'button-secondary',
+      const rerun = el('a', {
+        class: 'button-link job-rerun',
         text: 'Rerun with a different model…',
-        attrs: { type: 'button' }
+        attrs: { href: '#', role: 'button' }
       })
-      rerun.addEventListener('click', () => void openRerunDialog(job))
-      actions.append(rerun)
-      card.append(actions)
+      rerun.addEventListener('click', (event) => {
+        event.preventDefault()
+        void openRerunDialog(job)
+      })
+      card.append(rerun)
     }
     return card
   }
