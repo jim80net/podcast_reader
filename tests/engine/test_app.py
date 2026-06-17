@@ -308,6 +308,20 @@ class TestJobOverrides:
             "chapter_model": "grok-4",
         }
 
+    def test_explicit_null_override_fields_are_dropped(self, engine: _Engine) -> None:
+        # exclude_none: a field sent as null must not be stored (else the runner
+        # would treat it as an override and clear/clobber wrongly).
+        response = engine.client.post(
+            "/v1/jobs",
+            json={
+                "source": "https://example.com/nulls",
+                "overrides": {"chapter_provider": "xai", "whisper_model": None},
+            },
+            headers=engine.headers,
+        )
+        assert response.status_code == 201
+        assert response.json()["overrides"] == {"chapter_provider": "xai"}
+
     def test_submit_without_overrides_is_none(self, engine: _Engine) -> None:
         response = engine.client.post(
             "/v1/jobs", json={"source": "https://example.com/plain"}, headers=engine.headers

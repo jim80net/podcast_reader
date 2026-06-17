@@ -4,10 +4,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import pytest
+
 from podcast_reader.engine.process import _clear_rerun_artifacts
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from podcast_reader.types import JobOverrides
 
 
 def _seed(staging: Path) -> None:
@@ -31,10 +35,21 @@ class TestClearRerunArtifacts:
         # ...but the downloaded audio is kept (no needless re-download).
         assert (tmp_path / "ep.mp3").exists()
 
-    def test_chapter_override_keeps_transcript_and_audio(self, tmp_path: Path) -> None:
+    @pytest.mark.parametrize(
+        "overrides",
+        [
+            {"chapter_provider": "xai"},
+            {"chapter_model": "grok-4"},
+            {"custom_provider_url": "https://llm.local/v1"},
+        ],
+    )
+    def test_any_chapter_override_keeps_transcript_and_audio(
+        self, tmp_path: Path, overrides: JobOverrides
+    ) -> None:
+        # Each chapter-related field triggers the same re-chapter + re-render:
+        # the whisper JSON and audio survive; chapters + html go.
         _seed(tmp_path)
-        _clear_rerun_artifacts(tmp_path, {"chapter_provider": "xai"})
-        # Re-chapter + re-render only: the whisper JSON and audio survive.
+        _clear_rerun_artifacts(tmp_path, overrides)
         assert (tmp_path / "ep.json").exists()
         assert (tmp_path / "ep.mp3").exists()
         assert not (tmp_path / "ep_chapters.json").exists()

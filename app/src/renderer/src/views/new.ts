@@ -57,6 +57,7 @@ export function mountNew(container: HTMLElement, store: AppStore): ViewCleanup {
   container.append(el('h2', { text: 'New transcript' }), form, confirmSection, jobsSection, dropHint)
 
   let disposed = false
+  let rerunOpening = false // guards the rerun dialog's pre-append async gap
   // source → source_id, so a finished job can link straight to its transcript
   // (the JobRecord has no source_id; the library entry carries both). Refreshed
   // on job_done — the same trigger the Library view uses.
@@ -290,6 +291,10 @@ export function mountNew(container: HTMLElement, store: AppStore): ViewCleanup {
   // Submitting resubmits the same source with the chosen overrides; the engine
   // clears exactly the cached artifacts the change invalidates.
   async function openRerunDialog(job: JobRecord): Promise<void> {
+    // One dialog at a time, including during the async settings/providers fetch
+    // (the in-DOM dialog guards after append; the flag guards the gap before it).
+    if (rerunOpening || container.querySelector('.rerun-dialog') !== null) return
+    rerunOpening = true
     let settings: Awaited<ReturnType<typeof window.api.getSettings>>
     let providers: Awaited<ReturnType<typeof window.api.listProviders>>
     try {
@@ -298,9 +303,11 @@ export function mountNew(container: HTMLElement, store: AppStore): ViewCleanup {
         window.api.listProviders()
       ])
     } catch (err) {
+      rerunOpening = false
       if (!disposed) showFormError(err)
       return
     }
+    rerunOpening = false
     if (disposed) return
 
     const whisperCheck = el('input', { attrs: { type: 'checkbox', id: 'rerun-whisper' } })
