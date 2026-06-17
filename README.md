@@ -194,7 +194,7 @@ When chapters are generated, the HTML includes:
 - **Chapter sections** with headings and summaries
 - **Key points** — bullet-point summaries in a sticky right gutter (hidden on narrow screens)
 - **Pull quotes** — standout phrases rendered as bold inline text after each chapter abstract
-- **Sponsor dimming** — sponsor/ad segments are visually muted (hover to reveal)
+- **Sponsor badges** — sponsor/ad segments are tagged with a badge (rendered at full contrast like every other section)
 - **Anchor navigation** — click any TOC entry to jump to that section
 
 The HTML supports both dark and light themes automatically via `prefers-color-scheme`.
