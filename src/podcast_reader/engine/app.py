@@ -376,6 +376,19 @@ def create_app(
             if body.overrides is not None
             else None
         )
+        if overrides is not None:
+            # Fail fast (like PUT /v1/settings) so a bad rerun input is a 400,
+            # not a job that runs and degrades. Only present fields are checked
+            # (a custom base URL may legitimately come from the settings).
+            prov = overrides.get("chapter_provider")
+            if prov is not None and prov not in PROVIDERS:
+                raise HTTPException(status_code=400, detail=f"unknown chapter provider: {prov!r}")
+            custom_url = overrides.get("custom_provider_url")
+            if custom_url:
+                try:
+                    validate_custom_url(custom_url)
+                except ValueError as exc:
+                    raise HTTPException(status_code=400, detail=str(exc)) from exc
         return store.submit(
             body.source,
             body.title,

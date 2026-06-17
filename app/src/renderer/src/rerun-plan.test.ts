@@ -67,6 +67,20 @@ describe('buildRerunOverrides', () => {
     expect(plan.overrides).toEqual({ whisper_model: 'large-v3', chapter_provider: 'anthropic' })
   })
 
+  it('the custom provider needs a base URL to be valid', () => {
+    expect(
+      buildRerunOverrides({ ...base, reChapter: true, chapterProvider: 'custom' }).valid
+    ).toBe(false)
+    expect(
+      buildRerunOverrides({
+        ...base,
+        reChapter: true,
+        chapterProvider: 'custom',
+        customUrl: 'https://llm.local/v1'
+      }).valid
+    ).toBe(true)
+  })
+
   it('an enabled re-transcribe with a blank model is not valid on its own', () => {
     expect(buildRerunOverrides({ ...base, reTranscribe: true, whisperModel: '   ' })).toEqual({
       overrides: {},

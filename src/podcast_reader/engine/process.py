@@ -184,7 +184,13 @@ def make_pipeline_runner(base: Path, key_store: dict[str, str] | None = None) ->
         # re-transcribe and neither re-downloads the source audio.
         overrides = record.get("overrides") or {}
         _clear_rerun_artifacts(staging, overrides)
-        chapter_model_override = overrides.get("chapter_model")
+        # An explicit chapter_model override wins even when "" (force the
+        # provider default); only fall back to the setting when not overridden.
+        chapter_model = (
+            (overrides["chapter_model"] or None)
+            if "chapter_model" in overrides
+            else (settings["chapter_model"] or None)
+        )
 
         # Jar-aware download (cookie-management spec): a stored jar whose
         # domain suffix-matches the source host wins over the YT_DLP_COOKIES
@@ -195,7 +201,7 @@ def make_pipeline_runner(base: Path, key_store: dict[str, str] | None = None) ->
             source=record["source"],
             title=record["title"],
             output_dir=str(staging),
-            model=(chapter_model_override or settings["chapter_model"]) or None,
+            model=chapter_model,
             whisper_model=overrides.get("whisper_model") or settings["whisper_model"],
             whisper_lang=settings["whisper_lang"],
             whisper_device=settings["whisper_device"],

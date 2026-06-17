@@ -381,10 +381,10 @@ export function mountNew(container: HTMLElement, store: AppStore): ViewCleanup {
       )
     )
 
-    const close = (): void => {
-      dialog.close()
-      dialog.remove()
-    }
+    // Detach on ANY close — the Cancel/submit paths and the native Esc-to-close
+    // both fire 'close', so the dialog never lingers detached in the DOM.
+    dialog.addEventListener('close', () => dialog.remove())
+    const close = (): void => dialog.close()
     cancel.addEventListener('click', close)
     dialog.addEventListener('submit', (event) => {
       event.preventDefault()

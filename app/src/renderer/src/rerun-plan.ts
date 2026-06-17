@@ -33,7 +33,11 @@ export function buildRerunOverrides(input: RerunInput): RerunPlan {
       overrides.custom_provider_url = input.customUrl.trim()
     }
   }
-  const valid =
-    overrides.whisper_model !== undefined || overrides.chapter_provider !== undefined
+  // The chapter section is valid only when a provider is chosen AND, for the
+  // custom provider, a base URL is supplied (the engine rejects custom w/o URL).
+  const chapterValid =
+    overrides.chapter_provider !== undefined &&
+    (overrides.chapter_provider !== 'custom' || overrides.custom_provider_url !== undefined)
+  const valid = overrides.whisper_model !== undefined || chapterValid
   return { overrides, valid }
 }

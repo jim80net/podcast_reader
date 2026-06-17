@@ -322,6 +322,26 @@ class TestJobOverrides:
         assert response.status_code == 201
         assert response.json()["overrides"] == {"chapter_provider": "xai"}
 
+    def test_unknown_override_provider_is_400(self, engine: _Engine) -> None:
+        response = engine.client.post(
+            "/v1/jobs",
+            json={"source": "https://example.com/x", "overrides": {"chapter_provider": "nope"}},
+            headers=engine.headers,
+        )
+        assert response.status_code == 400
+        assert engine.store.list_jobs() == []  # nothing enqueued
+
+    def test_invalid_override_custom_url_is_400(self, engine: _Engine) -> None:
+        response = engine.client.post(
+            "/v1/jobs",
+            json={
+                "source": "https://example.com/x",
+                "overrides": {"chapter_provider": "custom", "custom_provider_url": "ftp://nope"},
+            },
+            headers=engine.headers,
+        )
+        assert response.status_code == 400
+
     def test_submit_without_overrides_is_none(self, engine: _Engine) -> None:
         response = engine.client.post(
             "/v1/jobs", json={"source": "https://example.com/plain"}, headers=engine.headers
