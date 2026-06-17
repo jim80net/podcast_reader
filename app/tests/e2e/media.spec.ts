@@ -169,6 +169,41 @@ test('the media column can be hidden and restored', async ({ harness }) => {
   await expect(showBtn).toBeHidden()
 })
 
+test('the hidden-media preference persists across reopening the Reader', async ({ harness }) => {
+  await expectEngineState(harness.window, 'ready')
+  await seedReader(harness, VIDEO_ID, 'video')
+  await openReader(harness, VIDEO_ID)
+
+  const panel = harness.window.locator('.media-player')
+  await expect(panel).toBeVisible()
+  await panel.getByRole('button', { name: 'Hide player' }).click()
+  await expect(panel).toBeHidden()
+
+  // Reopen the Reader (Library → back): the preference stuck, still hidden.
+  await harness.window.evaluate(() => {
+    window.location.hash = '#/library'
+  })
+  await openReader(harness, VIDEO_ID)
+  await expect(harness.window.locator('.media-player')).toBeHidden()
+  await expect(harness.window.locator('.media-show')).toBeVisible()
+})
+
+test('the transcript iframe follows the app theme', async ({ harness }) => {
+  await expectEngineState(harness.window, 'ready')
+  await seedReader(harness, VIDEO_ID, 'video')
+  // Pin the app to dark; the Reader must inject that into the artifact so the
+  // transcript matches (the artifact would otherwise default to its own dark,
+  // but here we prove it FOLLOWS the app rather than ignoring it).
+  await harness.window.evaluate(() => {
+    document.documentElement.dataset.theme = 'dark'
+  })
+  await openReader(harness, VIDEO_ID)
+  await expect(harness.window.locator('iframe.reader-frame')).toHaveAttribute(
+    'srcdoc',
+    /<html[^>]*\bdata-theme="dark"/
+  )
+})
+
 test('unavailable media leaves the Reader transcript-only', async ({ harness }) => {
   await expectEngineState(harness.window, 'ready')
   const id = createHash('sha256').update('unavailable-entry').digest('hex')

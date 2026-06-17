@@ -9,6 +9,9 @@ import type { ViewCleanup } from '../store'
 import type { SyncBridge } from '../sync-bridge'
 import type { MediaInfo } from '../../../shared/types'
 
+/** Persisted "hide the media column" preference (the user may never use video). */
+const MEDIA_HIDDEN_KEY = 'pr.media.hidden'
+
 /**
  * Reader view (app-views spec + design decision 8): the artifact HTML is
  * fetched main-side with auth and injected verbatim via `iframe.srcdoc` with
@@ -35,20 +38,21 @@ export function mountReader(container: HTMLElement, sourceId: string): ViewClean
   const readerBody = el('div', { class: 'reader-body' }, mediaSlot, frame)
   // "Show video" restores a hidden media column (lives outside the column so it
   // survives the collapse); revealed only once a player is actually mounted.
+  // The hide/show choice persists (the user "doesn't use the video"), so it
+  // sticks across episodes and launches.
   const showMediaBtn = el('button', {
     class: 'media-show',
     text: '▸ Show video',
     attrs: { type: 'button' }
   })
   showMediaBtn.hidden = true
-  showMediaBtn.addEventListener('click', () => {
-    readerBody.classList.remove('media-hidden')
-    showMediaBtn.hidden = true
-  })
-  const hideMedia = (): void => {
-    readerBody.classList.add('media-hidden')
-    showMediaBtn.hidden = false
+  const setMediaHidden = (hidden: boolean, persist: boolean): void => {
+    readerBody.classList.toggle('media-hidden', hidden)
+    showMediaBtn.hidden = !hidden
+    if (persist) localStorage.setItem(MEDIA_HIDDEN_KEY, hidden ? '1' : '0')
   }
+  showMediaBtn.addEventListener('click', () => setMediaHidden(false, true))
+  const hideMedia = (): void => setMediaHidden(true, true)
   container.append(
     el(
       'p',
@@ -91,6 +95,8 @@ export function mountReader(container: HTMLElement, sourceId: string): ViewClean
     mediaSlot.replaceChildren()
     player = createMediaPlayer(sourceId, info, { onHide: hideMedia })
     mediaSlot.append(player.el)
+    // Honor the persisted "hidden" preference once a player actually exists.
+    if (localStorage.getItem(MEDIA_HIDDEN_KEY) === '1') setMediaHidden(true, false)
     const frameWindow = frame.contentWindow
     if (frameWindow !== null) {
       bridge = createSyncBridge({ player, frameWindow })
@@ -168,7 +174,9 @@ export function mountReader(container: HTMLElement, sourceId: string): ViewClean
     .transcriptHtml(sourceId)
     .then((html) => {
       if (disposed) return
-      frame.srcdoc = html
+      // Inject the app's resolved theme so the transcript opens matching the
+      // app (the artifact defaults to dark; the Reader follows the toggle).
+      frame.srcdoc = withTheme(html, document.documentElement.dataset['theme'])
       frame.hidden = false
       status.remove()
     })
@@ -178,8 +186,25 @@ export function mountReader(container: HTMLElement, sourceId: string): ViewClean
       status.classList.add('error-text')
     })
 
+  // Live theme switching while the Reader is open: relay the app theme to the
+  // sandboxed artifact via postMessage (its sync script sets data-theme).
+  const onThemeChange = (event: Event): void => {
+    const theme = (event as CustomEvent<string>).detail
+    frame.contentWindow?.postMessage({ ch: 'pr-theme', theme }, '*')
+  }
+  window.addEventListener('pr-theme-change', onThemeChange)
+
   return () => {
     disposed = true
+    window.removeEventListener('pr-theme-change', onThemeChange)
     teardownPlayer()
   }
+}
+
+/** Set `data-theme` on the artifact's <html> so it opens in the app's theme. */
+function withTheme(html: string, theme: string | undefined): string {
+  if (theme !== 'light' && theme !== 'dark') return html
+  // Insert data-theme as the first attribute of the opening <html> tag, however
+  // it's written (`<html>` or `<html lang="en">`); replaces only the first match.
+  return html.replace(/<html\b/i, `<html data-theme="${theme}"`)
 }
