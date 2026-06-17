@@ -48,7 +48,8 @@ export function registerIpcHandlers(
     client().submitJob({
       source: req.source,
       title: req.title ?? null,
-      requires_confirmation: req.requiresConfirmation ?? false
+      requires_confirmation: req.requiresConfirmation ?? false,
+      overrides: req.overrides
     })
   )
   ipcMain.handle(CHANNELS.jobsList, () => client().listJobs())

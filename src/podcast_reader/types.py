@@ -93,6 +93,21 @@ class PipelineResult(TypedDict):
     title: str
 
 
+class JobOverrides(TypedDict, total=False):
+    """Per-job model overrides for a rerun (each absent key = use the setting).
+
+    The runner merges these over the settings snapshot and clears the cached
+    artifacts a change invalidates: ``whisper_model`` forces a full re-transcribe
+    (json + chapters + html); a chapter-only change (``chapter_provider`` /
+    ``chapter_model`` / ``custom_provider_url``) re-runs chapters + render only.
+    """
+
+    whisper_model: str
+    chapter_provider: str
+    chapter_model: str
+    custom_provider_url: str
+
+
 class JobRecord(TypedDict):
     id: str
     source: str
@@ -101,6 +116,7 @@ class JobRecord(TypedDict):
     error: JobError | None
     events: list[PipelineEvent]
     result: PipelineResult | None
+    overrides: JobOverrides | None
     created_at: float
     updated_at: float
 
@@ -143,7 +159,9 @@ class MediaInfo(TypedDict):
     progress: float  # 0.0..1.0 while preparing; 1.0 when ready
 
 
-def new_job_record(*, job_id: str, source: str, title: str | None) -> JobRecord:
+def new_job_record(
+    *, job_id: str, source: str, title: str | None, overrides: JobOverrides | None = None
+) -> JobRecord:
     """Create a queued JobRecord with empty history (timestamps set by the store)."""
     return JobRecord(
         id=job_id,
@@ -153,6 +171,7 @@ def new_job_record(*, job_id: str, source: str, title: str | None) -> JobRecord:
         error=None,
         events=[],
         result=None,
+        overrides=overrides,
         created_at=0.0,
         updated_at=0.0,
     )

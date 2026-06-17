@@ -1,6 +1,7 @@
 import type {
   CookieJarInfo,
   EngineSettings,
+  JobOverrides,
   JobRecord,
   KeyTestResult,
   LibraryEntry,
@@ -103,6 +104,8 @@ export interface SubmitJobRequest {
   source: string
   title?: string | null
   requiresConfirmation?: boolean
+  /** Per-job model overrides for a rerun (omitted for a plain submission). */
+  overrides?: JobOverrides
 }
 
 /**

@@ -75,6 +75,15 @@ export interface PipelineResult {
   title: string
 }
 
+// -- src/podcast_reader/types.py (JobOverrides) --
+// Per-job model overrides for a rerun; an absent field keeps the engine setting.
+export interface JobOverrides {
+  whisper_model?: string
+  chapter_provider?: string
+  chapter_model?: string
+  custom_provider_url?: string
+}
+
 // -- src/podcast_reader/types.py:91 (JobRecord) --
 export interface JobRecord {
   id: string
@@ -84,6 +93,7 @@ export interface JobRecord {
   error: JobError | null
   events: PipelineEvent[]
   result: PipelineResult | null
+  overrides: JobOverrides | null
   created_at: number
   updated_at: number
 }
@@ -144,6 +154,7 @@ export interface JobSubmission {
   source: string
   title?: string | null
   requires_confirmation?: boolean
+  overrides?: JobOverrides
 }
 
 // -- src/podcast_reader/engine/app.py:77 (KeyTestResult) --

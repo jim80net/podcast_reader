@@ -603,6 +603,34 @@ a.card:hover .card-title {
   overflow-wrap: anywhere;
 }
 
+/* Rerun dialog (native <dialog>): editorial-token styling + a backdrop. */
+.rerun-dialog {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--fg);
+  padding: var(--space-5);
+  max-width: 28rem;
+  width: calc(100vw - 4rem);
+  box-shadow: var(--shadow-sm);
+}
+
+.rerun-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.4);
+}
+
+.rerun-target {
+  color: var(--muted);
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+  margin-bottom: var(--space-3);
+}
+
+.rerun-section {
+  border-top: 1px solid var(--border);
+  padding-top: var(--space-3);
+}
+
 /* The full source URL beneath the title (shown only when a title is set). */
 .job-source-full {
   margin-top: var(--space-1);

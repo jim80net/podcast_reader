@@ -56,11 +56,11 @@ from podcast_reader.tools import (
 from podcast_reader.types import LibraryEntry, PipelineRequest, PipelineResult
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterable
 
     from podcast_reader.engine.jobs import JobRunner
     from podcast_reader.engine.settings import EngineState
-    from podcast_reader.types import JobRecord, PipelineEvent
+    from podcast_reader.types import JobOverrides, JobRecord, PipelineEvent
 
 __all__ = [
     "DiscoveryInfo",
@@ -178,17 +178,31 @@ def make_pipeline_runner(base: Path, key_store: dict[str, str] | None = None) ->
         staging = library.staging_dir(library_dir, source_id)
         staging.mkdir(parents=True, exist_ok=True)
 
+        # Rerun overrides (model picker): merge over the settings snapshot and
+        # clear exactly the cached artifacts the change invalidates (the staging
+        # dir doubles as the artifact cache), so a chapter-only rerun doesn't
+        # re-transcribe and neither re-downloads the source audio.
+        overrides = record.get("overrides") or {}
+        _clear_rerun_artifacts(staging, overrides)
+        # An explicit chapter_model override wins even when "" (force the
+        # provider default); only fall back to the setting when not overridden.
+        chapter_model = (
+            (overrides["chapter_model"] or None)
+            if "chapter_model" in overrides
+            else (settings["chapter_model"] or None)
+        )
+
         # Jar-aware download (cookie-management spec): a stored jar whose
         # domain suffix-matches the source host wins over the YT_DLP_COOKIES
         # env fallback, which still applies when no jar matches.
         jar = resolve_jar_for_source(base, source)
-        provider = settings["chapter_provider"]
+        provider = overrides.get("chapter_provider") or settings["chapter_provider"]
         request = PipelineRequest(
             source=record["source"],
             title=record["title"],
             output_dir=str(staging),
-            model=settings["chapter_model"] or None,
-            whisper_model=settings["whisper_model"],
+            model=chapter_model,
+            whisper_model=overrides.get("whisper_model") or settings["whisper_model"],
             whisper_lang=settings["whisper_lang"],
             whisper_device=settings["whisper_device"],
             hf_token=os.environ.get("HF_TOKEN"),
@@ -196,7 +210,8 @@ def make_pipeline_runner(base: Path, key_store: dict[str, str] | None = None) ->
             cookies=str(jar) if jar is not None else os.environ.get("YT_DLP_COOKIES"),
             chapter_provider=provider,
             chapter_api_key=_resolve_chapter_key(provider, keys),
-            custom_provider_url=settings["custom_provider_url"],
+            custom_provider_url=overrides.get("custom_provider_url")
+            or settings["custom_provider_url"],
             diarize=settings["diarize"],
         )
         staged = run_pipeline(request, on_event)
@@ -214,6 +229,32 @@ def make_pipeline_runner(base: Path, key_store: dict[str, str] | None = None) ->
         return result
 
     return run
+
+
+def _clear_rerun_artifacts(staging: Path, overrides: JobOverrides) -> None:
+    """Delete the cached artifacts a rerun override invalidates so the pipeline
+    regenerates them (the staging dir is the artifact cache).
+
+    A ``whisper_model`` change invalidates the transcript: drop every ``*.json``
+    (whisper output + chapters) and the ``*.html`` render, forcing a
+    re-transcribe — but keep any downloaded source audio so it isn't re-fetched.
+    A chapter-only change keeps the whisper JSON and drops only ``*_chapters.json``
+    + ``*.html`` (re-chapter + re-render, no re-transcribe). With no overrides,
+    nothing is cleared (a plain re-submission still reuses the cache).
+    """
+    if overrides.get("whisper_model"):
+        _unlink_all(staging.glob("*.json"))
+        _unlink_all(staging.glob("*.html"))
+    elif any(
+        overrides.get(k) for k in ("chapter_provider", "chapter_model", "custom_provider_url")
+    ):
+        _unlink_all(staging.glob("*_chapters.json"))
+        _unlink_all(staging.glob("*.html"))
+
+
+def _unlink_all(paths: Iterable[Path]) -> None:
+    for path in paths:
+        path.unlink(missing_ok=True)
 
 
 def _resolve_chapter_key(provider: str, keys: dict[str, str]) -> str | None:
