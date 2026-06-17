@@ -68,7 +68,7 @@ themeToggle.addEventListener('click', () => {
   renderThemeToggle()
 })
 renderThemeToggle()
-applyThemePref(themePref)
+applyAndBroadcast()
 // Follow OS changes while on System.
 window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
   if (themePref === 'system') applyAndBroadcast()

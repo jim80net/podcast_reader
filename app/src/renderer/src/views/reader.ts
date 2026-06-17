@@ -3,14 +3,14 @@ import { extractEngineDetail } from '../engine-error'
 import { mediaTerminalState } from '../media-events'
 import { createMediaPlayer } from '../media-player'
 import { hrefFor } from '../router'
-
-/** Persisted "hide the media column" preference (the user may never use video). */
-const MEDIA_HIDDEN_KEY = 'pr.media.hidden'
 import { createSyncBridge } from '../sync-bridge'
 import type { MediaPlayer } from '../media-player'
 import type { ViewCleanup } from '../store'
 import type { SyncBridge } from '../sync-bridge'
 import type { MediaInfo } from '../../../shared/types'
+
+/** Persisted "hide the media column" preference (the user may never use video). */
+const MEDIA_HIDDEN_KEY = 'pr.media.hidden'
 
 /**
  * Reader view (app-views spec + design decision 8): the artifact HTML is
