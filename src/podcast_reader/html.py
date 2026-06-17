@@ -396,8 +396,6 @@ body {
   color: var(--accent);
   border-left-color: var(--accent);
 }
-.nav-item.type-sponsor { opacity: 0.4; }
-.nav-item.type-sponsor:hover, .nav-item.type-sponsor.active { opacity: 1; }
 .nav-ts {
   font-family: 'JetBrains Mono', monospace;
   font-size: 0.7rem;
@@ -514,12 +512,6 @@ h1 {
   margin-bottom: 0.3rem;
   font-style: normal;
 }
-.type-sponsor {
-  opacity: 0.35;
-  transition: opacity 0.25s ease;
-}
-.type-sponsor:hover { opacity: 1; }
-
 /* ---- BODY TEXT ---- */
 p {
   margin-bottom: 1.3rem;
