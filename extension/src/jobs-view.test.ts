@@ -14,6 +14,7 @@ function record(id: string, state: JobState, overrides: Partial<JobRecord> = {})
     error: null,
     events: [],
     result: null,
+    overrides: null,
     created_at: 1,
     updated_at: 1,
     ...overrides
