@@ -1,6 +1,7 @@
 import { el } from '../dom'
 import { extractEngineDetail } from '../engine-error'
-import { deriveProgress, sortJobs, sourceLabel } from '../job-view'
+import { deriveProgress, sortJobs } from '../job-view'
+import { LatestGate } from '../latest-gate'
 import { hrefFor } from '../router'
 import type { AppStore, ViewCleanup } from '../store'
 import type { JobRecord } from '../../../shared/types'
@@ -59,14 +60,20 @@ export function mountNew(container: HTMLElement, store: AppStore): ViewCleanup {
   // (the JobRecord has no source_id; the library entry carries both). Refreshed
   // on job_done — the same trigger the Library view uses.
   let transcriptBySource = new Map<string, string>()
+  // Several job_done events can fire a burst of loads; the gate drops all but
+  // the latest response so a slow one can't clobber a newer map (OCR).
+  const libraryGate = new LatestGate()
   async function loadLibrary(): Promise<void> {
+    const isLatest = libraryGate.next()
     try {
       const entries = await window.api.listLibrary()
-      if (disposed) return
+      if (disposed || !isLatest()) return
       transcriptBySource = new Map(entries.map((e) => [e.source, e.source_id]))
       renderJobs()
     } catch {
-      // Transient/older engine: done jobs simply won't show the link yet.
+      // Transient/older engine: done jobs simply won't show the link yet. Silent
+      // by design (matches the Settings/setup degrade pattern; the renderer
+      // fences console) — it self-heals on the next job_done or remount.
     }
   }
 
@@ -190,11 +197,12 @@ export function mountNew(container: HTMLElement, store: AppStore): ViewCleanup {
   }
 
   function jobCard(job: JobRecord): HTMLElement {
-    // Show the title when present AND the full source beneath it — the source
-    // URL was effectively lost when only the host was shown.
+    // Always surface the full source URL (it was effectively lost when only the
+    // host was shown): the heading is the title when present (with the source
+    // beneath it) or the full source itself when untitled.
     const heading = el('div', { class: 'job-head' })
     heading.append(
-      el('span', { class: 'job-source', text: job.title ?? sourceLabel(job.source) }),
+      el('span', { class: 'job-source', text: job.title ?? job.source }),
       el('span', { class: 'badge', text: job.state, attrs: { 'data-state': job.state } })
     )
     const card = el('div', { class: 'card job-card' }, heading)
