@@ -84,6 +84,16 @@ export interface JobOverrides {
   custom_provider_url?: string
 }
 
+// -- src/podcast_reader/types.py (JobModels) --
+// The models a job actually ran with (recorded at dequeue). Whisper is
+// irrelevant for caption sources; the UI derives the transcription source from
+// the step timeline and uses whisper_model only otherwise.
+export interface JobModels {
+  whisper_model: string
+  chapter_provider: string
+  chapter_model: string
+}
+
 // -- src/podcast_reader/types.py:91 (JobRecord) --
 export interface JobRecord {
   id: string
@@ -94,6 +104,7 @@ export interface JobRecord {
   events: PipelineEvent[]
   result: PipelineResult | null
   overrides: JobOverrides | null
+  models: JobModels | null
   created_at: number
   updated_at: number
 }

@@ -340,6 +340,19 @@ class JobStore:
             self._fail(job_id, JobError(code="internal", message=str(exc), hint=""), on_event)
         else:
             self._transition(job_id, "done", result=result)
+        finally:
+            # The runner records the resolved models on its working copy; persist
+            # them (set even when the job fails, so the card can show them). This
+            # MUST NOT be able to turn a successful job into a failed one, so a
+            # journal I/O error here is logged, not propagated to the worker loop.
+            models = record.get("models")
+            if models is not None:
+                try:
+                    with self._lock:
+                        self._jobs[job_id]["models"] = models
+                        self._write_journal()
+                except Exception:
+                    logger.exception("Failed to persist models for job %s", job_id)
 
     def _fail(
         self,
@@ -414,8 +427,9 @@ class JobStore:
             queued: list[JobRecord] = []
             interrupted = False
             for record in records:
-                # Migrate journals written before per-job overrides existed.
+                # Migrate journals written before per-job overrides/models existed.
                 record.setdefault("overrides", None)
+                record.setdefault("models", None)
                 if record["state"] == "running":
                     record["state"] = "interrupted"
                     record["updated_at"] = time.time()

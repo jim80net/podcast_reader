@@ -155,18 +155,19 @@ test('the media column can be hidden and restored', async ({ harness }) => {
 
   const panel = harness.window.locator('.media-player')
   await expect(panel).toBeVisible()
-  const showBtn = harness.window.locator('.media-show')
-  await expect(showBtn).toBeHidden()
+  // The permanent toggle is always visible once a player exists.
+  const toggle = harness.window.locator('.media-toggle')
+  await expect(toggle).toHaveText('▾ Hide video')
 
-  // Hide → the player column collapses, the "Show video" control appears.
+  // Hide via the player ✕ → the column collapses, the toggle flips to "Show".
   await panel.getByRole('button', { name: 'Hide player' }).click()
   await expect(panel).toBeHidden()
-  await expect(showBtn).toBeVisible()
+  await expect(toggle).toHaveText('▸ Show video')
 
-  // Show → restored.
-  await showBtn.click()
+  // Show via the toggle → restored.
+  await toggle.click()
   await expect(panel).toBeVisible()
-  await expect(showBtn).toBeHidden()
+  await expect(toggle).toHaveText('▾ Hide video')
 })
 
 test('the hidden-media preference persists across reopening the Reader', async ({ harness }) => {
@@ -185,7 +186,7 @@ test('the hidden-media preference persists across reopening the Reader', async (
   })
   await openReader(harness, VIDEO_ID)
   await expect(harness.window.locator('.media-player')).toBeHidden()
-  await expect(harness.window.locator('.media-show')).toBeVisible()
+  await expect(harness.window.locator('.media-toggle')).toHaveText('▸ Show video')
 })
 
 test('the transcript iframe follows the app theme', async ({ harness }) => {

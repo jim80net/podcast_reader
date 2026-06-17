@@ -53,7 +53,7 @@ from podcast_reader.tools import (
     kill_children,
     popen_kwargs,  # re-export: spawn-time child options
 )
-from podcast_reader.types import LibraryEntry, PipelineRequest, PipelineResult
+from podcast_reader.types import JobModels, LibraryEntry, PipelineRequest, PipelineResult
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
@@ -197,12 +197,21 @@ def make_pipeline_runner(base: Path, key_store: dict[str, str] | None = None) ->
         # env fallback, which still applies when no jar matches.
         jar = resolve_jar_for_source(base, source)
         provider = overrides.get("chapter_provider") or settings["chapter_provider"]
+        whisper_model = overrides.get("whisper_model") or settings["whisper_model"]
+        # Record the resolved models on the working record; _run_job persists
+        # them so the UI shows what this job actually ran with (per source kind:
+        # captions sources ignore the whisper model — the UI derives that).
+        record["models"] = JobModels(
+            whisper_model=whisper_model,
+            chapter_provider=provider,
+            chapter_model=chapter_model or "",
+        )
         request = PipelineRequest(
             source=record["source"],
             title=record["title"],
             output_dir=str(staging),
             model=chapter_model,
-            whisper_model=overrides.get("whisper_model") or settings["whisper_model"],
+            whisper_model=whisper_model,
             whisper_lang=settings["whisper_lang"],
             whisper_device=settings["whisper_device"],
             hf_token=os.environ.get("HF_TOKEN"),

@@ -13,6 +13,7 @@ function job(overrides: Partial<JobRecord> = {}): JobRecord {
     events: [],
     result: null,
     overrides: null,
+    models: null,
     created_at: 100,
     updated_at: 100,
     ...overrides

@@ -107,7 +107,7 @@ test('New: pasted URL submits and shows live step progress, failure shows the hi
     ]
   })
   await expect(card.locator('.badge')).toHaveText('running')
-  await expect(card.locator('.step .step-name')).toHaveText('transcribe')
+  await expect(card.locator('.job-row-key', { hasText: 'transcribe' })).toBeVisible()
 
   // Structured failure: {code, message, hint} rendered from the job record.
   await harness.mock.control('/job', {
@@ -158,10 +158,11 @@ test('New: a finished job links to its transcript', async ({ harness }) => {
     events: [{ kind: 'job_done', step: null, message: 'done', data: { job_id: jobId } }]
   })
   await expect(card.locator('.badge')).toHaveText('done')
-  // The done card links to the transcript (matched to the library by source).
-  const link = card.locator('a.button-link', { hasText: 'View transcript' })
-  await expect(link).toHaveAttribute('href', '#/reader/done-src-id')
-  await link.click()
+  // The header is the library title and IS the link to the transcript.
+  const title = card.locator('a.job-title')
+  await expect(title).toHaveText('Done Episode')
+  await expect(title).toHaveAttribute('href', '#/reader/done-src-id')
+  await title.click()
   await expect(harness.window.locator('iframe.reader-frame')).toBeVisible()
 })
 

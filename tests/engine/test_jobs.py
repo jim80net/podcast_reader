@@ -94,6 +94,28 @@ class TestExecution:
         assert all(e["data"]["job_id"] == record["id"] for e in done["events"])
         store.shutdown()
 
+    def test_models_recorded_by_runner_are_persisted(self, tmp_path: Path) -> None:
+        # The runner records the resolved models on its working record; the
+        # store must persist them so the UI shows what the job ran with.
+        def runner(record: JobRecord, on_event: Callable[[PipelineEvent], None]) -> PipelineResult:
+            record["models"] = {
+                "whisper_model": "large-v3",
+                "chapter_provider": "xai",
+                "chapter_model": "grok-4",
+            }
+            return _RESULT
+
+        store = JobStore(tmp_path, runner)
+        record = store.submit("https://example.com/a", None)
+        store.start_worker()
+        assert _wait_for(lambda: store.get(record["id"])["state"] == "done")
+        assert store.get(record["id"])["models"] == {
+            "whisper_model": "large-v3",
+            "chapter_provider": "xai",
+            "chapter_model": "grok-4",
+        }
+        store.shutdown()
+
     def test_failed_carries_structured_error(self, tmp_path: Path) -> None:
         def failing(record: JobRecord, on_event: Callable[[PipelineEvent], None]) -> PipelineResult:
             raise PipelineError("not_found", "File not found: /nope", "Check the path.")
