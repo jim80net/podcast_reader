@@ -27,6 +27,30 @@
   --sidebar-w: 280px;
 }
 
+/* Warm-paper light palette, matching the desktop app's light theme. Applied
+   when the host (the Reader) sets data-theme="light" on <html> so the transcript
+   follows the app's theme; the dark palette above is the default (and what a
+   standalone file shows). */
+:root[data-theme='light'] {
+  --bg: #f7f4ee;
+  --bg-warm: #f1ede5;
+  --surface: #ffffff;
+  --surface-hover: #f1ede5;
+  --border: #e3ddd2;
+  --text: #3a342c;
+  --text-bright: #20201d;
+  --muted: #6b6157;
+  --accent: #9a3b2e;
+  --accent-dim: #b8705f;
+  --accent-glow: rgba(154, 59, 46, 0.1);
+  --link: #2a6f97;
+  --link-hover: #1f5675;
+  --red: #b23a26;
+  --green: #2f7d45;
+  --purple: #6b4fa0;
+  --sidebar-w: 280px;
+}
+
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
 html { scroll-behavior: smooth; scroll-padding-top: 1.5rem; }
@@ -392,6 +416,15 @@ document.addEventListener('DOMContentLoaded', function() {
 (function() {
   if (window.parent === window) return;
   var CH = 'pr-sync';
+  // Theme: the host (Reader) posts the resolved app theme so the transcript
+  // matches light/dark live. Registered before the passage logic so it works
+  // even for a transcript with no sync targets.
+  window.addEventListener('message', function(e) {
+    var d = e.data;
+    if (d && d.ch === 'pr-theme' && (d.theme === 'light' || d.theme === 'dark')) {
+      document.documentElement.dataset.theme = d.theme;
+    }
+  });
   // Only <p> passages are sync targets — NOT the chapter <section> containers
   // (which also carry data-start as anchors). Including a section would let the
   // highlight/seek land on a whole-chapter container instead of a passage.

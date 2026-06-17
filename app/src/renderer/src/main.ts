@@ -55,17 +55,23 @@ function renderThemeToggle(): void {
   themeToggle.setAttribute('aria-label', `Theme: ${name} (click to change)`)
   themeToggle.setAttribute('title', `Theme: ${name}`)
 }
+// Broadcast the resolved theme so open views (the Reader) can re-theme their
+// sandboxed iframes, which can't read the document's data-theme directly.
+function applyAndBroadcast(): void {
+  const resolved = applyThemePref(themePref)
+  window.dispatchEvent(new CustomEvent('pr-theme-change', { detail: resolved }))
+}
 themeToggle.addEventListener('click', () => {
   themePref = nextThemePref(themePref)
   localStorage.setItem(THEME_KEY, themePref)
-  applyThemePref(themePref)
+  applyAndBroadcast()
   renderThemeToggle()
 })
 renderThemeToggle()
 applyThemePref(themePref)
 // Follow OS changes while on System.
 window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
-  if (themePref === 'system') applyThemePref(themePref)
+  if (themePref === 'system') applyAndBroadcast()
 })
 
 const enginePill = el('span', {
