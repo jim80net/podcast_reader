@@ -210,8 +210,10 @@ export function mountNew(container: HTMLElement, store: AppStore): ViewCleanup {
     // job's title or the source). When done, the title IS the link to the
     // transcript (no separate "View transcript" link).
     const titleText = lib?.title ?? job.title ?? sourceLabel(job.source)
+    // Link to the transcript only for a DONE job — a failed/in-progress card
+    // must not route to a stale transcript from a previous run of this source.
     const titleEl =
-      lib !== undefined
+      job.state === 'done' && lib !== undefined
         ? el('a', {
             class: 'job-title',
             text: titleText,

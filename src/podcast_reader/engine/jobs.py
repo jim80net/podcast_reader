@@ -342,12 +342,17 @@ class JobStore:
             self._transition(job_id, "done", result=result)
         finally:
             # The runner records the resolved models on its working copy; persist
-            # them (set even when the job fails, so the card can show them).
+            # them (set even when the job fails, so the card can show them). This
+            # MUST NOT be able to turn a successful job into a failed one, so a
+            # journal I/O error here is logged, not propagated to the worker loop.
             models = record.get("models")
             if models is not None:
-                with self._lock:
-                    self._jobs[job_id]["models"] = models
-                    self._write_journal()
+                try:
+                    with self._lock:
+                        self._jobs[job_id]["models"] = models
+                        self._write_journal()
+                except Exception:
+                    logger.exception("Failed to persist models for job %s", job_id)
 
     def _fail(
         self,
