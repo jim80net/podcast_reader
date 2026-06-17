@@ -128,6 +128,43 @@ test('New: pasted URL submits and shows live step progress, failure shows the hi
   await expect(card.locator('.job-error-hint')).toHaveText('Check the URL and try again.')
 })
 
+test('New: a finished job links to its transcript', async ({ harness }) => {
+  await expectEngineState(harness.window, 'ready')
+  const source = 'https://example.com/done.mp3'
+  // The library entry the engine would create on completion (keyed by source).
+  await harness.mock.control('/seed', {
+    library: [
+      {
+        source_id: 'done-src-id',
+        source,
+        title: 'Done Episode',
+        html_path: '/mock/done.html',
+        created_at: 1_700_000_000
+      }
+    ],
+    transcripts: { 'done-src-id': '<!DOCTYPE html><html><body><p>done transcript</p></body></html>' }
+  })
+  await harness.window.evaluate(() => {
+    window.location.hash = '#/new'
+  })
+  await harness.window.locator('#new-source').fill(source)
+  await harness.window.locator('button[type="submit"]').click()
+  const card = harness.window.locator('.job-card')
+  const jobs = (await (await harness.mock.engine('/v1/jobs')).json()) as { id: string }[]
+  const jobId = jobs[0]?.id ?? ''
+
+  await harness.mock.control('/job', {
+    job: { id: jobId, state: 'done' },
+    events: [{ kind: 'job_done', step: null, message: 'done', data: { job_id: jobId } }]
+  })
+  await expect(card.locator('.badge')).toHaveText('done')
+  // The done card links to the transcript (matched to the library by source).
+  const link = card.locator('a.button-link', { hasText: 'View transcript' })
+  await expect(link).toHaveAttribute('href', '#/reader/done-src-id')
+  await link.click()
+  await expect(harness.window.locator('iframe.reader-frame')).toBeVisible()
+})
+
 test('SSE drop recovers through hydration: state advances without a delivered event', async ({
   harness
 }) => {

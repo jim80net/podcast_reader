@@ -1,6 +1,8 @@
 import { el } from '../dom'
 import { extractEngineDetail } from '../engine-error'
-import { deriveProgress, sortJobs, sourceLabel } from '../job-view'
+import { deriveProgress, sortJobs } from '../job-view'
+import { LatestGate } from '../latest-gate'
+import { hrefFor } from '../router'
 import type { AppStore, ViewCleanup } from '../store'
 import type { JobRecord } from '../../../shared/types'
 
@@ -54,6 +56,26 @@ export function mountNew(container: HTMLElement, store: AppStore): ViewCleanup {
   container.append(el('h2', { text: 'New transcript' }), form, confirmSection, jobsSection, dropHint)
 
   let disposed = false
+  // source → source_id, so a finished job can link straight to its transcript
+  // (the JobRecord has no source_id; the library entry carries both). Refreshed
+  // on job_done — the same trigger the Library view uses.
+  let transcriptBySource = new Map<string, string>()
+  // Several job_done events can fire a burst of loads; the gate drops all but
+  // the latest response so a slow one can't clobber a newer map (OCR).
+  const libraryGate = new LatestGate()
+  async function loadLibrary(): Promise<void> {
+    const isLatest = libraryGate.next()
+    try {
+      const entries = await window.api.listLibrary()
+      if (disposed || !isLatest()) return
+      transcriptBySource = new Map(entries.map((e) => [e.source, e.source_id]))
+      renderJobs()
+    } catch {
+      // Transient/older engine: done jobs simply won't show the link yet. Silent
+      // by design (matches the Settings/setup degrade pattern; the renderer
+      // fences console) — it self-heals on the next job_done or remount.
+    }
+  }
 
   function showFormError(err: unknown): void {
     formError.textContent = extractEngineDetail(err)
@@ -175,16 +197,34 @@ export function mountNew(container: HTMLElement, store: AppStore): ViewCleanup {
   }
 
   function jobCard(job: JobRecord): HTMLElement {
-    const card = el(
-      'div',
-      { class: 'card job-card' },
-      el(
-        'div',
-        { class: 'job-head' },
-        el('span', { class: 'job-source', text: job.title ?? sourceLabel(job.source) }),
-        el('span', { class: 'badge', text: job.state, attrs: { 'data-state': job.state } })
-      )
+    // Always surface the full source URL (it was effectively lost when only the
+    // host was shown): the heading is the title when present (with the source
+    // beneath it) or the full source itself when untitled.
+    const heading = el('div', { class: 'job-head' })
+    heading.append(
+      el('span', { class: 'job-source', text: job.title ?? job.source }),
+      el('span', { class: 'badge', text: job.state, attrs: { 'data-state': job.state } })
     )
+    const card = el('div', { class: 'card job-card' }, heading)
+    if (job.title !== null) {
+      card.append(el('p', { class: 'job-source-full', text: job.source }))
+    }
+    // A finished job links to its transcript (matched to a library entry by
+    // source) — clicking a done job now opens the Reader.
+    const sourceId = transcriptBySource.get(job.source)
+    if (job.state === 'done' && sourceId !== undefined) {
+      card.append(
+        el(
+          'div',
+          { class: 'job-actions' },
+          el('a', {
+            class: 'button-link',
+            text: 'View transcript →',
+            attrs: { href: hrefFor({ view: 'reader', sourceId }) }
+          })
+        )
+      )
+    }
     const progress = deriveProgress(job.events)
     if (progress.steps.length > 0) {
       const list = el('ul', { class: 'step-list' })
@@ -234,11 +274,18 @@ export function mountNew(container: HTMLElement, store: AppStore): ViewCleanup {
   }
 
   renderJobs()
+  void loadLibrary()
   const unsubscribeStore = store.subscribe(renderJobs)
+  // A finishing job adds a library entry; refresh the source→transcript map so
+  // its "View transcript" link appears without leaving the view.
+  const unsubscribeEvents = window.api.onPipelineEvent((event) => {
+    if (event.kind === 'job_done') void loadLibrary()
+  })
 
   return () => {
     disposed = true
     unsubscribeStore()
+    unsubscribeEvents()
     container.removeEventListener('dragover', onDragOver)
     container.removeEventListener('dragleave', onDragLeave)
     container.removeEventListener('drop', onDrop)

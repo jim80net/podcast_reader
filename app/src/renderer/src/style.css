@@ -603,6 +603,14 @@ a.card:hover .card-title {
   overflow-wrap: anywhere;
 }
 
+/* The full source URL beneath the title (shown only when a title is set). */
+.job-source-full {
+  margin-top: var(--space-1);
+  color: var(--muted);
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}
+
 .badge {
   font-family: var(--sans);
   font-size: var(--text-xs);
