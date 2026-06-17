@@ -37,7 +37,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
-    from podcast_reader.types import JobRecord, JobState, PipelineResult
+    from podcast_reader.types import JobOverrides, JobRecord, JobState, PipelineResult
 
     JobRunner = Callable[[JobRecord, Callable[[PipelineEvent], None]], PipelineResult]
 
@@ -152,7 +152,12 @@ class JobStore:
     # -- public API ------------------------------------------------------
 
     def submit(
-        self, source: str, title: str | None, *, requires_confirmation: bool = False
+        self,
+        source: str,
+        title: str | None,
+        *,
+        requires_confirmation: bool = False,
+        overrides: JobOverrides | None = None,
     ) -> JobRecord:
         """Create a job and enqueue it for the worker (default: ``queued``).
 
@@ -160,8 +165,13 @@ class JobStore:
         ``awaiting-confirmation`` and NOT enqueued: it never runs until an
         explicit :meth:`confirm` (protocol-initiated jobs use this so nothing
         attacker-supplied auto-executes).
+
+        *overrides* carries per-job model choices for a rerun; the runner merges
+        them over settings and clears the cached artifacts the change invalidates.
         """
-        record = new_job_record(job_id=uuid.uuid4().hex, source=source, title=title)
+        record = new_job_record(
+            job_id=uuid.uuid4().hex, source=source, title=title, overrides=overrides or None
+        )
         if requires_confirmation:
             record["state"] = "awaiting-confirmation"
         now = time.time()
@@ -404,6 +414,8 @@ class JobStore:
             queued: list[JobRecord] = []
             interrupted = False
             for record in records:
+                # Migrate journals written before per-job overrides existed.
+                record.setdefault("overrides", None)
                 if record["state"] == "running":
                     record["state"] = "interrupted"
                     record["updated_at"] = time.time()
@@ -412,7 +424,7 @@ class JobStore:
                     queued.append(record)
                 jobs[record["id"]] = record
             queued.sort(key=lambda r: r["created_at"])
-        except (OSError, ValueError, TypeError, KeyError) as exc:
+        except (OSError, ValueError, TypeError, KeyError, AttributeError) as exc:
             corrupt = path.with_name(path.name + ".corrupt")
             try:
                 path.replace(corrupt)

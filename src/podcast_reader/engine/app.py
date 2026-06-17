@@ -15,7 +15,7 @@ import os
 import queue
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import httpx
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, Response, status
@@ -60,6 +60,7 @@ from podcast_reader.providers import PROVIDERS, resolve_provider, validate_custo
 # importable at runtime (a TYPE_CHECKING import leaves unresolvable ForwardRefs).
 from podcast_reader.types import (
     EngineSettings,
+    JobOverrides,  # noqa: TC001 — used in a runtime cast
     JobRecord,  # noqa: TC001 — runtime response model
     LibraryEntry,  # noqa: TC001 — runtime response model
     MediaInfo,  # noqa: TC001 — runtime response model
@@ -83,17 +84,30 @@ _SOURCE_ID_RE = re.compile(r"^[0-9a-f]{64}$")
 _EMBED_PATH = re.compile(r"^/v1/embed/[A-Za-z0-9_-]{1,32}$")
 
 
+class JobOverridesBody(BaseModel):
+    """Optional per-job model overrides for a rerun (omit a field to keep the
+    setting). Present fields drive both the override and the cache-clearing:
+    ``whisper_model`` forces a re-transcribe; chapter fields re-run chapters."""
+
+    whisper_model: str | None = None
+    chapter_provider: str | None = None
+    chapter_model: str | None = None
+    custom_provider_url: str | None = None
+
+
 class JobSubmission(BaseModel):
     """Body of ``POST /v1/jobs``.
 
     ``requires_confirmation`` defaults to false so pre-change clients are
     unchanged; true journals the job in ``awaiting-confirmation`` without
     enqueueing it (it runs only after ``POST /v1/jobs/{id}/confirm``).
+    ``overrides`` carries rerun model choices (absent = a plain submission).
     """
 
     source: str
     title: str | None = None
     requires_confirmation: bool = False
+    overrides: JobOverridesBody | None = None
 
 
 class KeyBody(BaseModel):
@@ -355,8 +369,18 @@ def create_app(
 
     @app.post("/v1/jobs", status_code=status.HTTP_201_CREATED)
     def submit_job(body: JobSubmission) -> JobRecord:
+        # Keep only the set override fields (exclude_none), so the runner clears
+        # exactly the categories the user chose to change.
+        overrides = (
+            cast("JobOverrides", body.overrides.model_dump(exclude_none=True))
+            if body.overrides is not None
+            else None
+        )
         return store.submit(
-            body.source, body.title, requires_confirmation=body.requires_confirmation
+            body.source,
+            body.title,
+            requires_confirmation=body.requires_confirmation,
+            overrides=overrides,
         )
 
     @app.get("/v1/jobs")

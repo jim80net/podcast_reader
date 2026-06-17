@@ -165,6 +165,49 @@ test('New: a finished job links to its transcript', async ({ harness }) => {
   await expect(harness.window.locator('iframe.reader-frame')).toBeVisible()
 })
 
+test('New: a job can be rerun with a different chapter model', async ({ harness }) => {
+  await expectEngineState(harness.window, 'ready')
+  const source = 'https://example.com/rerun.mp3'
+  await harness.window.evaluate(() => {
+    window.location.hash = '#/new'
+  })
+  await harness.window.locator('#new-source').fill(source)
+  await harness.window.locator('button[type="submit"]').click()
+  const jobs = (await (await harness.mock.engine('/v1/jobs')).json()) as { id: string }[]
+  const jobId = jobs[0]?.id ?? ''
+  // Drive it to failed so the Rerun affordance shows.
+  await harness.mock.control('/job', {
+    job: { id: jobId, state: 'failed' },
+    events: [
+      {
+        kind: 'job_failed',
+        step: 'transcribe',
+        message: 'boom',
+        data: { job_id: jobId, code: 'internal', hint: '' }
+      }
+    ]
+  })
+  const card = harness.window.locator('.job-card')
+  await expect(card.locator('.badge')).toHaveText('failed')
+
+  // Open the rerun dialog, enable the chapter section, pick a provider, rerun.
+  await card.getByRole('button', { name: 'Rerun with a different model…' }).click()
+  const dialog = harness.window.locator('dialog.rerun-dialog')
+  await expect(dialog).toBeVisible()
+  await dialog.locator('#rerun-chapter').check()
+  await dialog.locator('select').selectOption('openai')
+  await dialog.getByRole('button', { name: 'Rerun', exact: true }).click()
+  await expect(dialog).toBeHidden()
+
+  // The resubmission carried the chapter-provider override to the engine.
+  const after = (await (await harness.mock.engine('/v1/jobs')).json()) as {
+    source: string
+    overrides: { chapter_provider?: string } | null
+  }[]
+  const rerun = after.find((j) => j.overrides?.chapter_provider === 'openai')
+  expect(rerun?.source).toBe(source)
+})
+
 test('SSE drop recovers through hydration: state advances without a delivered event', async ({
   harness
 }) => {

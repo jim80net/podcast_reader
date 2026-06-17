@@ -289,6 +289,33 @@ class TestAuth:
         assert response.status_code == 401
 
 
+class TestJobOverrides:
+    def test_submit_with_overrides_stores_only_set_fields(self, engine: _Engine) -> None:
+        # A rerun submission carries model overrides; the job record keeps just
+        # the fields that were set (exclude_none) so the runner clears exactly
+        # the right cached artifacts.
+        response = engine.client.post(
+            "/v1/jobs",
+            json={
+                "source": "https://example.com/over",
+                "overrides": {"chapter_provider": "xai", "chapter_model": "grok-4"},
+            },
+            headers=engine.headers,
+        )
+        assert response.status_code == 201
+        assert response.json()["overrides"] == {
+            "chapter_provider": "xai",
+            "chapter_model": "grok-4",
+        }
+
+    def test_submit_without_overrides_is_none(self, engine: _Engine) -> None:
+        response = engine.client.post(
+            "/v1/jobs", json={"source": "https://example.com/plain"}, headers=engine.headers
+        )
+        assert response.status_code == 201
+        assert response.json()["overrides"] is None
+
+
 class TestYoutubeEmbed:
     def test_embed_is_tokenless_and_returns_html(self, engine: _Engine) -> None:
         # The Reader iframe holds no token; the embed page MUST load without one

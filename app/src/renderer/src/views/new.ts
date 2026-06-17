@@ -2,9 +2,10 @@ import { el } from '../dom'
 import { extractEngineDetail } from '../engine-error'
 import { deriveProgress, sortJobs } from '../job-view'
 import { LatestGate } from '../latest-gate'
+import { buildRerunOverrides } from '../rerun-plan'
 import { hrefFor } from '../router'
 import type { AppStore, ViewCleanup } from '../store'
-import type { JobRecord } from '../../../shared/types'
+import type { JobOverrides, JobRecord } from '../../../shared/types'
 
 /**
  * New view (app-views spec, tasks 4.4/4.5): paste-URL or drop-file
@@ -82,11 +83,15 @@ export function mountNew(container: HTMLElement, store: AppStore): ViewCleanup {
     formError.hidden = false
   }
 
-  async function submit(source: string, title: string | null): Promise<void> {
+  async function submit(
+    source: string,
+    title: string | null,
+    overrides?: JobOverrides
+  ): Promise<void> {
     formError.hidden = true
     submitButton.disabled = true
     try {
-      const job = await window.api.submitJob({ source, title })
+      const job = await window.api.submitJob({ source, title, overrides })
       if (disposed) return
       store.upsert(job)
       urlInput.value = ''
@@ -209,22 +214,6 @@ export function mountNew(container: HTMLElement, store: AppStore): ViewCleanup {
     if (job.title !== null) {
       card.append(el('p', { class: 'job-source-full', text: job.source }))
     }
-    // A finished job links to its transcript (matched to a library entry by
-    // source) — clicking a done job now opens the Reader.
-    const sourceId = transcriptBySource.get(job.source)
-    if (job.state === 'done' && sourceId !== undefined) {
-      card.append(
-        el(
-          'div',
-          { class: 'job-actions' },
-          el('a', {
-            class: 'button-link',
-            text: 'View transcript →',
-            attrs: { href: hrefFor({ view: 'reader', sourceId }) }
-          })
-        )
-      )
-    }
     const progress = deriveProgress(job.events)
     if (progress.steps.length > 0) {
       const list = el('ul', { class: 'step-list' })
@@ -270,7 +259,146 @@ export function mountNew(container: HTMLElement, store: AppStore): ViewCleanup {
         )
       )
     }
+    // Finished/failed jobs: link to the transcript (done, matched to a library
+    // entry by source) and offer a rerun with a different model.
+    if (job.state === 'done' || job.state === 'failed') {
+      const actions = el('div', { class: 'job-actions' })
+      const sourceId = transcriptBySource.get(job.source)
+      if (job.state === 'done' && sourceId !== undefined) {
+        actions.append(
+          el('a', {
+            class: 'button-link',
+            text: 'View transcript →',
+            attrs: { href: hrefFor({ view: 'reader', sourceId }) }
+          })
+        )
+      }
+      const rerun = el('button', {
+        class: 'button-secondary',
+        text: 'Rerun with a different model…',
+        attrs: { type: 'button' }
+      })
+      rerun.addEventListener('click', () => void openRerunDialog(job))
+      actions.append(rerun)
+      card.append(actions)
+    }
     return card
+  }
+
+  // Rerun dialog: two opt-in sections (re-transcribe with a Whisper model /
+  // regenerate chapters with a provider+model), prefilled from current settings.
+  // Submitting resubmits the same source with the chosen overrides; the engine
+  // clears exactly the cached artifacts the change invalidates.
+  async function openRerunDialog(job: JobRecord): Promise<void> {
+    let settings: Awaited<ReturnType<typeof window.api.getSettings>>
+    let providers: Awaited<ReturnType<typeof window.api.listProviders>>
+    try {
+      ;[settings, providers] = await Promise.all([
+        window.api.getSettings(),
+        window.api.listProviders()
+      ])
+    } catch (err) {
+      if (!disposed) showFormError(err)
+      return
+    }
+    if (disposed) return
+
+    const whisperCheck = el('input', { attrs: { type: 'checkbox', id: 'rerun-whisper' } })
+    const whisperModel = el('input', {
+      attrs: { type: 'text', value: settings.whisper_model, disabled: '' }
+    })
+    whisperCheck.addEventListener('change', () => {
+      whisperModel.disabled = !whisperCheck.checked
+    })
+
+    const chapterCheck = el('input', { attrs: { type: 'checkbox', id: 'rerun-chapter' } })
+    const providerSelect = el('select', { attrs: { disabled: '' } })
+    for (const p of providers) {
+      providerSelect.append(el('option', { text: p.id, attrs: { value: p.id } }))
+    }
+    providerSelect.value = settings.chapter_provider
+    const chapterModel = el('input', {
+      attrs: { type: 'text', value: settings.chapter_model, placeholder: 'provider default', disabled: '' }
+    })
+    const customUrl = el('input', {
+      attrs: { type: 'text', value: settings.custom_provider_url, placeholder: 'https://…', disabled: '' }
+    })
+    const customField = el(
+      'div',
+      { class: 'field' },
+      el('label', { text: 'Custom base URL' }),
+      customUrl
+    )
+    const syncChapter = (): void => {
+      const on = chapterCheck.checked
+      providerSelect.disabled = chapterModel.disabled = !on
+      customUrl.disabled = !on
+      customField.hidden = providerSelect.value !== 'custom'
+    }
+    chapterCheck.addEventListener('change', syncChapter)
+    providerSelect.addEventListener('change', syncChapter)
+    syncChapter()
+
+    const error = el('p', { class: 'error-text', attrs: { role: 'alert' } })
+    error.hidden = true
+    const cancel = el('button', { class: 'button-secondary', text: 'Cancel', attrs: { type: 'button' } })
+    const run = el('button', { text: 'Rerun', attrs: { type: 'submit' } })
+    const dialog = el(
+      'dialog',
+      { class: 'rerun-dialog' },
+      el(
+        'form',
+        { attrs: { method: 'dialog' } },
+        el('h3', { text: 'Rerun with a different model' }),
+        el('p', { class: 'rerun-target', text: job.title ?? job.source }),
+        el(
+          'div',
+          { class: 'field rerun-section' },
+          el('label', {}, whisperCheck, document.createTextNode(' Re-transcribe the audio')),
+          el('label', { text: 'Whisper model' }),
+          whisperModel,
+          el('p', { class: 'field-note', text: 'Ignored for YouTube sources (they use captions).' })
+        ),
+        el(
+          'div',
+          { class: 'field rerun-section' },
+          el('label', {}, chapterCheck, document.createTextNode(' Regenerate chapters')),
+          el('label', { text: 'Provider' }),
+          providerSelect,
+          el('label', { text: 'Chapter model' }),
+          chapterModel,
+          customField
+        ),
+        error,
+        el('div', { class: 'form-actions' }, run, cancel)
+      )
+    )
+
+    const close = (): void => {
+      dialog.close()
+      dialog.remove()
+    }
+    cancel.addEventListener('click', close)
+    dialog.addEventListener('submit', (event) => {
+      event.preventDefault()
+      const plan = buildRerunOverrides({
+        reTranscribe: whisperCheck.checked,
+        whisperModel: whisperModel.value,
+        reChapter: chapterCheck.checked,
+        chapterProvider: providerSelect.value,
+        chapterModel: chapterModel.value,
+        customUrl: customUrl.value
+      })
+      if (!plan.valid) {
+        error.textContent = 'Enable at least one option (and set a Whisper model to re-transcribe).'
+        error.hidden = false
+        return
+      }
+      close()
+      void submit(job.source, job.title, plan.overrides)
+    })
+    container.append(dialog)
+    dialog.showModal()
   }
 
   renderJobs()

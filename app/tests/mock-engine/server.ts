@@ -52,6 +52,7 @@ interface JobRecord {
   error: JobError | null
   events: PipelineEvent[]
   result: Record<string, unknown> | null
+  overrides: Record<string, unknown> | null
   created_at: number
   updated_at: number
 }
@@ -301,7 +302,12 @@ function nowSeconds(): number {
   return Date.now() / 1000
 }
 
-function makeJob(source: string, title: string | null, state: string): JobRecord {
+function makeJob(
+  source: string,
+  title: string | null,
+  state: string,
+  overrides: Record<string, unknown> | null = null
+): JobRecord {
   jobCounter += 1
   const job: JobRecord = {
     id: `mock-job-${jobCounter}`,
@@ -311,6 +317,7 @@ function makeJob(source: string, title: string | null, state: string): JobRecord
     error: null,
     events: [],
     result: null,
+    overrides,
     created_at: nowSeconds(),
     updated_at: nowSeconds()
   }
@@ -643,7 +650,8 @@ async function handleV1(req: IncomingMessage, res: ServerResponse, path: string)
     const job = makeJob(
       body.source as string,
       (body.title as string | null | undefined) ?? null,
-      body.requires_confirmation === true ? 'awaiting-confirmation' : 'queued'
+      body.requires_confirmation === true ? 'awaiting-confirmation' : 'queued',
+      (body.overrides as Record<string, unknown> | undefined) ?? null
     )
     sendJson(res, 201, job)
     return

@@ -58,6 +58,7 @@ const JOB_RECORD_KEYS: Record<keyof JobRecord, true> = {
   error: true,
   events: true,
   result: true,
+  overrides: true,
   created_at: true,
   updated_at: true
 }
