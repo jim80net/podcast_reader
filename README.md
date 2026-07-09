@@ -210,7 +210,10 @@ The HTML supports both dark and light themes automatically via `prefers-color-sc
 
 ```bash
 # Install as a standalone tool with audio transcription support
+# (includes torch + pyannote.audio so HF_TOKEN diarization works)
 uv tool install '.[whisper]'
+# After upgrading from an older whisper-only install:
+# uv tool install --force '.[whisper]'
 
 # Or run from the repo without installing
 uv run podcast-reader <url-or-file> [title]
@@ -222,17 +225,17 @@ Optional features are packaged as extras:
 
 | Extra | Enables | Pulls in |
 |-------|---------|----------|
-| `whisper` | Transcribing audio files and non-YouTube URLs | `whisper-ctranslate2` |
+| `whisper` | Transcribing audio files and non-YouTube URLs; CLI diarization when `HF_TOKEN` is set | `whisper-ctranslate2`, `torch`, `pyannote.audio` |
 | `chapters` | _(empty compatibility alias — chapters are now built in)_ | — |
-| `diarization` | Speaker labels | `pyannote.audio` |
+| `diarization` | Frozen diarization-worker pack build / engine pack | `pyannote.audio` |
 | `dev` | Tests, type checking, linting | `pytest`, `mypy`, `ruff` |
 
 ```bash
 # Example: development setup
 uv sync --extra dev
 
-# Example: everything needed to transcribe local audio with speaker labels
-uv sync --extra whisper --extra diarization
+# Example: CLI transcription + HF_TOKEN diarization (torch/pyannote come with whisper)
+uv sync --extra whisper
 ```
 
 For speaker diarization, set `HF_TOKEN` and accept the model terms at:
