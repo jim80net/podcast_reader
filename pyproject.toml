@@ -20,8 +20,13 @@ dependencies = [
 # Chapters are now built in (BYO API key over plain HTTP); the extra remains
 # as an empty compatibility alias for existing `.[chapters]` installs.
 chapters = []
+# whisper-ctranslate2 enables diarization when HF_TOKEN is set (--hf_token);
+# that path imports torch inside whisper_ctranslate2.diarization — ship the
+# stack with the extra so `uv tool install '.[whisper]'` is not fail-open.
 whisper = [
     "whisper-ctranslate2>=0.5.7",
+    "torch>=2.0",
+    "pyannote.audio>=4.0",
 ]
 # The bundled whisper worker's in-process engine (spike pin: 1.2.1). Only the
 # frozen-engine build and worker development need it; the main package never

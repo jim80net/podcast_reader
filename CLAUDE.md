@@ -36,8 +36,11 @@ uv sync --extra dev
 uv run podcast-reader <url-or-file> [title]
 
 # Install as standalone tool (whisper extra needed for non-YouTube sources;
-# chapter generation is built in — bring your own API key)
+# includes torch + pyannote.audio for whisper-ctranslate2 diarization when
+# HF_TOKEN is set; chapter generation is built in — bring your own API key)
 uv tool install '.[whisper]'
+# After upgrading, reinstall if you already had an older whisper-only install:
+# uv tool install --force '.[whisper]'
 ```
 
 For speaker diarization, set `HF_TOKEN` and accept model terms at:
