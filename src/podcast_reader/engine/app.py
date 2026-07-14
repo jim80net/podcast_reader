@@ -21,6 +21,7 @@ import httpx
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, Response, status
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
+from starlette.background import BackgroundTask
 
 from podcast_reader.chapters import verify_key
 
@@ -449,7 +450,20 @@ def create_app(
             finally:
                 store.unsubscribe(client_queue)
 
-        return StreamingResponse(stream(), media_type="text/event-stream")
+        # The finally above only runs when the generator is CLOSED. On client
+        # disconnect starlette cancels the stream without closing the sync
+        # generator (iterate_in_threadpool holds it in a reference cycle), so
+        # closure waits for the cyclic GC — unbounded unsubscribe latency and
+        # a host-dependent leak (issue #48; red locally / green in CI came
+        # down to GC timing). The background task is starlette's deterministic
+        # after-response hook — it runs on normal completion AND after a
+        # disconnect cancellation. unsubscribe is idempotent, so the pair is
+        # belt-and-suspenders, not a double-free.
+        return StreamingResponse(
+            stream(),
+            media_type="text/event-stream",
+            background=BackgroundTask(store.unsubscribe, client_queue),
+        )
 
     def _require_pack_manager() -> PackManager:
         if pack_manager is None:

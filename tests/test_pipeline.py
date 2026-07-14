@@ -214,6 +214,53 @@ class TestRunPipelineYouTube:
         mock_build_html.assert_called_once()
 
 
+class TestOutputDirPreparation:
+    """Issue #49: the output directory is created (or fails fast) BEFORE any
+    network work, at the shared orchestration point covering both faces."""
+
+    @patch("podcast_reader.pipeline._wsl_path", return_value=None)
+    @patch("podcast_reader.pipeline.build_html", return_value="<html></html>")
+    @patch("podcast_reader.pipeline.fetch_transcript")
+    @patch("podcast_reader.pipeline.snippets_to_whisper_segments", return_value=_SAMPLE_SEGMENTS)
+    def test_missing_output_dir_is_created(
+        self,
+        _mock_snippets: MagicMock,
+        mock_fetch: MagicMock,
+        _mock_build_html: MagicMock,
+        _mock_wsl: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        mock_fetch.return_value = [{"text": "Hi.", "start": 0.0, "duration": 5.0}]
+        out_dir = tmp_path / "does" / "not" / "exist"
+
+        run_pipeline(
+            _request(input_arg=_YT_URL, output_dir=out_dir),
+            on_event=lambda e: None,
+        )
+
+        assert (out_dir / "abc123XYZqq.html").exists()
+
+    @patch("podcast_reader.pipeline.fetch_transcript")
+    def test_uncreatable_output_dir_fails_fast_before_network(
+        self,
+        mock_fetch: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        blocker = tmp_path / "a-file"
+        blocker.write_text("not a directory")
+
+        with pytest.raises(PipelineError) as exc_info:
+            run_pipeline(
+                _request(input_arg=_YT_URL, output_dir=blocker / "child"),
+                on_event=lambda e: None,
+            )
+
+        assert exc_info.value.code == "invalid_output_dir"
+        assert "Cannot create output directory" in exc_info.value.message
+        # Fail-fast means zero network work happened.
+        mock_fetch.assert_not_called()
+
+
 class TestRunPipelineURL:
     """Tests for the generic URL (yt-dlp) branch of run_pipeline."""
 

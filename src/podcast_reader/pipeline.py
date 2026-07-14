@@ -79,6 +79,21 @@ def run_pipeline(
     output_dir = Path(request["output_dir"])
     cookies = Path(request["cookies"]) if request["cookies"] else None
 
+    # Prepare the output directory before ANY network work (#49): create it
+    # like most CLI tools do, and fail fast with a structured error instead
+    # of finishing a whole fetch and dying on a raw FileNotFoundError at the
+    # first write. Shared orchestration point — covers the CLI and engine
+    # faces alike.
+    try:
+        output_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        reason = exc.strerror or type(exc).__name__
+        raise PipelineError(
+            "invalid_output_dir",
+            f"Cannot create output directory {output_dir}: {reason}",
+            "Check the output directory path and its permissions.",
+        ) from exc
+
     input_type = classify_input(source)
     stem: str
     json_path: Path
