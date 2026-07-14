@@ -103,8 +103,21 @@ class Engine:
             raise SmokeError(
                 "engine never printed the ready sentinel; output:\n" + "".join(self._output)
             )
-        discovery = json.loads((data_dir / "engine.json").read_text())
-        state = json.loads((data_dir / "engine-state.json").read_text())
+        try:
+            discovery = json.loads((data_dir / "engine.json").read_text())
+            state = json.loads((data_dir / "engine-state.json").read_text())
+        except (FileNotFoundError, PermissionError) as exc:
+            # The child can print its post-discovery sentinel and then fail
+            # quickly enough for serve_engine's finally block to remove the
+            # file before this process reads it. Preserve the actual child
+            # traceback instead of reporting only the secondary file race.
+            self._pump.join(timeout=2)
+            exit_code = self.process.poll()
+            self.kill()
+            raise SmokeError(
+                f"engine handshake files unavailable ({exc}); child exit={exit_code}; output:\n"
+                + "".join(self._output)
+            ) from exc
         self.port = int(discovery["port"])
         self.token = str(state["token"])
         print(f"handshake complete: port {self.port}, pid {discovery['pid']}")
