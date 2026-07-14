@@ -296,6 +296,14 @@ class TestSyncMetadata:
 
 
 class TestBuildHtmlIntegration:
+    def test_os_light_theme_does_not_override_explicit_dark_theme(self) -> None:
+        from podcast_reader.html import build_html
+
+        result = build_html([], title="T", source="test")
+
+        assert ":root[data-theme='dark'] {" in result
+        assert ":root:not([data-theme='dark']) {" in result
+
     def test_speakerless_output_byte_identical_no_chapters(self) -> None:
         """Spec scenario: speakerless transcripts unchanged — golden file
         generated before speaker rendering existed."""
