@@ -273,6 +273,22 @@ h1 {
 .timeline-links a:hover .timeline-snippet,
 .timeline-links a:focus-visible .timeline-snippet { color: var(--text-bright); }
 
+/* ---- KEYLESS SECTION LANDMARKS ---- */
+/* Quiet structural rhythm at the rail's marker boundaries: same visual
+   language as a chapter heading's top rule, minus the heading. */
+.landmark {
+  border-top: 1px solid var(--border);
+  margin: 2.4rem 0 1.3rem;
+  padding-top: 0.45rem;
+}
+.landmark-ts {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.68rem;
+  color: var(--muted);
+  letter-spacing: 0.03em;
+  user-select: none;
+}
+
 /* ---- CHAPTER SECTIONS ---- */
 main {
   margin-inline: auto;
@@ -448,7 +464,7 @@ footer {
 <div id="content">
 <header>
   <h1>Test Episode</h1>
-  <div class="meta">Auto-transcribed with test</div>
+  <div class="meta">1 min of audio &middot; 36 words &middot; about 1 min to read &middot; Auto-transcribed with test</div>
 </header>
 <main>
 <nav class="timeline-nav" aria-label="Transcript timeline">

@@ -243,12 +243,16 @@ def _timeline_label(text: str) -> str:
     return label
 
 
-def build_timeline_nav(segments: list[dict[str, Any]], sentences_per_para: int = 5) -> str:
-    """Build a compact time-based landmark rail for a keyless transcript."""
-    paragraphs = segments_to_paragraphs(segments, sentences_per_para)
-    if not paragraphs:
-        return ""
+def _timeline_markers(paragraphs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Pick the coarse-interval marker paragraphs.
 
+    Shared by the jump rail and the body's section landmarks so the
+    rule-and-timestamp rhythm in the text matches the stops the rail
+    navigates (identity-comparable: the returned dicts ARE items of
+    *paragraphs*).
+    """
+    if not paragraphs:
+        return []
     duration = max(float(p["end"]) for p in paragraphs)
     interval = _timeline_interval(duration)
     markers = [paragraphs[0]]
@@ -258,6 +262,16 @@ def build_timeline_nav(segments: list[dict[str, Any]], sentences_per_para: int =
         if marker is not None and marker is not markers[-1]:
             markers.append(marker)
         threshold += interval
+    return markers
+
+
+def build_timeline_nav(segments: list[dict[str, Any]], sentences_per_para: int = 5) -> str:
+    """Build a compact time-based landmark rail for a keyless transcript."""
+    paragraphs = segments_to_paragraphs(segments, sentences_per_para)
+    if not paragraphs:
+        return ""
+
+    markers = _timeline_markers(paragraphs)
 
     # Stop #1 is always t=0, whose opening words are frequently boilerplate
     # (sponsor reads, intro jingles) — the least useful label on the page.
@@ -277,6 +291,39 @@ def build_timeline_nav(segments: list[dict[str, Any]], sentences_per_para: int =
     )
 
 
+_READING_WPM = 200
+
+
+def _byline(segments: list[dict[str, Any]], source: str) -> str:
+    """Reader-facing byline: duration, word count, reading time, provenance.
+
+    Everything is derived from data already in hand at render time (#58).
+    Word counts are rounded to honest precision (captions are approximate);
+    an empty artifact keeps the provenance-only line it always had.
+    """
+    parts: list[str] = []
+    if segments:
+        minutes = max(1, round(max(float(s["end"]) for s in segments) / 60))
+        hours, rem = divmod(minutes, 60)
+        if hours and rem:
+            parts.append(f"{hours} hr {rem} min of audio")
+        elif hours:
+            parts.append(f"{hours} hr of audio")
+        else:
+            parts.append(f"{minutes} min of audio")
+        words = sum(len(s["text"].split()) for s in segments)
+        if words >= 1000:
+            parts.append(f"~{round(words, -2):,} words")
+        elif words >= 100:
+            parts.append(f"~{round(words, -1):,} words")
+        elif words:
+            parts.append(f"{words} words")
+        if words:
+            parts.append(f"about {max(1, round(words / _READING_WPM))} min to read")
+    parts.append(f"Auto-transcribed with {source}")
+    return " &middot; ".join(parts)
+
+
 def build_chapter_body(
     segments: list[dict[str, Any]],
     chapters: list[dict[str, Any]],
@@ -285,10 +332,17 @@ def build_chapter_body(
     """Build main content with chapter sections, using themed paragraph breaks when available."""
     if not chapters:
         paragraphs = segments_to_paragraphs(segments, sentences_per_para)
+        # Section landmarks share the rail's marker computation (issue #59):
+        # a quiet rule + timestamp gives the eye the same coarse sections the
+        # rail navigates. The first marker is skipped — it sits directly
+        # under the masthead.
+        landmark_ids = {id(p) for p in _timeline_markers(paragraphs)[1:]}
         parts = []
         last_speaker: str | None = None
         for p in paragraphs:
             ts = fmt_time(p["start"])
+            if id(p) in landmark_ids:
+                parts.append(f'<div class="landmark"><span class="landmark-ts">{ts}</span></div>')
             prefix = _speaker_prefix(p, last_speaker)
             last_speaker = p.get("speaker")
             anchor = _time_anchor(float(p["start"]))
@@ -645,6 +699,22 @@ h1 {
 .timeline-links a:hover .timeline-snippet,
 .timeline-links a:focus-visible .timeline-snippet { color: var(--text-bright); }
 
+/* ---- KEYLESS SECTION LANDMARKS ---- */
+/* Quiet structural rhythm at the rail's marker boundaries: same visual
+   language as a chapter heading's top rule, minus the heading. */
+.landmark {
+  border-top: 1px solid var(--border);
+  margin: 2.4rem 0 1.3rem;
+  padding-top: 0.45rem;
+}
+.landmark-ts {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.68rem;
+  color: var(--muted);
+  letter-spacing: 0.03em;
+  user-select: none;
+}
+
 /* ---- CHAPTER SECTIONS ---- */
 main {
   margin-inline: auto;
@@ -974,7 +1044,7 @@ def build_html(
         sidebar_html,
         '\n<div id="content">\n<header>\n'
         f"  <h1>{title}</h1>\n"
-        f'  <div class="meta">Auto-transcribed with {source}</div>\n'
+        f'  <div class="meta">{_byline(segments, source)}</div>\n'
         "</header>\n<main>\n",
         timeline_html,
         "\n" if timeline_html else "",

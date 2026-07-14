@@ -360,6 +360,117 @@ class TestKeylessTimeline:
         assert "Chapters, key points, and pull quotes are available" not in html
 
 
+class TestByline:
+    def test_reports_duration_words_and_reading_time(self) -> None:
+        from podcast_reader.html import _byline
+
+        # 90 x 10s segments = 15 min; 25 words each = 2,250 words.
+        segments = [
+            {"start": float(i * 10), "end": float(i * 10 + 10), "text": "word " * 25}
+            for i in range(90)
+        ]
+        line = _byline(segments, "youtube-captions")
+        assert line == (
+            "15 min of audio &middot; ~2,200 words &middot; "
+            "about 11 min to read &middot; Auto-transcribed with youtube-captions"
+        )
+
+    def test_hour_plus_durations_use_hr_min(self) -> None:
+        from podcast_reader.html import _byline
+
+        line = _byline([{"start": 0.0, "end": 4500.0, "text": "hi"}], "test")
+        assert line.startswith("1 hr 15 min of audio")
+        exact_hour = _byline([{"start": 0.0, "end": 3600.0, "text": "hi"}], "test")
+        assert exact_hour.startswith("1 hr of audio &middot;")
+
+    def test_small_word_counts_are_exact_not_rounded(self) -> None:
+        from podcast_reader.html import _byline
+
+        line = _byline([{"start": 0.0, "end": 30.0, "text": "one two three four"}], "test")
+        assert "4 words" in line
+        assert "~" not in line
+        assert "about 1 min to read" in line
+
+    def test_empty_segments_keep_provenance_only(self) -> None:
+        from podcast_reader.html import _byline
+
+        assert _byline([], "test") == "Auto-transcribed with test"
+
+    def test_byline_renders_in_meta_slot_on_both_paths(self) -> None:
+        from podcast_reader.html import build_html
+
+        segs = [{"start": 0.0, "end": 120.0, "text": "hello there general kenobi"}]
+        keyless = build_html(list(segs), title="T", source="test")
+        assert '<div class="meta">2 min of audio &middot; 4 words' in keyless
+        chaptered = build_html(
+            list(segs),
+            title="T",
+            chapters=[
+                {
+                    "title": "Only",
+                    "start": 0.0,
+                    "end": 120.0,
+                    "abstract": "All.",
+                    "type": "content",
+                    "key_points": [],
+                }
+            ],
+            source="test",
+        )
+        assert '<div class="meta">2 min of audio &middot; 4 words' in chaptered
+
+
+class TestKeylessLandmarks:
+    _SEGMENTS = [
+        {"start": 0.0, "end": 10.0, "text": "Opening one."},
+        {"start": 10.0, "end": 20.0, "text": "Opening two."},
+        {"start": 305.0, "end": 315.0, "text": "Five minutes one."},
+        {"start": 315.0, "end": 325.0, "text": "Five minutes two."},
+        {"start": 605.0, "end": 615.0, "text": "Ten minutes one."},
+        {"start": 615.0, "end": 625.0, "text": "Ten minutes two."},
+        {"start": 905.0, "end": 915.0, "text": "Fifteen minutes one."},
+        {"start": 915.0, "end": 925.0, "text": "Fifteen minutes two."},
+    ]
+
+    def test_landmarks_at_rail_marker_boundaries_except_first(self) -> None:
+        from podcast_reader.html import build_html
+
+        html = build_html(list(self._SEGMENTS), title="T", sentences_per_para=1, source="test")
+        for ts in ("00:05:05", "00:10:05", "00:15:05"):
+            assert f'<div class="landmark"><span class="landmark-ts">{ts}</span></div>' in html
+        # No landmark under the masthead for the first stop.
+        assert '<span class="landmark-ts">00:00:00</span>' not in html
+        assert html.count('class="landmark"') == 3
+
+    def test_landmark_precedes_its_marker_paragraph(self) -> None:
+        from podcast_reader.html import build_html
+
+        html = build_html(list(self._SEGMENTS), title="T", sentences_per_para=1, source="test")
+        landmark = '<div class="landmark"><span class="landmark-ts">00:05:05</span></div>'
+        assert html.index(landmark) < html.index('id="t-305000"')
+
+    def test_chaptered_artifact_has_no_landmarks(self) -> None:
+        from podcast_reader.html import build_html
+
+        html = build_html(
+            list(self._SEGMENTS),
+            title="T",
+            chapters=[
+                {
+                    "title": "All",
+                    "start": 0.0,
+                    "end": 925.0,
+                    "abstract": "Everything.",
+                    "type": "content",
+                    "key_points": [],
+                }
+            ],
+            sentences_per_para=1,
+            source="test",
+        )
+        assert 'class="landmark"' not in html
+
+
 class TestTimelineLabel:
     def test_short_text_is_kept_whole_without_ellipsis(self) -> None:
         from podcast_reader.html import _timeline_label
