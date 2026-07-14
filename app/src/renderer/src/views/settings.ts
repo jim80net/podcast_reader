@@ -5,12 +5,18 @@ import { planChapterSave } from '../chapter-onboarding'
 import { el } from '../dom'
 import { extractEngineDetail, settingsErrorField } from '../engine-error'
 import { keyPlaceholder, modelPlaceholder, toSettingsUpdate } from '../settings-form'
+import {
+  normalizeNamedProviderKey,
+  removeNamedProvider,
+  toNamedProviderConfig,
+  upsertNamedProvider
+} from '../named-provider-form'
 import type { CookiesSection } from './cookies-section'
 import type { PacksSection } from './packs-section'
 import type { PairingSection } from './pairing-section'
 import type { SettingsFormValues } from '../settings-form'
 import type { ViewCleanup } from '../store'
-import type { EngineSettings, ProviderInfo } from '../../../shared/types'
+import type { CustomProviderConfig, EngineSettings, ProviderInfo } from '../../../shared/types'
 
 /**
  * Settings view (app-views spec, task 4.6): provider dropdown fed by
@@ -54,6 +60,7 @@ export function mountSettings(container: HTMLElement): ViewCleanup {
     storageMode: 'encrypted' | 'session-memory'
   ): void {
     let knownProviders = providers
+    let customProviders = settings.custom_providers.map((provider) => ({ ...provider }))
     const fieldErrors = new Map<string, HTMLElement>()
 
     function field(
@@ -164,7 +171,12 @@ export function mountSettings(container: HTMLElement): ViewCleanup {
       keyResult.textContent = ''
     }
     syncProviderDependentUi()
-    providerSelect.addEventListener('change', syncProviderDependentUi)
+    let previousProvider = providerSelect.value
+    providerSelect.addEventListener('change', () => {
+      if (providerSelect.value !== previousProvider) modelInput.value = ''
+      previousProvider = providerSelect.value
+      syncProviderDependentUi()
+    })
 
     async function refreshProviders(): Promise<void> {
       try {
@@ -178,7 +190,7 @@ export function mountSettings(container: HTMLElement): ViewCleanup {
     }
 
     keyTestButton.addEventListener('click', () => {
-      keyTestButton.disabled = true
+      setSettingsMutationBusy(true)
       keyResult.textContent = 'Testing…'
       // Snapshot at click time: the dropdown could change during the async test
       // round-trip, and the key must persist under the provider we tested, not
@@ -224,12 +236,12 @@ export function mountSettings(container: HTMLElement): ViewCleanup {
           keyResult.textContent = `Key test failed: ${extractEngineDetail(err)}`
         })
         .finally(() => {
-          keyTestButton.disabled = false
+          setSettingsMutationBusy(false)
         })
     })
 
     keyClearButton.addEventListener('click', () => {
-      keyClearButton.disabled = true
+      setSettingsMutationBusy(true)
       // "" clears the vault entry and restores the engine's env fallback.
       window.api
         .putKey(providerSelect.value, '')
@@ -242,8 +254,279 @@ export function mountSettings(container: HTMLElement): ViewCleanup {
           keyResult.textContent = `Clear failed: ${extractEngineDetail(err)}`
         })
         .finally(() => {
-          keyClearButton.disabled = false
+          setSettingsMutationBusy(false)
         })
+    })
+
+    // -- user-defined providers (nonsecret configuration) ----------------
+    const namedSelect = el('select', {})
+    const namedNameInput = el('input', {
+      attrs: { type: 'text', placeholder: 'office-gateway' }
+    })
+    const namedUrlInput = el('input', {
+      attrs: { type: 'text', placeholder: 'https://llm.example/v1' }
+    })
+    const namedModelInput = el('input', { attrs: { type: 'text', placeholder: 'model-name' } })
+    const namedTokensInput = el('input', {
+      attrs: { type: 'number', min: '1', max: '1000000', step: '1' }
+    })
+    const namedKeyInput = el('input', {
+      attrs: { type: 'password', autocomplete: 'off' }
+    })
+    const namedEditor = el('div', { class: 'settings-form' })
+    const namedStatus = el('span', { class: 'key-result', attrs: { role: 'status' } })
+    const addNamedButton = el('button', {
+      text: 'Add provider',
+      class: 'button-secondary',
+      attrs: { type: 'button' }
+    })
+    const saveNamedButton = el('button', {
+      text: 'Save provider',
+      class: 'button-secondary',
+      attrs: { type: 'button' }
+    })
+    const removeNamedButton = el('button', {
+      text: 'Remove provider',
+      class: 'button-secondary',
+      attrs: { type: 'button' }
+    })
+    const testNamedButton = el('button', {
+      text: 'Save provider and test key',
+      class: 'button-secondary',
+      attrs: { type: 'button' }
+    })
+    let editingName: string | undefined
+
+    const namedControls = [
+      namedSelect,
+      namedNameInput,
+      namedUrlInput,
+      namedModelInput,
+      namedTokensInput,
+      namedKeyInput,
+      addNamedButton,
+      saveNamedButton,
+      testNamedButton,
+      removeNamedButton
+    ]
+
+    function setSettingsMutationBusy(busy: boolean): void {
+      for (const control of [
+        ...namedControls,
+        providerSelect,
+        keyTestButton,
+        keyClearButton,
+        saveButton
+      ]) {
+        control.disabled = busy
+      }
+      if (!busy) namedNameInput.disabled = editingName !== undefined
+    }
+
+    function renderNamedOptions(selected?: string): void {
+      namedSelect.replaceChildren(
+        el('option', { text: 'Choose a provider to edit', attrs: { value: '' } })
+      )
+      for (const provider of customProviders) {
+        namedSelect.append(el('option', { text: provider.name, attrs: { value: provider.name } }))
+      }
+      namedSelect.value = selected ?? ''
+    }
+
+    function showNamedEditor(provider?: CustomProviderConfig): void {
+      editingName = provider?.name
+      namedNameInput.value = provider?.name ?? ''
+      namedNameInput.disabled = provider !== undefined
+      namedUrlInput.value = provider?.base_url ?? ''
+      namedModelInput.value = provider?.default_model ?? ''
+      namedTokensInput.value = provider === undefined ? '16384' : String(provider.max_tokens)
+      namedKeyInput.value = ''
+      namedKeyInput.placeholder =
+        provider === undefined ? 'enter a key to test' : keyPlaceholder(knownProviders, provider.name)
+      namedEditor.hidden = false
+      removeNamedButton.hidden = provider === undefined
+      namedStatus.textContent = ''
+    }
+
+    renderNamedOptions()
+    namedEditor.append(
+      field('named_provider_name', 'Provider name', namedNameInput),
+      field('named_provider_url', 'Base URL', namedUrlInput),
+      field('named_provider_model', 'Provider default model', namedModelInput),
+      field('named_provider_tokens', 'Maximum output tokens', namedTokensInput),
+      field('named_provider_key', 'API key (write-only)', namedKeyInput),
+      el(
+        'div',
+        { class: 'key-actions' },
+        saveNamedButton,
+        testNamedButton,
+        removeNamedButton,
+        namedStatus
+      )
+    )
+    namedEditor.hidden = true
+    namedSelect.addEventListener('change', () => {
+      const provider = customProviders.find((entry) => entry.name === namedSelect.value)
+      if (provider === undefined) {
+        namedEditor.hidden = true
+        return
+      }
+      showNamedEditor(provider)
+    })
+    addNamedButton.addEventListener('click', () => {
+      renderNamedOptions()
+      showNamedEditor()
+      namedNameInput.focus()
+    })
+
+    saveNamedButton.addEventListener('click', () => {
+      clearErrors()
+      const result = toNamedProviderConfig(
+        {
+          name: namedNameInput.value,
+          base_url: namedUrlInput.value,
+          default_model: namedModelInput.value,
+          max_tokens: namedTokensInput.value
+        },
+        customProviders,
+        editingName
+      )
+      if (!result.ok) {
+        showFieldError(`named_provider_${result.field.replace('base_url', 'url').replace('default_model', 'model').replace('max_tokens', 'tokens')}`, result.message)
+        return
+      }
+      const next = upsertNamedProvider(customProviders, result.config, editingName)
+      const enteredKey = normalizeNamedProviderKey(namedKeyInput.value)
+      setSettingsMutationBusy(true)
+      void (async () => {
+        try {
+          const current = await window.api.getSettings()
+          const saved = await window.api.putSettings({ ...current, custom_providers: next })
+          customProviders = saved.custom_providers.map((provider) => ({ ...provider }))
+          Object.assign(settings, saved)
+          editingName = result.config.name
+          renderNamedOptions(editingName)
+          showNamedEditor(result.config)
+          await refreshProviders()
+          if (enteredKey !== undefined) {
+            try {
+              await window.api.putKey(result.config.name, enteredKey)
+              await refreshProviders()
+              namedStatus.textContent = 'Provider and key saved.'
+            } catch (err) {
+              namedKeyInput.value = enteredKey
+              namedStatus.textContent =
+                `Provider saved, but saving its key failed: ${extractEngineDetail(err)}`
+            }
+          } else {
+            namedStatus.textContent =
+              'Provider saved. Select it above to add or test its write-only API key.'
+          }
+        } catch (err) {
+          namedStatus.textContent = `Save failed: ${extractEngineDetail(err)}`
+        } finally {
+          setSettingsMutationBusy(false)
+        }
+      })()
+    })
+
+    testNamedButton.addEventListener('click', () => {
+      clearErrors()
+      const result = toNamedProviderConfig(
+        {
+          name: namedNameInput.value,
+          base_url: namedUrlInput.value,
+          default_model: namedModelInput.value,
+          max_tokens: namedTokensInput.value
+        },
+        customProviders,
+        editingName
+      )
+      if (!result.ok) {
+        showFieldError(
+          `named_provider_${result.field.replace('base_url', 'url').replace('default_model', 'model').replace('max_tokens', 'tokens')}`,
+          result.message
+        )
+        return
+      }
+      const next = upsertNamedProvider(customProviders, result.config, editingName)
+      const enteredKey = normalizeNamedProviderKey(namedKeyInput.value)
+      setSettingsMutationBusy(true)
+      namedStatus.textContent = 'Saving provider and testing…'
+      void (async () => {
+        try {
+          const current = await window.api.getSettings()
+          const saved = await window.api.putSettings({ ...current, custom_providers: next })
+          customProviders = saved.custom_providers.map((provider) => ({ ...provider }))
+          Object.assign(settings, saved)
+          editingName = result.config.name
+          renderNamedOptions(editingName)
+          await refreshProviders()
+          const tested = await window.api.testKey(
+            result.config.name,
+            enteredKey
+          )
+          if (!tested.ok) {
+            namedStatus.textContent =
+              `Provider saved; key test failed: ${tested.detail ?? 'unknown error'}`
+            return
+          }
+          if (enteredKey !== undefined) {
+            await window.api.putKey(result.config.name, enteredKey)
+            namedKeyInput.value = ''
+            await refreshProviders()
+          }
+          namedStatus.textContent =
+            enteredKey === undefined
+              ? 'Provider saved; stored key works.'
+              : 'Provider and key saved.'
+        } catch (err) {
+          namedStatus.textContent = `Save or test failed: ${extractEngineDetail(err)}`
+        } finally {
+          setSettingsMutationBusy(false)
+          removeNamedButton.hidden = editingName === undefined
+        }
+      })()
+    })
+
+    removeNamedButton.addEventListener('click', () => {
+      if (editingName === undefined) return
+      const removedName = editingName
+      const next = removeNamedProvider(customProviders, removedName)
+      setSettingsMutationBusy(true)
+      void (async () => {
+        try {
+          const current = await window.api.getSettings()
+          const replacement =
+            current.chapter_provider === removedName ? 'anthropic' : current.chapter_provider
+          const saved = await window.api.putSettings({
+            ...current,
+            chapter_provider: replacement,
+            chapter_model: replacement === current.chapter_provider ? current.chapter_model : '',
+            custom_providers: next
+          })
+          customProviders = saved.custom_providers.map((provider) => ({ ...provider }))
+          Object.assign(settings, saved)
+          providerSelect.value = saved.chapter_provider
+          modelInput.value = saved.chapter_model
+          previousProvider = saved.chapter_provider
+          editingName = undefined
+          renderNamedOptions()
+          namedEditor.hidden = true
+          await refreshProviders()
+          try {
+            await window.api.putKey(removedName, '')
+            saveStatus.textContent = 'Provider and stored key removed.'
+          } catch (err) {
+            saveStatus.textContent =
+              `Provider removed, but clearing its stored key failed: ${extractEngineDetail(err)}`
+          }
+        } catch (err) {
+          namedStatus.textContent = `Remove failed: ${extractEngineDetail(err)}`
+        } finally {
+          setSettingsMutationBusy(false)
+        }
+      })()
     })
 
     // -- whisper / output -------------------------------------------------
@@ -297,7 +580,7 @@ export function mountSettings(container: HTMLElement): ViewCleanup {
       el('h3', { text: 'Chapters' }),
       field('chapter_provider', 'Provider', providerSelect),
       customUrlField,
-      field('chapter_model', 'Chapter model', modelInput),
+      field('chapter_model', 'Chapter model override', modelInput),
       cleanupField,
       el(
         'div',
@@ -306,6 +589,16 @@ export function mountSettings(container: HTMLElement): ViewCleanup {
         keyInput,
         el('div', { class: 'key-actions' }, keyTestButton, keyClearButton, keyResult)
       ),
+      el('h3', { text: 'User-defined providers' }),
+      el('p', {
+        class: 'field-note',
+        text:
+          'Add OpenAI-compatible endpoints here. Configuration is saved without credentials; ' +
+          'keys use the write-only field above after you select the provider.'
+      }),
+      field('named_provider_select', 'Saved providers', namedSelect),
+      addNamedButton,
+      namedEditor,
       el('h3', { text: 'Transcription' }),
       field('whisper_model', 'Whisper model', whisperModelInput),
       field('whisper_device', 'Device', deviceSelect),
@@ -368,11 +661,15 @@ export function mountSettings(container: HTMLElement): ViewCleanup {
         showFieldError(result.field, result.message)
         return
       }
-      saveButton.disabled = true
+      setSettingsMutationBusy(true)
       void (async () => {
         try {
           // Engine settings first — a rejected PUT persists nothing.
-          await window.api.putSettings(result.update)
+          const saved = await window.api.putSettings({
+            ...result.update,
+            custom_providers: customProviders
+          })
+          Object.assign(settings, saved)
           const key = keyInput.value
           if (key !== '') {
             await window.api.putKey(providerSelect.value, key)
@@ -386,7 +683,7 @@ export function mountSettings(container: HTMLElement): ViewCleanup {
           const detail = extractEngineDetail(err)
           showFieldError(settingsErrorField(detail), detail)
         } finally {
-          saveButton.disabled = false
+          setSettingsMutationBusy(false)
         }
       })()
     })

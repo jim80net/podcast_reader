@@ -34,6 +34,10 @@ def _request(*, input_arg: str, output_dir: Path) -> PipelineRequest:
         hf_token=None,
         sentences=5,
         cookies=None,
+        chapter_provider="anthropic",
+        chapter_api_key=None,
+        custom_provider_url="",
+        custom_providers=[],
         diarize=False,
         caption_cleanup=False,
     )

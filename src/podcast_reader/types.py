@@ -85,6 +85,7 @@ class PipelineRequest(TypedDict):
     chapter_provider: str  # a podcast_reader.providers.PROVIDERS key
     chapter_api_key: str | None  # None: skip chapter generation
     custom_provider_url: str  # base URL for the "custom" provider ("" otherwise)
+    custom_providers: list[CustomProviderConfig]  # request-local nonsecret snapshot
     diarize: bool  # run the diarization pack's worker after transcription
     caption_cleanup: bool  # opt-in spelling/casing cleanup via the chapter provider
 
@@ -144,6 +145,15 @@ class LibraryEntry(TypedDict):
     created_at: float
 
 
+class CustomProviderConfig(TypedDict):
+    """Persisted, nonsecret configuration for one user-defined provider."""
+
+    name: str
+    base_url: str
+    default_model: str
+    max_tokens: int
+
+
 class EngineSettings(TypedDict):
     whisper_model: str
     whisper_lang: str
@@ -153,6 +163,7 @@ class EngineSettings(TypedDict):
     chapter_model: str  # "" means: the chapter provider's default model
     chapter_provider: str  # a podcast_reader.providers.PROVIDERS key
     custom_provider_url: str  # base URL for the "custom" provider ("" otherwise)
+    custom_providers: list[CustomProviderConfig]  # named providers; never credentials
     diarize: bool  # default false; warn-and-skip when the pack is absent
     caption_cleanup: bool  # opt-in, provider-assisted spelling/casing cleanup
     media_cache_max_bytes: int  # LRU cap for the lazy media cache (media-playback)

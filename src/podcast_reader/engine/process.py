@@ -48,7 +48,7 @@ from podcast_reader.engine.settings import (
     token_fingerprint,
 )
 from podcast_reader.pipeline import InputType, PipelineError, classify_input, run_pipeline
-from podcast_reader.providers import PROVIDERS
+from podcast_reader.providers import build_provider_registry, canonicalize_custom_providers
 from podcast_reader.tools import (
     kill_children,
     popen_kwargs,  # re-export: spawn-time child options
@@ -56,7 +56,7 @@ from podcast_reader.tools import (
 from podcast_reader.types import JobModels, LibraryEntry, PipelineRequest, PipelineResult
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable
+    from collections.abc import Callable, Iterable, Mapping, Sequence
 
     from podcast_reader.engine.jobs import JobRunner
     from podcast_reader.engine.settings import EngineState
@@ -158,7 +158,8 @@ def make_pipeline_runner(base: Path, key_store: dict[str, str] | None = None) ->
 
     *key_store* is the process-memory chapter-API-key dict shared with the
     FastAPI app (``PUT /v1/keys`` writes it); the runner injects the key for
-    the configured provider at dequeue, falling back to the provider's env var.
+    the configured built-in or named provider at dequeue, falling back to its
+    established or deterministic per-name environment variable.
     """
     keys: dict[str, str] = key_store if key_store is not None else {}
 
@@ -198,7 +199,8 @@ def make_pipeline_runner(base: Path, key_store: dict[str, str] | None = None) ->
         jar = resolve_jar_for_source(base, source)
         provider = overrides.get("chapter_provider") or settings["chapter_provider"]
         whisper_model = overrides.get("whisper_model") or settings["whisper_model"]
-        chapter_api_key = _resolve_chapter_key(provider, keys)
+        custom_providers = canonicalize_custom_providers(settings["custom_providers"])
+        chapter_api_key = _resolve_chapter_key(provider, keys, custom_providers)
         # Record only the model claims that actually applied to this job. The
         # app renders null fields as absent rows, so skipped steps do not leave
         # behind stale provider/model strings.
@@ -223,6 +225,7 @@ def make_pipeline_runner(base: Path, key_store: dict[str, str] | None = None) ->
             chapter_api_key=chapter_api_key,
             custom_provider_url=overrides.get("custom_provider_url")
             or settings["custom_provider_url"],
+            custom_providers=custom_providers,
             diarize=settings["diarize"],
             caption_cleanup=settings["caption_cleanup"],
         )
@@ -271,7 +274,11 @@ def _unlink_all(paths: Iterable[Path]) -> None:
         path.unlink(missing_ok=True)
 
 
-def _resolve_chapter_key(provider: str, keys: dict[str, str]) -> str | None:
+def _resolve_chapter_key(
+    provider: str,
+    keys: dict[str, str],
+    custom_providers: Sequence[Mapping[str, object]] = (),
+) -> str | None:
     """Resolve the chapter API key: pushed key first, then the env variable.
 
     The env fallback preserves headless ``podcast-reader serve`` deployments
@@ -282,7 +289,7 @@ def _resolve_chapter_key(provider: str, keys: dict[str, str]) -> str | None:
     pushed = keys.get(provider)
     if pushed:
         return pushed
-    spec = PROVIDERS.get(provider)
+    spec = build_provider_registry(custom_providers).get(provider)
     if spec is None:
         return None
     return os.environ.get(spec["key_env"])

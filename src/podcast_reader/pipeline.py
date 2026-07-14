@@ -280,7 +280,11 @@ def run_pipeline(
         )
         try:
             try:
-                spec = resolve_provider(provider, custom_base_url=request["custom_provider_url"])
+                spec = resolve_provider(
+                    provider,
+                    custom_base_url=request["custom_provider_url"],
+                    custom_providers=request["custom_providers"],
+                )
             except ValueError as exc:
                 # providers.py messages are self-authored (no response-body
                 # content) — promote them so the warning carries the diagnosis.

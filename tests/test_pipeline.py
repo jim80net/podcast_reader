@@ -11,7 +11,7 @@ from unittest.mock import ANY, MagicMock, patch
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from podcast_reader.types import PipelineEvent
+    from podcast_reader.types import CustomProviderConfig, PipelineEvent
 
 import pytest
 
@@ -78,6 +78,7 @@ def _request(
     chapter_api_key: str | None = None,
     diarize: bool = False,
     caption_cleanup: bool = False,
+    custom_providers: list[CustomProviderConfig] | None = None,
 ) -> PipelineRequest:
     """Build a PipelineRequest with test defaults."""
     return PipelineRequest(
@@ -94,6 +95,7 @@ def _request(
         chapter_provider=chapter_provider,
         chapter_api_key=chapter_api_key,
         custom_provider_url="",
+        custom_providers=custom_providers or [],
         diarize=diarize,
         caption_cleanup=caption_cleanup,
     )
@@ -730,6 +732,49 @@ class TestRunPipelineChapters:
 
         # build_html should receive the chapters as keyword arg
         assert mock_build_html.call_args.kwargs["chapters"] == _SAMPLE_CHAPTERS
+
+    @patch("podcast_reader.pipeline._wsl_path", return_value=None)
+    @patch("podcast_reader.pipeline.build_html", return_value="<html></html>")
+    @patch("podcast_reader.pipeline.snap_chapters_to_segments", return_value=_SAMPLE_CHAPTERS)
+    @patch("podcast_reader.pipeline.generate_chapters", return_value=_SAMPLE_CHAPTERS)
+    @patch("podcast_reader.pipeline.format_transcript", return_value="[0.0] Hello.")
+    @patch("podcast_reader.pipeline.fetch_transcript")
+    @patch("podcast_reader.pipeline.snippets_to_whisper_segments", return_value=_SAMPLE_SEGMENTS)
+    def test_named_provider_uses_request_local_url_model_and_cap(
+        self,
+        _mock_snippets: MagicMock,
+        _mock_fetch: MagicMock,
+        _mock_format: MagicMock,
+        mock_generate: MagicMock,
+        _mock_snap: MagicMock,
+        _mock_build_html: MagicMock,
+        _mock_wsl: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        from podcast_reader.types import CustomProviderConfig
+
+        config = CustomProviderConfig(
+            name="office-gateway",
+            base_url="https://llm.corp.example/v1",
+            default_model="corp-small",
+            max_tokens=32768,
+        )
+
+        run_pipeline(
+            _request(
+                input_arg=_YT_URL,
+                output_dir=tmp_path,
+                chapter_provider="office-gateway",
+                chapter_api_key="test-key",
+                custom_providers=[config],
+            ),
+            on_event=lambda e: None,
+        )
+
+        spec = mock_generate.call_args.kwargs["spec"]
+        assert spec["base_url"] == "https://llm.corp.example/v1"
+        assert spec["default_model"] == "corp-small"
+        assert spec["max_tokens"] == 32768
 
     @patch("podcast_reader.pipeline._wsl_path", return_value=None)
     @patch("podcast_reader.pipeline.build_html", return_value="<html></html>")

@@ -30,11 +30,19 @@ When no key has been pushed for the configured provider, the engine job runner S
 - **THEN** the pushed key is used
 
 ### Requirement: Provider selection setting
-`EngineSettings` SHALL include `chapter_provider` (default `anthropic`) and `custom_provider_url` (default empty), both settable via `PUT /v1/settings` and snapshotted at job dequeue like all settings. `chapter_model` SHALL default to empty, meaning "the provider's default model".
+`EngineSettings` SHALL include `chapter_provider` (default `anthropic`), `custom_provider_url` (default empty), and `custom_providers` (default empty list), all settable via `PUT /v1/settings` and snapshotted at job dequeue like all settings. Each named provider entry SHALL persist only `name`, `base_url`, `default_model`, and `max_tokens`; credential-shaped or unknown fields SHALL be rejected without reflecting their submitted values. `chapter_model` SHALL default to empty, meaning "the provider's default model".
 
 #### Scenario: Provider change applies to next job
 - **WHEN** `chapter_provider` is changed while a job is running
 - **THEN** the running job keeps its snapshot; the next job uses the new provider
+
+#### Scenario: Malformed named configuration recovers
+- **WHEN** an on-disk settings file contains an invalid named-provider entry
+- **THEN** the file is quarantined and the engine serves with defaults rather than repeatedly failing startup, listing, CLI, or job work
+
+#### Scenario: Named key remains engine-memory-only
+- **WHEN** a key is pushed for a user-defined provider
+- **THEN** only the process-memory key store contains it; settings, jobs, events, journals, logs, and provider responses contain neither its value nor an identifying prefix
 
 ### Requirement: Stale settings upgrade cleanly
 Engine settings persisted by an earlier version (lacking the new fields) SHALL load with defaults merged in, and `PUT /v1/settings` requests in the earlier shape SHALL continue to succeed. No job may fail because the settings file predates this change.
@@ -67,13 +75,12 @@ The engine SHALL expose `POST /v1/keys/test` accepting `{provider, api_key?}` th
 - **THEN** the engine responds 400 without any outbound request
 
 ### Requirement: Provider listing endpoint (per P4)
-The engine SHALL expose `GET /v1/providers` (bearer-authenticated like all routes) returning, for each provider registry entry, the provider id, its default model, and a boolean indicating whether a key is currently available for it (pushed in-memory or present in the provider's env variable). The response SHALL never contain key material in any form — no values, prefixes, lengths, or fingerprints, only the availability boolean.
+The engine SHALL expose `GET /v1/providers` (bearer-authenticated like all routes) returning built-in defaults followed by each current user-defined entry in settings order. For every entry it SHALL return the provider id, default model, and a boolean indicating whether a key is currently available (pushed in-memory or present in the provider's environment variable). The response SHALL never contain key material in any form — no values, prefixes, lengths, or fingerprints, only the availability boolean.
 
 #### Scenario: Registry listed
 - **WHEN** `GET /v1/providers` is called with a valid token
-- **THEN** the response lists exactly the registry ids `anthropic`, `openai`, `xai`, `openrouter`, `deepseek`, and `custom`, each with its default model and key-availability boolean
+- **THEN** the response lists `anthropic`, `openai`, `xai`, `openrouter`, `deepseek`, and `custom`, followed by all configured named entries, each with its default model and key-availability boolean
 
 #### Scenario: No key material in the listing
 - **WHEN** `GET /v1/providers` is called while keys are pushed and provider env variables are set
 - **THEN** the response contains no key value or key-derived material — availability is reported as a boolean only
-

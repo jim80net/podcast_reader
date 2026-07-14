@@ -35,7 +35,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
     from pathlib import Path
 
-    from podcast_reader.types import JobRecord
+    from podcast_reader.types import JobOverrides, JobRecord
 
 _RESULT = PipelineResult(
     json_path="/lib/aaa/a.json",
@@ -745,6 +745,176 @@ class TestSettings:
         assert fetched["custom_provider_url"] == "https://llm.example.com/v1"
         assert load_settings(tmp_path)["chapter_provider"] == "custom"
 
+    def test_named_provider_fields_roundtrip_and_become_selectable(
+        self, engine: _Engine, tmp_path: Path
+    ) -> None:
+        current = engine.client.get("/v1/settings", headers=engine.headers).json()
+        current["custom_providers"] = [
+            {
+                "name": "office-gateway",
+                "base_url": "https://llm.corp.example/v1",
+                "default_model": "corp-small",
+                "max_tokens": 32768,
+            }
+        ]
+        current["chapter_provider"] = "office-gateway"
+
+        put = engine.client.put("/v1/settings", json=current, headers=engine.headers)
+
+        assert put.status_code == 200
+        assert load_settings(tmp_path)["custom_providers"] == current["custom_providers"]
+        listing = engine.client.get("/v1/providers", headers=engine.headers).json()
+        assert listing[-1] == {
+            "id": "office-gateway",
+            "default_model": "corp-small",
+            "key_available": False,
+        }
+
+    @pytest.mark.parametrize("secret_field", ["api_key", "key"])
+    def test_named_provider_secret_shaped_fields_rejected(
+        self, engine: _Engine, tmp_path: Path, secret_field: str
+    ) -> None:
+        current = engine.client.get("/v1/settings", headers=engine.headers).json()
+        current["custom_providers"] = [
+            {
+                "name": "office-gateway",
+                "base_url": "https://llm.corp.example/v1",
+                "default_model": "corp-small",
+                "max_tokens": 32768,
+                secret_field: "sk-must-not-persist",
+            }
+        ]
+
+        put = engine.client.put("/v1/settings", json=current, headers=engine.headers)
+
+        assert put.status_code == 422
+        assert "sk-must-not-persist" not in put.text
+        if (tmp_path / "settings.json").exists():
+            assert "sk-must-not-persist" not in (tmp_path / "settings.json").read_text()
+
+    def test_named_provider_url_credentials_rejected(self, engine: _Engine) -> None:
+        current = engine.client.get("/v1/settings", headers=engine.headers).json()
+        current["custom_providers"] = [
+            {
+                "name": "office-gateway",
+                "base_url": "https://user:secret@llm.corp.example/v1",
+                "default_model": "corp-small",
+                "max_tokens": 32768,
+            }
+        ]
+
+        put = engine.client.put("/v1/settings", json=current, headers=engine.headers)
+
+        assert put.status_code == 400
+        assert "secret" not in put.text
+
+    @pytest.mark.parametrize("requires_confirmation", [True, False])
+    def test_cannot_delete_provider_referenced_by_nonterminal_override(
+        self, engine: _Engine, requires_confirmation: bool
+    ) -> None:
+        current = engine.client.get("/v1/settings", headers=engine.headers).json()
+        current["custom_providers"] = [
+            {
+                "name": "office-gateway",
+                "base_url": "https://llm.corp.example/v1",
+                "default_model": "corp-small",
+                "max_tokens": 32768,
+            }
+        ]
+        assert (
+            engine.client.put("/v1/settings", json=current, headers=engine.headers).status_code
+            == 200
+        )
+        if not requires_confirmation:
+            engine.runner_release.clear()
+        submitted = engine.client.post(
+            "/v1/jobs",
+            json={
+                "source": "https://example.com/queued",
+                "requires_confirmation": requires_confirmation,
+                "overrides": {"chapter_provider": "office-gateway"},
+            },
+            headers=engine.headers,
+        )
+        assert submitted.status_code == 201
+        if not requires_confirmation:
+            assert _wait_for(
+                lambda: (
+                    engine.client.get(
+                        f"/v1/jobs/{submitted.json()['id']}", headers=engine.headers
+                    ).json()["state"]
+                    == "running"
+                )
+            )
+
+        current["custom_providers"] = []
+        put = engine.client.put("/v1/settings", json=current, headers=engine.headers)
+
+        assert put.status_code == 409
+        assert submitted.json()["id"] in put.json()["detail"]
+
+    def test_provider_deletion_and_override_submission_are_serialized(
+        self, engine: _Engine, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from concurrent.futures import ThreadPoolExecutor
+
+        current = engine.client.get("/v1/settings", headers=engine.headers).json()
+        provider = {
+            "name": "office-gateway",
+            "base_url": "https://llm.corp.example/v1",
+            "default_model": "corp-small",
+            "max_tokens": 32768,
+        }
+        current["custom_providers"] = [provider]
+        assert (
+            engine.client.put("/v1/settings", json=current, headers=engine.headers).status_code
+            == 200
+        )
+        submit_entered = threading.Event()
+        release_submit = threading.Event()
+        real_submit = engine.store.submit
+
+        def held_submit(
+            source: str,
+            title: str | None,
+            *,
+            requires_confirmation: bool = False,
+            overrides: JobOverrides | None = None,
+        ) -> JobRecord:
+            submit_entered.set()
+            assert release_submit.wait(timeout=10)
+            return real_submit(
+                source,
+                title,
+                requires_confirmation=requires_confirmation,
+                overrides=overrides,
+            )
+
+        monkeypatch.setattr(engine.store, "submit", held_submit)
+        removal = {**current, "custom_providers": []}
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            submitted = pool.submit(
+                engine.client.post,
+                "/v1/jobs",
+                json={
+                    "source": "https://example.com/race",
+                    "requires_confirmation": True,
+                    "overrides": {"chapter_provider": "office-gateway"},
+                },
+                headers=engine.headers,
+            )
+            assert submit_entered.wait(timeout=10)
+            deleted = pool.submit(
+                engine.client.put, "/v1/settings", json=removal, headers=engine.headers
+            )
+            release_submit.set()
+            submit_response = submitted.result(timeout=10)
+            delete_response = deleted.result(timeout=10)
+
+        assert submit_response.status_code == 201
+        assert delete_response.status_code == 409
+        assert load_settings(engine.data_dir)["custom_providers"] == [provider]
+
     def test_diarize_roundtrip_and_default(self, engine: _Engine, tmp_path: Path) -> None:
         """diarization-worker spec: `diarize` defaults false, settable via
         PUT /v1/settings."""
@@ -880,6 +1050,143 @@ class TestKeys:
         assert response.status_code == 204
         assert engine.key_store == {"anthropic": "sk-ant-pushed"}
 
+    def test_named_provider_key_is_accepted_and_write_only(self, engine: _Engine) -> None:
+        current = engine.client.get("/v1/settings", headers=engine.headers).json()
+        current["custom_providers"] = [
+            {
+                "name": "office-gateway",
+                "base_url": "https://llm.corp.example/v1",
+                "default_model": "corp-small",
+                "max_tokens": 32768,
+            }
+        ]
+        assert (
+            engine.client.put("/v1/settings", json=current, headers=engine.headers).status_code
+            == 200
+        )
+
+        response = engine.client.put(
+            "/v1/keys",
+            json={"provider": "office-gateway", "api_key": "sk-office-secret"},
+            headers=engine.headers,
+        )
+
+        assert response.status_code == 204
+        assert engine.key_store["office-gateway"] == "sk-office-secret"
+        assert (
+            "sk-office-secret"
+            not in engine.client.get("/v1/providers", headers=engine.headers).text
+        )
+
+    def test_unknown_provider_can_be_cleared_but_not_set(self, engine: _Engine) -> None:
+        cleared = engine.client.put(
+            "/v1/keys", json={"provider": "removed", "api_key": ""}, headers=engine.headers
+        )
+        set_key = engine.client.put(
+            "/v1/keys", json={"provider": "removed", "api_key": "secret"}, headers=engine.headers
+        )
+
+        assert cleared.status_code == 204
+        assert set_key.status_code == 400
+
+    def test_remove_then_readd_does_not_reactivate_old_key(self, engine: _Engine) -> None:
+        current = engine.client.get("/v1/settings", headers=engine.headers).json()
+        provider = {
+            "name": "office-gateway",
+            "base_url": "https://llm.corp.example/v1",
+            "default_model": "corp-small",
+            "max_tokens": 32768,
+        }
+        current["custom_providers"] = [provider]
+        assert (
+            engine.client.put("/v1/settings", json=current, headers=engine.headers).status_code
+            == 200
+        )
+        assert (
+            engine.client.put(
+                "/v1/keys",
+                json={"provider": "office-gateway", "api_key": "sk-old-secret"},
+                headers=engine.headers,
+            ).status_code
+            == 204
+        )
+        current["custom_providers"] = []
+        assert (
+            engine.client.put("/v1/settings", json=current, headers=engine.headers).status_code
+            == 200
+        )
+        assert "office-gateway" not in engine.key_store
+
+        current["custom_providers"] = [{**provider, "base_url": "https://new.example/v1"}]
+        assert (
+            engine.client.put("/v1/settings", json=current, headers=engine.headers).status_code
+            == 200
+        )
+        listing = engine.client.get("/v1/providers", headers=engine.headers).json()
+        assert (
+            next(item for item in listing if item["id"] == "office-gateway")["key_available"]
+            is False
+        )
+        engine.key_test_handler = lambda request: httpx.Response(200, json=_completion("ok"))
+        tested = engine.client.post(
+            "/v1/keys/test", json={"provider": "office-gateway"}, headers=engine.headers
+        )
+        assert tested.json()["ok"] is False
+        assert engine.key_test_requests == []
+
+    def test_key_put_and_provider_removal_are_serialized(self, tmp_path: Path) -> None:
+        from concurrent.futures import ThreadPoolExecutor
+
+        class BlockingKeys(dict[str, str]):
+            armed = False
+
+            def __setitem__(self, name: str, value: str) -> None:
+                if self.armed and name == "office-gateway":
+                    write_entered.set()
+                    assert release_write.wait(timeout=10)
+                super().__setitem__(name, value)
+
+        write_entered = threading.Event()
+        release_write = threading.Event()
+        keys = BlockingKeys()
+        store = JobStore(tmp_path, lambda record, on_event: _RESULT)
+        client = TestClient(create_app(tmp_path, store, key_store=keys))
+        headers = {"Authorization": f"Bearer {load_engine_state(tmp_path)['token']}"}
+        current = client.get("/v1/settings", headers=headers).json()
+        provider = {
+            "name": "office-gateway",
+            "base_url": "https://llm.corp.example/v1",
+            "default_model": "corp-small",
+            "max_tokens": 32768,
+        }
+        current["custom_providers"] = [provider]
+        assert client.put("/v1/settings", json=current, headers=headers).status_code == 200
+        keys.armed = True
+        removal = {**current, "custom_providers": []}
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            key_put = pool.submit(
+                client.put,
+                "/v1/keys",
+                json={"provider": "office-gateway", "api_key": "sk-racing"},
+                headers=headers,
+            )
+            assert write_entered.wait(timeout=10)
+            deleted = pool.submit(client.put, "/v1/settings", json=removal, headers=headers)
+            assert not deleted.done()
+            release_write.set()
+            assert key_put.result(timeout=10).status_code == 204
+            assert deleted.result(timeout=10).status_code == 200
+
+        assert keys == {}
+        current["custom_providers"] = [{**provider, "base_url": "https://new.example/v1"}]
+        assert client.put("/v1/settings", json=current, headers=headers).status_code == 200
+        listing = client.get("/v1/providers", headers=headers).json()
+        assert (
+            next(item for item in listing if item["id"] == "office-gateway")["key_available"]
+            is False
+        )
+
     def test_put_key_overwrites_previous(self, engine: _Engine) -> None:
         for key in ("sk-first", "sk-second"):
             engine.client.put(
@@ -919,7 +1226,7 @@ class TestKeys:
             headers=engine.headers,
         )
         assert put.status_code == 204
-        assert engine.key_store == {"anthropic": ""}
+        assert engine.key_store == {}
         assert _resolve_chapter_key("anthropic", engine.key_store) == "sk-env-fallback"
 
     def test_keys_cannot_be_read_back(self, engine: _Engine) -> None:
@@ -1078,6 +1385,35 @@ class TestKeys:
         assert response.json()["ok"] is True
         assert str(engine.key_test_requests[0].url) == "https://llm.example.com/v1/chat/completions"
 
+    def test_named_provider_key_test_uses_its_endpoint_default_and_cap(
+        self, engine: _Engine
+    ) -> None:
+        current = engine.client.get("/v1/settings", headers=engine.headers).json()
+        current["custom_providers"] = [
+            {
+                "name": "office-gateway",
+                "base_url": "https://llm.corp.example/v1",
+                "default_model": "corp-small",
+                "max_tokens": 32768,
+            }
+        ]
+        assert (
+            engine.client.put("/v1/settings", json=current, headers=engine.headers).status_code
+            == 200
+        )
+        engine.key_test_handler = lambda request: httpx.Response(200, json=_completion("ok"))
+
+        response = engine.client.post(
+            "/v1/keys/test",
+            json={"provider": "office-gateway", "api_key": "sk-office"},
+            headers=engine.headers,
+        )
+
+        assert response.json()["ok"] is True
+        request = engine.key_test_requests[0]
+        assert str(request.url) == "https://llm.corp.example/v1/chat/completions"
+        assert json.loads(request.content)["model"] == "corp-small"
+
     def test_custom_provider_without_url_400_no_outbound_call(self, engine: _Engine) -> None:
         """Per P9: empty custom_provider_url is a 400, not an outbound request."""
         engine.key_test_handler = lambda request: httpx.Response(200, json=_completion("ok"))
@@ -1130,16 +1466,53 @@ class TestKeys:
         models = [json.loads(r.content)["model"] for r in engine.key_test_requests]
         assert models == ["my-anthropic-model", PROVIDERS["openai"]["default_model"]]
 
-    def test_keys_are_write_only_sweep(self, engine: _Engine, tmp_path: Path) -> None:
+    def test_keys_are_write_only_sweep(
+        self, engine: _Engine, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
         """Spec scenario: after a key is PUT, no endpoint response and no
         persisted file contains the key value."""
-        key = "sk-test-write-only-0123456789abcdef"
-        put = engine.client.put(
-            "/v1/keys",
-            json={"provider": "anthropic", "api_key": key},
-            headers=engine.headers,
+        current = engine.client.get("/v1/settings", headers=engine.headers).json()
+        current["custom_providers"] = [
+            {
+                "name": name,
+                "base_url": f"https://{name}.example/v1",
+                "default_model": "sweep-model",
+                "max_tokens": 4096,
+            }
+            for name in ("sweep-one", "sweep-two")
+        ]
+        current["chapter_provider"] = "sweep-one"
+        assert (
+            engine.client.put("/v1/settings", json=current, headers=engine.headers).status_code
+            == 200
         )
-        assert key not in put.text
+        secrets = [
+            "sk-test-write-only-0123456789abcdef",
+            "sk-named-one-0123456789abcdef",
+            "sk-named-two-fedcba9876543210",
+        ]
+        for provider, key in zip(("anthropic", "sweep-one", "sweep-two"), secrets, strict=True):
+            put = engine.client.put(
+                "/v1/keys",
+                json={"provider": provider, "api_key": key},
+                headers=engine.headers,
+            )
+            assert key not in put.text
+
+        echoed = f"provider rejected {secrets[2]}"
+        engine.key_test_handler = lambda request: httpx.Response(
+            401, json={"error": {"message": echoed}}
+        )
+        with caplog.at_level(logging.DEBUG):
+            failed_test = engine.client.post(
+                "/v1/keys/test", json={"provider": "sweep-two"}, headers=engine.headers
+            )
+        assert failed_test.json()["ok"] is False
+        for key in secrets:
+            assert key not in failed_test.text
+            assert key[:12] not in failed_test.text
+            assert key not in caplog.text
+            assert key[:12] not in caplog.text
 
         # run a job so journal/library files exist and events flow
         submitted = engine.client.post(
@@ -1152,16 +1525,23 @@ class TestKeys:
                 == "done"
             )
         )
+        completed = engine.client.get(f"/v1/jobs/{job_id}", headers=engine.headers)
+        assert completed.json()["state"] == "done"
 
         for method, path in _ROUTES:
             if method != "GET" or path == "/v1/events":
                 continue  # SSE stream blocks forever under TestClient
             response = engine.client.request(method, path, headers=engine.headers)
-            assert key not in response.text, f"key leaked via {method} {path}"
+            for key in secrets:
+                assert key not in response.text, f"key leaked via {method} {path}"
+                assert key[:12] not in response.text, f"key prefix leaked via {method} {path}"
 
         for path in tmp_path.rglob("*"):
             if path.is_file():
-                assert key not in path.read_text(errors="replace"), f"key leaked into {path}"
+                persisted = path.read_text(errors="replace")
+                for key in secrets:
+                    assert key not in persisted, f"key leaked into {path}"
+                    assert key[:12] not in persisted, f"key prefix leaked into {path}"
 
 
 class TestProviders:

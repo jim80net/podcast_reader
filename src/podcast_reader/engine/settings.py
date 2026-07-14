@@ -28,6 +28,7 @@ from importlib import metadata
 from pathlib import Path
 from typing import TypedDict, cast
 
+from podcast_reader.providers import canonicalize_custom_providers
 from podcast_reader.types import EngineSettings
 
 logger = logging.getLogger(__name__)
@@ -118,14 +119,27 @@ def load_settings(base: Path) -> EngineSettings:
     except (OSError, ValueError, TypeError) as exc:
         _quarantine(path, exc)
         return default_settings(base)
-    if "chapter_provider" not in loaded and loaded.get("chapter_model") == _PHASE1_CHAPTER_MODEL:
-        loaded = {**loaded, "chapter_model": ""}
-    return cast("EngineSettings", {**default_settings(base), **loaded})
+    try:
+        if (
+            "chapter_provider" not in loaded
+            and loaded.get("chapter_model") == _PHASE1_CHAPTER_MODEL
+        ):
+            loaded = {**loaded, "chapter_model": ""}
+        merged = {**default_settings(base), **loaded}
+        merged["custom_providers"] = canonicalize_custom_providers(merged["custom_providers"])
+    except (KeyError, TypeError, ValueError) as exc:
+        _quarantine(path, exc)
+        return default_settings(base)
+    return cast("EngineSettings", merged)
 
 
 def save_settings(base: Path, settings: EngineSettings) -> None:
     """Persist user settings atomically."""
-    atomic_write_json(base / SETTINGS_FILE, settings)
+    canonical = dict(settings)
+    canonical["custom_providers"] = canonicalize_custom_providers(
+        canonical.get("custom_providers", [])
+    )
+    atomic_write_json(base / SETTINGS_FILE, canonical)
 
 
 def default_settings(base: Path) -> EngineSettings:
@@ -139,6 +153,7 @@ def default_settings(base: Path) -> EngineSettings:
         chapter_model="",  # "" means: the chapter provider's default model
         chapter_provider="anthropic",
         custom_provider_url="",
+        custom_providers=[],
         diarize=False,
         caption_cleanup=False,
         media_cache_max_bytes=5 * 1024**3,  # 5 GiB LRU cap for the lazy media cache

@@ -11,8 +11,9 @@ import os
 import sys
 from pathlib import Path
 
+from podcast_reader.engine.settings import data_dir_path, load_settings
 from podcast_reader.pipeline import PipelineError, _wsl_path, run_pipeline
-from podcast_reader.providers import PROVIDERS
+from podcast_reader.providers import build_provider_registry
 from podcast_reader.types import PipelineEvent, PipelineRequest
 
 
@@ -77,9 +78,8 @@ def _run_one_shot(argv: list[str]) -> None:
     )
     parser.add_argument(
         "--provider",
-        choices=sorted(PROVIDERS),
         default="anthropic",
-        help="Chapter LLM provider (default: anthropic)",
+        help="Built-in or user-defined chapter LLM provider (default: anthropic)",
     )
     parser.add_argument(
         "--model",
@@ -92,6 +92,12 @@ def _run_one_shot(argv: list[str]) -> None:
         help="Use the chapter model for labeled spelling/casing cleanup (never rewording)",
     )
     args = parser.parse_args(argv)
+    settings = load_settings(data_dir_path())
+    registry = build_provider_registry(settings["custom_providers"])
+    try:
+        provider_spec = registry[args.provider]
+    except KeyError:
+        parser.error(f"unknown chapter provider: {args.provider!r}")
 
     request = PipelineRequest(
         source=args.input,
@@ -105,8 +111,9 @@ def _run_one_shot(argv: list[str]) -> None:
         sentences=int(os.environ.get("SENTENCES", "5")),
         cookies=os.environ.get("YT_DLP_COOKIES"),
         chapter_provider=args.provider,
-        chapter_api_key=os.environ.get(PROVIDERS[args.provider]["key_env"]),
+        chapter_api_key=os.environ.get(provider_spec["key_env"]),
         custom_provider_url=os.environ.get("PODCAST_READER_CUSTOM_PROVIDER_URL", ""),
+        custom_providers=settings["custom_providers"],
         # CLI diarization stays the whisper-ctranslate2 --hf_token path; the
         # pack-based diarize step is an engine setting (desktop app).
         diarize=False,

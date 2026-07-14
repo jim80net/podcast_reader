@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
 
@@ -173,6 +174,41 @@ class TestCliProviderSelection:
         assert request["chapter_provider"] == "custom"
         assert request["chapter_api_key"] == "sk-local"
         assert request["custom_provider_url"] == "http://127.0.0.1:11434/v1"
+
+    def test_named_provider_reads_settings_and_per_name_key_env(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        settings = {
+            "custom_providers": [
+                {
+                    "name": "office-gateway",
+                    "base_url": "https://llm.corp.example/v1",
+                    "default_model": "corp-small",
+                    "max_tokens": 32768,
+                }
+            ]
+        }
+        (tmp_path / "settings.json").write_text(json.dumps(settings))
+        monkeypatch.setenv("PODCAST_READER_DATA_DIR", str(tmp_path))
+        monkeypatch.setenv("PODCAST_READER_PROVIDER_OFFICE_GATEWAY_KEY", "sk-office")
+
+        request = self._captured_request(
+            ["https://example.com/x.mp3", "T", "--provider", "office-gateway"], monkeypatch
+        )
+
+        assert request["chapter_provider"] == "office-gateway"
+        assert request["chapter_api_key"] == "sk-office"
+        assert request["custom_providers"] == settings["custom_providers"]
+
+    def test_read_only_cli_does_not_create_default_data_dir(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        target = tmp_path / "missing-data-dir"
+        monkeypatch.setenv("PODCAST_READER_DATA_DIR", str(target))
+
+        self._captured_request(["https://example.com/x.mp3"], monkeypatch)
+
+        assert not target.exists()
 
     def test_unknown_provider_rejected_by_argparse(self) -> None:
         with pytest.raises(SystemExit):

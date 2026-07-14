@@ -119,6 +119,13 @@ export interface LibraryEntry {
   created_at: number
 }
 
+export interface CustomProviderConfig {
+  name: string
+  base_url: string
+  default_model: string
+  max_tokens: number
+}
+
 // -- src/podcast_reader/types.py:111 (EngineSettings) --
 export interface EngineSettings {
   whisper_model: string
@@ -129,6 +136,7 @@ export interface EngineSettings {
   chapter_model: string // "" means: the chapter provider's default model
   chapter_provider: string // a podcast_reader.providers.PROVIDERS key
   custom_provider_url: string // base URL for the "custom" provider ("" otherwise)
+  custom_providers: CustomProviderConfig[] // named nonsecret provider configuration
   diarize: boolean // default false; engine warns-and-skips when the pack is absent
   caption_cleanup: boolean // opt-in provider-assisted spelling/casing cleanup
   media_cache_max_bytes: number // LRU cap for the lazy media cache (media-playback)
@@ -145,6 +153,7 @@ export interface SettingsUpdate {
   chapter_model: string
   chapter_provider?: string
   custom_provider_url?: string
+  custom_providers?: CustomProviderConfig[]
   diarize?: boolean
   caption_cleanup?: boolean
   media_cache_max_bytes?: number

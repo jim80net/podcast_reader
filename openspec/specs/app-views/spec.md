@@ -60,7 +60,7 @@ The New view SHALL list all jobs in `awaiting-confirmation` with their source UR
 - **THEN** the New view still lists it
 
 ### Requirement: Settings view
-The Settings view SHALL expose: chapter provider dropdown populated from the engine's `GET /v1/providers` (provider ids, default models, key-availability — per P4), including custom with base-URL field, per-provider API key entry (write-only — saved keys are shown masked and never read back) with a "test key" button calling the engine's key-test endpoint, whisper model/device/language, sentences per paragraph, and library/storage directory. Saving SHALL persist engine settings via `PUT /v1/settings` and key changes via the vault-and-push flow; validation errors from the engine SHALL be shown inline. The view SHALL additionally provide an extension-pairing section — a button that mints a pairing code via the engine (`POST /v1/pair`, main-process IPC) and displays the combined `<port>-<code>` paste string as the primary affordance, with the engine port and code as separate fields for fallback (per review adjudication), alongside an expiry countdown, re-minting on demand — and a cookie-management section listing captured cookie domains from `GET /v1/cookies` (metadata only) with per-domain delete via `DELETE /v1/cookies/{domain}`.
+The Settings view SHALL expose: chapter provider dropdown populated from the engine's `GET /v1/providers` (provider ids, default models, key-availability — per P4), including legacy custom with base-URL field; add/edit/remove controls for user-defined named OpenAI-compatible providers (name, base URL, provider default model, and max-tokens cap); per-provider API key entry (write-only — saved keys are shown masked and never read back) with a "test key" button calling the engine's key-test endpoint; whisper model/device/language; sentences per paragraph; and library/storage directory. The named provider default model SHALL be labeled distinctly from the selected provider's optional chapter-model override, and switching provider in the desktop view SHALL clear that override unless the user deliberately enters a replacement. Saving SHALL persist nonsecret engine settings via `PUT /v1/settings` and key changes via the vault-and-push flow; validation errors from the engine SHALL be shown inline. The view SHALL additionally provide an extension-pairing section — a button that mints a pairing code via the engine (`POST /v1/pair`, main-process IPC) and displays the combined `<port>-<code>` paste string as the primary affordance, with the engine port and code as separate fields for fallback (per review adjudication), alongside an expiry countdown, re-minting on demand — and a cookie-management section listing captured cookie domains from `GET /v1/cookies` (metadata only) with per-domain delete via `DELETE /v1/cookies/{domain}`.
 
 #### Scenario: Key test reports outcome without exposing the key
 - **WHEN** the user enters a key and clicks test
@@ -69,6 +69,10 @@ The Settings view SHALL expose: chapter provider dropdown populated from the eng
 #### Scenario: Provider switch persists
 - **WHEN** the user selects a different provider and saves
 - **THEN** `GET /v1/settings` reflects the new `chapter_provider` and the next job uses it
+
+#### Scenario: Named provider lifecycle
+- **WHEN** the user adds a valid named endpoint, selects it, stores/tests its key, and later removes it
+- **THEN** only its nonsecret configuration appears in engine settings, its key follows the existing vault-and-push path under that name, and removal clears both the selection and stored key
 
 #### Scenario: Invalid setting rejected inline
 - **WHEN** the engine rejects a settings value (e.g. invalid custom provider URL)
@@ -139,4 +143,3 @@ The renderer views (Library, Reader, New, Settings, and the first-run Setup) SHA
 #### Scenario: Accessibility maintained
 - **WHEN** text, muted text, and controls are rendered on the light and dark palettes
 - **THEN** they meet WCAG AA contrast, interactive elements show a visible focus state, and any transition is disabled under `prefers-reduced-motion`
-

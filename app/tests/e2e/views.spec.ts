@@ -288,3 +288,91 @@ test('Settings: round-trip save, engine-side key test, inline validation error',
   }
   expect(unchanged.chapter_provider).toBe('anthropic')
 })
+
+test('Settings: add, use, and remove a named OpenAI-compatible provider', async ({ harness }) => {
+  await expectEngineState(harness.window, 'ready')
+  await harness.window.evaluate(() => {
+    window.location.hash = '#/settings'
+  })
+
+  await harness.window.getByRole('button', { name: 'Add provider' }).click()
+  await harness.window.locator('#settings-named_provider_name').fill('office-gateway')
+  await harness.window
+    .locator('#settings-named_provider_url')
+    .fill('https://llm.corp.example/v1')
+  await harness.window.locator('#settings-named_provider_model').fill('corp-small')
+  await harness.window.locator('#settings-named_provider_tokens').fill('32768')
+  await harness.window.locator('#settings-named_provider_key').fill('  sk-office-save  ')
+  await harness.window.getByRole('button', { name: 'Save provider', exact: true }).click()
+  await expect(harness.window.getByText('Provider and key saved.')).toBeVisible()
+
+  await harness.window
+    .locator('#settings-named_provider_url')
+    .fill('https://llm.corp.example/v2')
+  await harness.window.locator('#settings-named_provider_key').fill('  sk-office-test  ')
+  await harness.mock.control('/seed', { keyTestDelayMs: 200 })
+  await harness.window.getByRole('button', { name: 'Save provider and test key' }).click()
+  await expect(harness.window.getByRole('button', { name: 'Remove provider' })).toBeDisabled()
+  await expect(harness.window.getByText('Provider and key saved.')).toBeVisible()
+
+  const provider = harness.window.locator('#settings-chapter_provider')
+  await expect(provider.locator('option')).toHaveCount(7)
+  await provider.selectOption('office-gateway')
+  const log = await harness.mock.log()
+  expect(
+    log.some((entry) => entry.kind === 'keys-test' && entry.detail === 'office-gateway')
+  ).toBe(true)
+  expect(
+    log.some((entry) => entry.kind === 'keys-put' && entry.detail === 'office-gateway')
+  ).toBe(true)
+
+  // Editing config is persisted before the test; a failed test leaves the new
+  // nonsecret config saved but never stores the entered replacement key.
+  const keyPushesBeforeFailure = log.filter(
+    (entry) => entry.kind === 'keys-put' && entry.detail === 'office-gateway'
+  ).length
+  await harness.mock.control('/seed', {
+    keyTestDelayMs: 0,
+    keyTestResult: { ok: false, detail: '401 from provider' }
+  })
+  await harness.window
+    .locator('#settings-named_provider_url')
+    .fill('https://new-gateway.example/v1')
+  await harness.window.locator('#settings-named_provider_key').fill('sk-must-not-store')
+  await harness.window.getByRole('button', { name: 'Save provider and test key' }).click()
+  await expect(harness.window.getByText('Provider saved; key test failed: 401')).toBeVisible()
+  const logAfterFailure = await harness.mock.log()
+  expect(
+    logAfterFailure.filter(
+      (entry) => entry.kind === 'keys-put' && entry.detail === 'office-gateway'
+    )
+  ).toHaveLength(keyPushesBeforeFailure)
+  const edited = (await (await harness.mock.engine('/v1/settings')).json()) as {
+    custom_providers: Array<{ base_url: string }>
+  }
+  expect(edited.custom_providers[0]?.base_url).toBe('https://new-gateway.example/v1')
+
+  await harness.mock.control('/seed', { settingsPutDelayMs: 200 })
+  await harness.window.locator('#settings-sentences').fill('9')
+  await harness.window.getByRole('button', { name: 'Save', exact: true }).click()
+  await expect(harness.window.getByRole('button', { name: 'Add provider' })).toBeDisabled()
+  await expect(
+    harness.window.getByRole('button', { name: 'Save provider and test key' })
+  ).toBeDisabled()
+  await expect(harness.window.locator('.form-actions .key-result')).toHaveText('Saved.')
+
+  await harness.window.getByRole('button', { name: 'Remove provider' }).click()
+  await expect(harness.window.getByRole('button', { name: 'Add provider' })).toBeDisabled()
+  await expect(
+    harness.window.getByRole('button', { name: 'Save provider and test key' })
+  ).toBeDisabled()
+  await expect(harness.window.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
+  await expect(harness.window.getByRole('button', { name: 'Test key', exact: true })).toBeDisabled()
+  await expect(provider.locator('option')).toHaveCount(6)
+  const settings = (await (await harness.mock.engine('/v1/settings')).json()) as {
+    custom_providers: unknown[]
+    chapter_provider: string
+  }
+  expect(settings.custom_providers).toEqual([])
+  expect(settings.chapter_provider).toBe('anthropic')
+})
