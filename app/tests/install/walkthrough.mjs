@@ -8,8 +8,14 @@
  *   01-first-run-wizard.png   wizard (its appearance itself requires an
  *                             engine `ready` status — main.ts gates it)
  *   02-new-view-submitted.png New view right after submitting a YouTube URL
- *   03-new-view-job-done.png  the finished captions job card
+ *   03-new-view-job-done.png  a finished local-audio job card
  *   04-reader-transcript.png  Reader with the rendered transcript
+ *
+ * GitHub-hosted Windows runners are routinely blocked by YouTube, so the
+ * submitted YouTube job is intentionally not the source of the Reader proof.
+ * After capturing that real submission, this walkthrough installs the real,
+ * pinned tiny Whisper pack and transcribes the repository's short speech WAV.
+ * No engine or IPC boundary is mocked.
  *
  * The engine handshake is asserted explicitly via window.api.getEngineStatus
  * (state === 'ready', non-empty version, adopted === false — i.e. the app
@@ -39,7 +45,8 @@ const YOUTUBE_URL = 'https://www.youtube.com/watch?v=jNQXAC9IVRw'
 
 const READY_TIMEOUT_MS = 120_000
 const WIZARD_TIMEOUT_MS = 30_000
-const JOB_TIMEOUT_MS = 180_000
+const PACK_TIMEOUT_MS = 180_000
+const JOB_TIMEOUT_MS = 420_000
 
 const { values: args } = parseArgs({
   options: {
@@ -50,6 +57,11 @@ const { values: args } = parseArgs({
 })
 if (!args.exe || !args.out) {
   console.error('usage: node walkthrough.mjs --exe <installed-exe> --out <dir> [--main <entry>]')
+  process.exit(2)
+}
+const testAudio = process.env.PODCAST_READER_TEST_AUDIO
+if (!testAudio) {
+  console.error('PODCAST_READER_TEST_AUDIO must point to a short local audio fixture')
   process.exit(2)
 }
 const outDir = args.out
@@ -147,7 +159,47 @@ await page.locator('.job-card').first().waitFor({ timeout: WIZARD_TIMEOUT_MS })
 await page.screenshot({ path: join(outDir, '02-new-view-submitted.png') })
 log('captured New view with submitted job')
 
-// --- 4. wait for the captions job to finish (real network, real engine) ----
+// GitHub runner IPs are often blocked by YouTube. Keep the real captions
+// submission above as a product/UI proof, then use the installed app's pack
+// manager and frozen Whisper worker for a deterministic Reader proof.
+await page.evaluate(() => window.api.installPack('model-tiny'))
+await waitFor(
+  async () => {
+    const response = await page.evaluate(() => window.api.listPacks())
+    const pack = response.packs.find((candidate) => candidate.id === 'model-tiny')
+    if (pack?.state === 'failed' || pack?.state === 'incompatible') {
+      await fail(`tiny Whisper pack ${pack.state}: ${JSON.stringify(pack.error)}`)
+    }
+    return pack?.state === 'installed' ? pack : undefined
+  },
+  PACK_TIMEOUT_MS,
+  'tiny Whisper pack to install'
+)
+log('tiny Whisper pack installed')
+
+const settings = await page.evaluate(() => window.api.getSettings())
+await page.evaluate(
+  (nextSettings) => window.api.putSettings(nextSettings),
+  { ...settings, whisper_model: 'tiny', whisper_device: 'cpu' }
+)
+
+await urlInput.fill(testAudio)
+await page.locator('#new-title').fill('Installed app audio proof')
+await page.getByRole('button', { name: 'Transcribe' }).click()
+await waitFor(
+  async () => {
+    const jobs = await page.evaluate(() => window.api.listJobs())
+    const localJob = jobs.find((job) => job.source === testAudio)
+    if (localJob?.state === 'failed' || localJob?.state === 'interrupted') {
+      await fail(`local audio job ${localJob.state}: ${JSON.stringify(localJob.error)}`)
+    }
+    return localJob?.state === 'done' ? localJob : undefined
+  },
+  JOB_TIMEOUT_MS,
+  'local audio transcription to finish'
+)
+
+// --- 4. open the real transcript produced by the installed frozen engine ---
 const readerHref = await waitFor(
   async () => {
     const link = page.locator('a.job-title').first()
@@ -156,7 +208,7 @@ const readerHref = await waitFor(
     return href !== null && href.startsWith('#/reader/') ? href : undefined
   },
   JOB_TIMEOUT_MS,
-  'captions job to finish (a.job-title linking to the Reader)'
+  'finished local-audio job to link to the Reader'
 )
 await page.screenshot({ path: join(outDir, '03-new-view-job-done.png') })
 log(`job done, transcript at ${readerHref}`)

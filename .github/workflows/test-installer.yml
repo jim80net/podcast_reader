@@ -70,7 +70,9 @@ jobs:
       # The artifact above is a FILE; the steps below prove it is a PRODUCT:
       # silent install, launch the INSTALLED app (real frozen engine, nothing
       # mocked), assert the engine handshake, walk first-run -> submit a
-      # YouTube URL -> Reader with screenshots, then uninstall cleanly.
+      # YouTube URL -> real tiny-model local transcript -> Reader with
+      # screenshots, then uninstall cleanly. The local Reader proof avoids
+      # GitHub-hosted runner IP blocks at YouTube.
       # /S (silent) also means the unsigned build never hits the INTERACTIVE
       # SmartScreen dialog — that prompt only guards interactive launches.
       - name: Install silently (NSIS /S)
@@ -93,6 +95,8 @@ jobs:
       - name: Walk the installed app (engine handshake + screenshots)
         run: node tests/install/walkthrough.mjs --exe "$INSTALLED_EXE" --out "$RUNNER_TEMP/walkthrough"
         working-directory: app
+        env:
+          PODCAST_READER_TEST_AUDIO: ${{ github.workspace }}\tests\fixtures\fixture_speech.wav
       - name: Upload walkthrough screenshots
         if: always()
         uses: actions/upload-artifact@v4
