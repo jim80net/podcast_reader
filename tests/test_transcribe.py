@@ -12,7 +12,13 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from podcast_reader.engine.packs import MANIFEST_FILE, REGISTRY, HardwareInfo, pack_dir
+from podcast_reader.engine.packs import (
+    CUDA_DLL_STEMS,
+    MANIFEST_FILE,
+    REGISTRY,
+    HardwareInfo,
+    pack_dir,
+)
 from podcast_reader.transcribe import (
     _effective_device,
     build_whisper_args,
@@ -383,6 +389,40 @@ class TestWorkerPathSwitch:
                 audio_path=audio, output_dir=audio.parent, model="tiny", lang="en", device="cpu"
             )
 
+    def test_cuda_dll_failure_is_structured_with_repair_and_cpu_paths(
+        self, base: Path, audio: Path
+    ) -> None:
+        _install_model_pack(base, "tiny")
+
+        def failing(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+            return subprocess.CompletedProcess(
+                args,
+                1,
+                stdout="",
+                stderr=(
+                    "whisper-worker error: Library cublas64_12.dll "
+                    "is not found or cannot be loaded\n"
+                ),
+            )
+
+        with (
+            patch(
+                "podcast_reader.transcribe.resolve_bundled_worker",
+                return_value="/bundle/whisper-worker",
+            ),
+            patch("podcast_reader.transcribe._effective_device", return_value="cuda"),
+            patch("podcast_reader.transcribe.run_child_streaming", side_effect=failing),
+            pytest.raises(PipelineError) as excinfo,
+        ):
+            transcribe(
+                audio_path=audio, output_dir=audio.parent, model="tiny", lang="en", device="cuda"
+            )
+
+        assert excinfo.value.code == "cuda_runtime_unavailable"
+        assert "Settings → Packs" in excinfo.value.hint
+        assert "Device to CPU" in excinfo.value.hint
+        assert "cublas64_12.dll" in excinfo.value.detail
+
 
 class TestEffectiveDevice:
     """The cuda→cpu fallback matrix on a platform where the pack is
@@ -397,13 +437,18 @@ class TestEffectiveDevice:
         entry = REGISTRY["cuda-runtime"]
         target = pack_dir(base, entry)
         target.mkdir(parents=True, exist_ok=True)
-        (target / "cudnn64_9.dll").write_bytes(b"dll")
+        files = []
+        for stem in CUDA_DLL_STEMS:
+            suffix = "12" if stem.startswith("cublas") else "9"
+            name = f"{stem}_{suffix}.dll"
+            (target / name).write_bytes(b"dll")
+            files.append({"path": name, "sha256": "0" * 64, "size": 3})
         manifest = {
             "pack_schema": pack_schema,
             "id": entry["id"],
             "version": entry["version"],
             "component_versions": dict(entry["component_versions"]),
-            "files": [{"path": "cudnn64_9.dll", "sha256": "0" * 64, "size": 3}],
+            "files": files,
             "licenses": [],
         }
         (target / MANIFEST_FILE).write_text(json.dumps(manifest))
@@ -439,6 +484,23 @@ class TestEffectiveDevice:
         assert device == "cpu"
         (warning,) = events
         assert "incompatible" in warning["message"]
+
+    def test_incomplete_pack_degrades_with_repair_step(self, base: Path) -> None:
+        self._cuda_pack(base)
+        target = pack_dir(base, REGISTRY["cuda-runtime"])
+        manifest = json.loads((target / MANIFEST_FILE).read_text())
+        manifest["files"] = manifest["files"][1:]
+        (target / MANIFEST_FILE).write_text(json.dumps(manifest))
+        events: list[PipelineEvent] = []
+
+        with patch("podcast_reader.transcribe.detect_hardware", return_value=self._hw(True)):
+            device = _effective_device(base, "cuda", events.append, platform="win32")
+
+        assert device == "cpu"
+        (warning,) = events
+        assert "incomplete or damaged" in warning["message"]
+        assert "Settings → Packs" in warning["message"]
+        assert CUDA_DLL_STEMS[0] in warning["message"]
 
     def test_usable_pack_keeps_cuda(self, base: Path) -> None:
         self._cuda_pack(base)

@@ -186,7 +186,7 @@ def _resolve_worker(base: Path) -> tuple[str | None, str]:
     manifest = packs.read_manifest(target)
     if manifest is None:
         return None, "the speaker diarization pack is not installed"
-    error = packs.compat_error(entry, manifest) or packs.files_error(target, manifest)
+    error = packs.compat_error(entry, manifest) or packs.pack_files_error(entry, target, manifest)
     if error is not None:
         return None, f"the installed speaker diarization pack is unusable ({error})"
     worker = shutil.which(WORKER_NAME, path=str(target))

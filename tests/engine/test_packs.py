@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from podcast_reader.engine.packs import (
+    CUDA_DLL_STEMS,
     MANIFEST_FILE,
     PACK_SCHEMA,
     REGISTRY,
@@ -24,6 +25,7 @@ from podcast_reader.engine.packs import (
     is_published,
     manifest_path,
     pack_dir,
+    pack_files_error,
     pack_total_size,
     platform_supported,
     read_manifest,
@@ -262,6 +264,29 @@ class TestFilesValidation:
         error = files_error(tmp_path / "pack", manifest)
         assert error is not None
         assert "model.bin" in error
+
+    def test_partial_cuda_manifest_fails_required_dll_set(self, tmp_path: Path) -> None:
+        target = tmp_path / "runtime"
+        target.mkdir()
+        (target / "cudnn64_9.dll").write_bytes(b"dll")
+        manifest = _manifest(files=[ManifestFile(path="cudnn64_9.dll", sha256="0" * 64, size=3)])
+
+        assert files_error(target, manifest) is None
+        error = pack_files_error(REGISTRY["cuda-runtime"], target, manifest)
+        assert error is not None
+        assert "cublas64" in error
+
+    def test_complete_cuda_manifest_passes_required_dll_set(self, tmp_path: Path) -> None:
+        target = tmp_path / "runtime"
+        target.mkdir()
+        recorded: list[ManifestFile] = []
+        for stem in CUDA_DLL_STEMS:
+            suffix = "12" if stem.startswith("cublas") else "9"
+            name = f"{stem}_{suffix}.dll"
+            (target / name).write_bytes(b"dll")
+            recorded.append(ManifestFile(path=name, sha256="0" * 64, size=3))
+
+        assert pack_files_error(REGISTRY["cuda-runtime"], target, _manifest(files=recorded)) is None
 
 
 class TestManifestIO:
