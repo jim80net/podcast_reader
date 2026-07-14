@@ -18,6 +18,12 @@ jobs:
           python-version: "3.10"
       - name: Sync dependencies
         run: uv sync --extra dev --extra chapters
+      - name: Installed wheel contains private-web assets
+        run: |
+          uv build --wheel --out-dir wheel-smoke-dist
+          uv venv wheel-smoke-venv
+          uv pip install --python wheel-smoke-venv/bin/python wheel-smoke-dist/*.whl
+          wheel-smoke-venv/bin/python -c "from importlib.resources import files; root = files('podcast_reader.web_assets'); assert all(root.joinpath(name).is_file() for name in ('shell.html', 'app.js', 'app.css'))"
       - name: Unit tests
         run: uv run pytest -m "not integration" -q
       - name: Type check (strict)

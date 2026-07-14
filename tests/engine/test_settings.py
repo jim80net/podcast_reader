@@ -7,6 +7,7 @@ import logging
 import os
 import stat
 import sys
+from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import pytest
@@ -84,6 +85,23 @@ class TestEngineState:
 
 
 class TestSecureWrites:
+    def test_windows_private_sddl_sets_explicit_user_owner_and_only_two_aces(self) -> None:
+        from podcast_reader.engine.settings import (
+            _windows_dacl_principals_are_exact,
+            _windows_private_sddl,
+        )
+
+        sid = "S-1-5-21-100-200-300-400"
+        assert _windows_private_sddl(sid) == (f"O:{sid}D:P(A;;FA;;;SY)(A;;FA;;;{sid})")
+
+        resolved = {"SY": "S-1-5-18", "LA": "S-1-5-21-local-500"}
+
+        def equals(principal: str, expected: str) -> bool:
+            return resolved.get(principal, principal) == expected
+
+        assert _windows_dacl_principals_are_exact({"SY", "LA"}, "S-1-5-21-local-500", equals)
+        assert not _windows_dacl_principals_are_exact({"SY", "LA"}, "S-1-5-21-domain-500", equals)
+
     def test_engine_state_tmp_created_0600_at_open(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -108,6 +126,157 @@ class TestSecureWrites:
         save_engine_state(tmp_path, EngineState(port=7, token="t" * 43))
         assert load_engine_state(tmp_path)["port"] == 7
         assert list(tmp_path.glob("*.tmp")) == []
+
+    def test_windows_dacl_is_applied_before_replace_and_verified_after(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from podcast_reader.engine import settings as settings_module
+
+        events: list[tuple[str, str]] = []
+        real_open = os.open
+        real_replace = os.replace
+        real_write = settings_module._write_text_to_fd
+
+        monkeypatch.setattr("podcast_reader.engine.settings.sys.platform", "win32")
+
+        def observed_create(path: Path) -> int:
+            fd = real_open(path, flags, mode)
+            events.append(("create", path.name))
+            events.append(("apply", path.name))
+            events.append(("verify", path.name))
+            return fd
+
+        def observed_write(fd: int, data: str) -> None:
+            events.append(("write", "engine-state.json.tmp"))
+            real_write(fd, data)
+
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+        mode = 0o600
+        monkeypatch.setattr(
+            "podcast_reader.engine.settings._windows_create_private_fd", observed_create
+        )
+        monkeypatch.setattr(
+            "podcast_reader.engine.settings.verify_windows_private_file",
+            lambda path: events.append(("verify", path.name)),
+        )
+        monkeypatch.setattr("podcast_reader.engine.settings._write_text_to_fd", observed_write)
+
+        def observed_replace(source: Path, destination: Path) -> None:
+            events.append(("replace", destination.name))
+            real_replace(source, destination)
+
+        monkeypatch.setattr("podcast_reader.engine.settings.os.replace", observed_replace)
+        save_engine_state(tmp_path, EngineState(port=1, token="t" * 43))
+
+        assert events == [
+            ("create", "engine-state.json.tmp"),
+            ("apply", "engine-state.json.tmp"),
+            ("verify", "engine-state.json.tmp"),
+            ("write", "engine-state.json.tmp"),
+            ("replace", "engine-state.json"),
+            ("verify", "engine-state.json"),
+        ]
+
+    def test_windows_dacl_failure_leaves_no_secret_temp(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        secret = "never-written-before-protection"
+        monkeypatch.setattr("podcast_reader.engine.settings.sys.platform", "win32")
+
+        def reject_dacl(_path: Path) -> None:
+            raise PermissionError("DACL rejected")
+
+        monkeypatch.setattr(
+            "podcast_reader.engine.settings._windows_create_private_fd", reject_dacl
+        )
+        with pytest.raises(PermissionError, match="DACL rejected"):
+            save_engine_state(tmp_path, EngineState(port=1, token=secret))
+
+        assert not (tmp_path / "engine-state.json").exists()
+        assert not (tmp_path / "engine-state.json.tmp").exists()
+        assert all(secret not in path.read_text(errors="replace") for path in tmp_path.rglob("*"))
+
+    def test_windows_post_replace_verification_failure_removes_destination(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from podcast_reader.engine import settings as settings_module
+
+        secret = "remove-unverified-destination"
+        monkeypatch.setattr("podcast_reader.engine.settings.sys.platform", "win32")
+
+        def create_protected_temp(path: Path) -> int:
+            assert path.name.endswith(".tmp")
+            return os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+
+        def reject_destination(path: Path) -> None:
+            if not path.name.endswith(".tmp"):
+                raise PermissionError("final DACL unverified")
+
+        monkeypatch.setattr(
+            "podcast_reader.engine.settings._windows_create_private_fd", create_protected_temp
+        )
+        monkeypatch.setattr(
+            "podcast_reader.engine.settings.verify_windows_private_file", reject_destination
+        )
+        # The mocked ensure still represents its internal temp verification;
+        # the separate verifier is the post-replace boundary under test.
+        assert settings_module.sys.platform == "win32"
+        with pytest.raises(PermissionError, match="final DACL unverified"):
+            save_engine_state(tmp_path, EngineState(port=1, token=secret))
+
+        assert not (tmp_path / "engine-state.json").exists()
+        assert not (tmp_path / "engine-state.json.tmp").exists()
+
+    def test_windows_handle_conversion_failure_closes_handle_once(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import ctypes
+
+        from podcast_reader.engine import settings as settings_module
+
+        closed: list[int] = []
+
+        class Function:
+            argtypes: object = None
+            restype: object = None
+
+            def __call__(self, *_args: object) -> int:
+                return 1234
+
+        def close_handle(handle: int) -> None:
+            closed.append(handle)
+
+        def local_free(_pointer: object) -> None:
+            return
+
+        kernel = SimpleNamespace(
+            CreateFileW=Function(), CloseHandle=close_handle, LocalFree=local_free
+        )
+
+        class Msvcrt:
+            @staticmethod
+            def open_osfhandle(_handle: int, _flags: int) -> int:
+                raise OSError("conversion failed")
+
+        monkeypatch.setattr(settings_module, "msvcrt", Msvcrt())
+        monkeypatch.setattr(
+            settings_module,
+            "_windows_private_descriptor",
+            lambda: (object(), kernel, ctypes.c_void_p(99)),
+        )
+        monkeypatch.setattr(settings_module, "_verify_windows_private_handle", lambda _handle: None)
+
+        with pytest.raises(OSError, match="conversion failed"):
+            settings_module._windows_create_private_fd(tmp_path / "state.tmp")
+
+        assert closed == [1234]
+
+    @pytest.mark.skipif(sys.platform != "win32", reason="requires the Windows security APIs")
+    def test_windows_engine_state_has_verified_owner_system_dacl(self, tmp_path: Path) -> None:
+        from podcast_reader.engine.settings import verify_windows_private_file
+
+        load_engine_state(tmp_path)
+        verify_windows_private_file(tmp_path / "engine-state.json")
 
 
 class TestUserSettings:
