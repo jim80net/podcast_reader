@@ -7,6 +7,7 @@ pipeline events to stdout; the ``serve`` subcommand starts the engine.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 from pathlib import Path
@@ -30,6 +31,8 @@ def main_with_args(argv: list[str]) -> None:
     """
     if argv and argv[0] == "serve":
         _run_serve(argv[1:])
+    elif argv and argv[0] == "serve-guardian":
+        _run_serve_guardian(argv[1:])
     else:
         _run_one_shot(argv)
 
@@ -39,6 +42,40 @@ def serve_engine(*, discovery_file: Path | None = None) -> None:
     from podcast_reader.engine.process import serve_engine as _serve_engine
 
     _serve_engine(discovery_file=discovery_file)
+
+
+def run_serve_guardian(*, engine_port: int, tailscale_argv: list[str]) -> int:
+    """Run the packaged private-web guardian (lazy import for one-shot mode)."""
+    from podcast_reader.engine.serve_guardian import run_guardian
+
+    return run_guardian(engine_port=engine_port, tailscale_argv=tailscale_argv)
+
+
+def _run_serve_guardian(argv: list[str]) -> None:
+    parser = argparse.ArgumentParser(
+        prog="podcast-reader serve-guardian",
+        description="Own a foreground Tailscale Serve lease for the desktop app",
+    )
+    parser.add_argument("--engine-port", type=int, required=True)
+    parser.add_argument(
+        "--tailscale-command-json",
+        default='["tailscale"]',
+        help=argparse.SUPPRESS,
+    )
+    args = parser.parse_args(argv)
+    try:
+        command: object = json.loads(args.tailscale_command_json)
+    except json.JSONDecodeError:
+        parser.error("--tailscale-command-json must be a JSON argv array")
+    if (
+        not isinstance(command, list)
+        or not command
+        or not all(isinstance(part, str) and part for part in command)
+    ):
+        parser.error("--tailscale-command-json must be a non-empty JSON string array")
+    code = run_serve_guardian(engine_port=args.engine_port, tailscale_argv=command)
+    if code != 0:
+        raise SystemExit(code)
 
 
 def _run_serve(argv: list[str]) -> None:

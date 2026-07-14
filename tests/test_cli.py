@@ -77,6 +77,22 @@ class TestCliAdapter:
         main_with_args(["serve", "--discovery-file", "/tmp/d.json"])
         mock_serve.assert_called_once()
 
+    @patch("podcast_reader.cli.run_serve_guardian", return_value=0)
+    def test_serve_guardian_subcommand_dispatches(self, guardian: MagicMock) -> None:
+        main_with_args(
+            [
+                "serve-guardian",
+                "--engine-port",
+                "43127",
+                "--tailscale-command-json",
+                '["/test/tailscale"]',
+            ]
+        )
+        guardian.assert_called_once_with(
+            engine_port=43127,
+            tailscale_argv=["/test/tailscale"],
+        )
+
 
 _SAMPLE_SEGMENTS = {
     "segments": [

@@ -1,0 +1,16 @@
+{
+  "Foreground": {
+    "test-session": {
+      "TCP": {
+        "443": { "HTTPS": true }
+      },
+      "Web": {
+        "desktop.example.ts.net:443": {
+          "Handlers": {
+            "/": { "Proxy": "http://127.0.0.1:43127" }
+          }
+        }
+      }
+    }
+  }
+}

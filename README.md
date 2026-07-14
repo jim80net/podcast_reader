@@ -114,6 +114,22 @@ transcription does not need the 1.2 GB runtime pack. To repair GPU use, open
 not work unsigned). Signed/notarized release pipelines are gated on
 code-signing credentials. Details in [`app/README.md`](app/README.md).
 
+#### Private tailnet reader
+
+The desktop app can expose its read-only library through Tailscale Serve. Install
+and sign in to the Tailscale client on the desktop first, then open **Settings →
+Private web access** and enable it. The app shows the private `https://…/web/`
+address after Tailscale verifies the mapping. Open that address from another
+device on the same tailnet and use **Connect another device** to mint the
+single-use pairing code.
+
+This control never invokes Tailscale Funnel, never binds the engine beyond
+`127.0.0.1`, and does not bundle Tailscale. If HTTPS listener 443 already has a
+Serve mapping—or the installed Tailscale returns a status format the app cannot
+prove safe—the app leaves it untouched and reports a conflict. Disable or move
+the existing mapping with the Tailscale CLI before trying again. Desktop and
+extension access continue to work when private web access is unavailable.
+
 ### Chrome extension (`extension/`)
 
 A Manifest V3 extension (see [`extension/README.md`](extension/README.md))

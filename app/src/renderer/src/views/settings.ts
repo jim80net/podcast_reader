@@ -1,6 +1,7 @@
 import { mountCookiesSection } from './cookies-section'
 import { mountPacksSection } from './packs-section'
 import { mountPairingSection } from './pairing-section'
+import { mountPrivateWebSection } from './private-web-section'
 import { planChapterSave } from '../chapter-onboarding'
 import { el } from '../dom'
 import { extractEngineDetail, settingsErrorField } from '../engine-error'
@@ -14,6 +15,7 @@ import {
 import type { CookiesSection } from './cookies-section'
 import type { PacksSection } from './packs-section'
 import type { PairingSection } from './pairing-section'
+import type { PrivateWebSection } from './private-web-section'
 import type { SettingsFormValues } from '../settings-form'
 import type { ViewCleanup } from '../store'
 import type { CustomProviderConfig, EngineSettings, ProviderInfo } from '../../../shared/types'
@@ -34,6 +36,7 @@ export function mountSettings(container: HTMLElement): ViewCleanup {
   let loaded = false
   let packsSection: PacksSection | null = null
   let pairingSection: PairingSection | null = null
+  let privateWebSection: PrivateWebSection | null = null
   let cookiesSection: CookiesSection | null = null
 
   async function load(): Promise<void> {
@@ -633,8 +636,10 @@ export function mountSettings(container: HTMLElement): ViewCleanup {
     // Extension pairing + captured-login management (chrome-extension change,
     // task 3.2): Settings sections, not new views (design decision 11).
     const pairingContainer = el('section', { class: 'pairing-section' })
+    const privateWebContainer = el('section', { class: 'pairing-section' })
     const cookiesContainer = el('section', { class: 'cookies-section' })
-    container.append(pairingContainer, cookiesContainer)
+    container.append(privateWebContainer, pairingContainer, cookiesContainer)
+    privateWebSection = mountPrivateWebSection(privateWebContainer)
     pairingSection = mountPairingSection(pairingContainer)
     cookiesSection = mountCookiesSection(cookiesContainer)
 
@@ -700,6 +705,7 @@ export function mountSettings(container: HTMLElement): ViewCleanup {
     unsubscribeStatus()
     packsSection?.cleanup()
     pairingSection?.cleanup()
+    privateWebSection?.cleanup()
     cookiesSection?.cleanup()
   }
 }

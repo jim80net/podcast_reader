@@ -43,3 +43,20 @@ export function resolveEngineCommand(opts: {
   if (override !== null) return { argv: override, posture: 'override' }
   return { argv: ['uv', 'run', 'podcast-reader', 'serve'], posture: 'dev' }
 }
+
+/** Resolve the guardian through the same packaged/override/dev engine posture. */
+export function resolveGuardianCommand(opts: {
+  resourcesPath: string | null
+  env: Record<string, string | undefined>
+  fileExists: (path: string) => boolean
+  platform: NodeJS.Platform
+}): ResolvedEngineCommand {
+  const resolved = resolveEngineCommand(opts)
+  if (resolved.argv.at(-1) !== 'serve') {
+    throw new Error('PODCAST_READER_ENGINE_CMD must end in "serve" to launch private web access')
+  }
+  return {
+    posture: resolved.posture,
+    argv: [...resolved.argv.slice(0, -1), 'serve-guardian']
+  }
+}

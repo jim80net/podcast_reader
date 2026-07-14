@@ -65,4 +65,14 @@ describe('AppConfigStore', () => {
       first_run_complete: true
     })
   })
+
+  it('persists private web access only after an explicit opt-in', () => {
+    const path = join(dir, 'app-config.json')
+    const store = storeAt(path)
+    expect(store.privateWebEnabled()).toBe(false)
+    store.setPrivateWebEnabled(true)
+    expect(storeAt(path).privateWebEnabled()).toBe(true)
+    store.setPrivateWebEnabled(false)
+    expect(storeAt(path).privateWebEnabled()).toBe(false)
+  })
 })
