@@ -59,6 +59,7 @@ from podcast_reader.engine.settings import (
     token_fingerprint,
 )
 from podcast_reader.engine.web_session import SESSION_LIFETIME_S, WebSessionSigner
+from podcast_reader.engine.web_surface import SHELL_CSP, asset_bytes, transcript_csp
 from podcast_reader.providers import (
     build_provider_registry,
     canonicalize_custom_providers,
@@ -109,6 +110,15 @@ _WEB_BEARER_EXEMPT = frozenset(
         ("POST", "/web/api/logout"),
     }
 )
+_WEB_PUBLIC_GET = frozenset(
+    {
+        ("GET", "/web/"),
+        ("GET", "/web/assets/app.js"),
+        ("GET", "/web/assets/app.css"),
+    }
+)
+_WEB_COOKIE_GET = frozenset({("GET", "/web/api/library")})
+_WEB_TRANSCRIPT_PATH = re.compile(r"^/web/api/transcripts/[^/]{1,256}\.html$")
 
 
 def _https_authority(value: str, *, origin: bool) -> tuple[str, int] | None:
@@ -347,6 +357,14 @@ class EmptyWebBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class WebLibraryEntry(BaseModel):
+    """The deliberately minimized browser projection of a library entry."""
+
+    source_id: str
+    title: str
+    created_at: float
+
+
 #: Cap on the unauthenticated claim body (per V4): a legitimate claim is a
 #: tiny JSON object, so anything declaring more — or declaring nothing
 #: (chunked) — is rejected before the body is read.
@@ -436,7 +454,12 @@ def create_app(
         #    http origin (the Error 152/153 fix).
         if request.method == "POST" and request.url.path == "/v1/pair/claim":
             return await call_next(request)
-        if route in _WEB_BEARER_EXEMPT:
+        if (
+            route in _WEB_BEARER_EXEMPT
+            or route in _WEB_PUBLIC_GET
+            or route in _WEB_COOKIE_GET
+            or (request.method == "GET" and _WEB_TRANSCRIPT_PATH.match(request.url.path))
+        ):
             return await call_next(request)
         if request.method == "GET" and _EMBED_PATH.match(request.url.path):
             return await call_next(request)
@@ -576,6 +599,57 @@ def create_app(
         )
         response.headers["Cache-Control"] = "no-store"
         return response
+
+    def _require_web_session(request: Request) -> None:
+        credential = request.cookies.get(_WEB_SESSION_COOKIE, "")
+        if not web_sessions.verify(credential):
+            raise HTTPException(status_code=401, detail="unauthorized")
+
+    @app.get("/web/")
+    def web_shell() -> Response:
+        return Response(
+            asset_bytes("shell.html"),
+            media_type="text/html",
+            headers={"Content-Security-Policy": SHELL_CSP},
+        )
+
+    @app.get("/web/assets/app.js")
+    def web_script() -> Response:
+        return Response(asset_bytes("app.js"), media_type="text/javascript")
+
+    @app.get("/web/assets/app.css")
+    def web_stylesheet() -> Response:
+        return Response(asset_bytes("app.css"), media_type="text/css")
+
+    @app.get("/web/api/library", response_model=list[WebLibraryEntry])
+    def web_library(request: Request) -> list[WebLibraryEntry]:
+        _require_web_session(request)
+        return [
+            WebLibraryEntry(
+                source_id=entry["source_id"],
+                title=entry["title"],
+                created_at=entry["created_at"],
+            )
+            for entry in list_entries(_library_dir(data_dir))
+        ]
+
+    @app.get("/web/api/transcripts/{source_id}.html")
+    def web_transcript(request: Request, source_id: str) -> Response:
+        _require_web_session(request)
+        if not _SOURCE_ID_RE.fullmatch(source_id):
+            raise HTTPException(status_code=404, detail="transcript not found")
+        entry = get_entry(_library_dir(data_dir), source_id)
+        if entry is None:
+            raise HTTPException(status_code=404, detail="transcript not found")
+        path = Path(entry["html_path"])
+        if not path.is_file():
+            raise HTTPException(status_code=404, detail="transcript not found")
+        document = path.read_bytes()
+        return Response(
+            document,
+            media_type="text/html",
+            headers={"Content-Security-Policy": transcript_csp(document)},
+        )
 
     @app.post("/v1/shutdown", status_code=status.HTTP_202_ACCEPTED)
     def shutdown(background: BackgroundTasks) -> None:

@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import logging
+import re
 import stat
 import threading
 import time
+from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 import httpx
@@ -17,7 +20,7 @@ from fastapi.testclient import TestClient
 
 from podcast_reader.engine.app import create_app
 from podcast_reader.engine.jobs import JobStore
-from podcast_reader.engine.library import add_entry, entry_dir, source_identity
+from podcast_reader.engine.library import add_entry, entry_dir, get_entry, source_identity
 from podcast_reader.engine.pack_manager import PackManager
 from podcast_reader.engine.packs import (
     REGISTRY,
@@ -33,12 +36,12 @@ from podcast_reader.engine.web_session import (
     SESSION_PREFIX,
     WebSessionSigner,
 )
+from podcast_reader.html import build_html
 from podcast_reader.providers import PROVIDERS
 from podcast_reader.types import LibraryEntry, PipelineEvent, PipelineResult
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
-    from pathlib import Path
 
     from podcast_reader.types import JobOverrides, JobRecord
 
@@ -2294,6 +2297,145 @@ class TestWebPairingSession:
     )
     def test_web_auth_exemptions_are_exact(self, engine: _Engine, method: str, path: str) -> None:
         assert engine.web_client.request(method, path).status_code == 401
+
+
+class TestWebReadRoutes:
+    _WEB_HEADERS = {
+        "Origin": "https://web.test",
+        "Sec-Fetch-Site": "same-origin",
+    }
+
+    def _session(self, engine: _Engine) -> None:
+        response = engine.web_client.post(
+            "/web/api/session",
+            json={},
+            headers={**engine.headers, **self._WEB_HEADERS},
+        )
+        assert response.status_code == 204
+
+    def _seed(
+        self,
+        engine: _Engine,
+        *,
+        source: str = "https://example.com/private?token=source-secret",
+        chapters: list[dict[str, object]] | None = None,
+    ) -> tuple[str, str]:
+        source_id = source_identity(source)
+        library_dir = engine.data_dir / "library"
+        edir = entry_dir(library_dir, source_id)
+        edir.mkdir(parents=True)
+        html = build_html(
+            [{"start": 0.0, "end": 2.0, "text": "A private transcript."}],
+            "Private episode",
+            chapters=chapters,
+        )
+        html_path = edir / "episode.html"
+        html_path.write_text(html)
+        add_entry(
+            library_dir,
+            LibraryEntry(
+                source_id=source_id,
+                source=source,
+                title="Private episode",
+                html_path=str(html_path),
+                created_at=1_700_000_123.0,
+            ),
+        )
+        return source_id, html
+
+    def test_public_shell_and_assets_are_data_free_and_hardened(self, engine: _Engine) -> None:
+        source_id, _html = self._seed(engine)
+        shell = engine.web_client.get("/web/")
+        script = engine.web_client.get("/web/assets/app.js")
+        stylesheet = engine.web_client.get("/web/assets/app.css")
+
+        assert shell.status_code == script.status_code == stylesheet.status_code == 200
+        assert shell.headers["content-security-policy"].startswith("default-src 'none'")
+        assert script.headers["content-type"].startswith("text/javascript")
+        assert stylesheet.headers["content-type"].startswith("text/css")
+        combined = shell.text + script.text + stylesheet.text
+        assert source_id not in combined
+        assert engine.token not in combined
+        assert "source-secret" not in combined
+        assert "innerHTML" not in script.text
+        assert "serviceWorker" not in script.text
+        for response in (shell, script, stylesheet):
+            assert response.headers["referrer-policy"] == "no-referrer"
+            assert response.headers["x-content-type-options"] == "nosniff"
+
+    def test_library_requires_cookie_and_returns_only_minimized_projection(
+        self, engine: _Engine
+    ) -> None:
+        source_id, _html = self._seed(engine)
+        assert engine.web_client.get("/web/api/library").status_code == 401
+        self._session(engine)
+
+        response = engine.web_client.get("/web/api/library")
+
+        assert response.status_code == 200
+        assert response.json() == [
+            {
+                "source_id": source_id,
+                "title": "Private episode",
+                "created_at": 1_700_000_123.0,
+            }
+        ]
+        assert "source-secret" not in response.text
+        assert "html_path" not in response.text
+        assert response.headers["cache-control"] == "no-store"
+
+    @pytest.mark.parametrize(
+        "chapters",
+        [
+            None,
+            [
+                {
+                    "start": 0.0,
+                    "end": 2.0,
+                    "title": "Opening",
+                    "abstract": "The opening.",
+                    "type": "content",
+                    "key_points": [],
+                }
+            ],
+        ],
+    )
+    def test_transcript_requires_cookie_and_is_byte_identical_with_exact_script_csp(
+        self, engine: _Engine, chapters: list[dict[str, object]] | None
+    ) -> None:
+        source_id, html = self._seed(engine, chapters=chapters)
+        path = f"/web/api/transcripts/{source_id}.html"
+        assert engine.web_client.get(path).status_code == 401
+        self._session(engine)
+
+        response = engine.web_client.get(path)
+
+        assert response.status_code == 200
+        assert response.content == html.encode()
+        csp = response.headers["content-security-policy"]
+        scripts = re.findall(r"<script>(.*?)</script>", html, flags=re.DOTALL)
+        assert scripts
+        for script in scripts:
+            digest = hashlib.sha256(script.encode()).digest()
+            assert f"'sha256-{base64.b64encode(digest).decode()}'" in csp
+        assert "frame-ancestors 'self'" in csp
+        assert "connect-src 'none'" in csp
+        assert response.headers["cache-control"] == "no-store"
+
+    def test_unknown_invalid_and_missing_artifact_are_404_after_cookie(
+        self, engine: _Engine
+    ) -> None:
+        self._session(engine)
+        unknown = "a" * 64
+        invalid = "not-a-source-id"
+        assert engine.web_client.get(f"/web/api/transcripts/{unknown}.html").status_code == 404
+        assert engine.web_client.get(f"/web/api/transcripts/{invalid}.html").status_code == 404
+
+        source_id, _html = self._seed(engine)
+        entry = get_entry(engine.data_dir / "library", source_id)
+        assert entry is not None
+        Path(entry["html_path"]).unlink()
+        assert engine.web_client.get(f"/web/api/transcripts/{source_id}.html").status_code == 404
 
 
 def _cookie_line(domain: str, value: str = "secret-cookie-value") -> str:

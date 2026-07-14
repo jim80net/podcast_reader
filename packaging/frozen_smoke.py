@@ -29,6 +29,7 @@ import contextlib
 import json
 import os
 import re
+import stat
 import subprocess
 import sys
 import tempfile
@@ -164,6 +165,34 @@ def assert_version(engine: Engine, expected: str) -> None:
     print(f"health ok: version {health['version']}")
 
 
+def assert_web_assets(engine: Engine) -> None:
+    """The actual frozen engine serves every packaged browser shell asset."""
+    expected = {
+        "/web/": b'<main id="app"',
+        "/web/assets/app.js": b"loadLibrary()",
+        "/web/assets/app.css": b".library",
+    }
+    for path, marker in expected.items():
+        request = urllib.request.Request(f"http://127.0.0.1:{engine.port}{path}")
+        with urllib.request.urlopen(request, timeout=30) as response:
+            body = response.read()
+            if response.status != 200 or marker not in body:
+                raise SmokeError(f"packaged web asset failed at {path}: {response.status}")
+    print("packaged private-web shell assets served")
+
+
+def assert_engine_state_permissions(engine: Engine) -> None:
+    """Verify the platform's real bearer-file protection in the frozen run."""
+    state_path = engine.data_dir / "engine-state.json"
+    if sys.platform == "win32":
+        from podcast_reader.engine.settings import verify_windows_private_file
+
+        verify_windows_private_file(state_path)
+        print("engine state owner+SYSTEM DACL verified")
+    elif stat.S_IMODE(state_path.stat().st_mode) != 0o600:
+        raise SmokeError("engine state is not mode 0600")
+
+
 def install_pack(engine: Engine, pack_id: str, timeout: float) -> None:
     engine.expect("POST", f"/v1/packs/{pack_id}/install")
     print(f"install of {pack_id} accepted; polling")
@@ -283,6 +312,8 @@ def main(argv: list[str] | None = None) -> None:
     engine = Engine(args.engine.resolve(), data_dir, timeout=60)
     try:
         assert_version(engine, pyproject_version())
+        assert_engine_state_permissions(engine)
+        assert_web_assets(engine)
         if not args.boot_only:
             install_pack(engine, args.pack, args.timeout)
             assert_pack_manifest(engine, args.pack)

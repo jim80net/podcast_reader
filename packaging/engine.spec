@@ -17,7 +17,7 @@
 # Output: dist/engine/ — podcast-reader-engine[.exe], whisper-worker[.exe],
 #         _internal/ (the layout engine-cmd.ts and dist.mjs --engine-dir expect).
 
-from PyInstaller.utils.hooks import copy_metadata
+from PyInstaller.utils.hooks import collect_data_files, copy_metadata
 
 block_cipher = None
 
@@ -30,6 +30,9 @@ common_kwargs = dict(
         # dist-info, /v1/health reports the "0.0.0-dev" placeholder and the
         # app's MIN_ENGINE_VERSION gate would reject the packaged engine.
         *copy_metadata("podcast-reader"),
+        # Browser-native private reader shell. importlib.resources resolves
+        # these from the frozen package; absence is a build failure in smoke.
+        *collect_data_files("podcast_reader.web_assets"),
     ],
     excludes=[
         # Not needed by the engine or worker; keeps the bundle honest on size.

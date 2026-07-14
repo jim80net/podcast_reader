@@ -48,6 +48,7 @@
 # node_modules/, dist/, and the build zip
 !extension/**/*.json
 !extension/**/*.html
+!src/podcast_reader/web_assets/*.html
 
 # Python
 __pycache__/
