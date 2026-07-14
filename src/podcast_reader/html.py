@@ -2,7 +2,20 @@
 
 from __future__ import annotations
 
+import html
 from typing import Any
+
+
+def _esc(text: str) -> str:
+    """Escape untrusted text for interpolation into markup text nodes (#56).
+
+    Applied to transcript-derived strings (segment text, rail labels,
+    speaker labels) and provider-derived strings (titles, abstracts, key
+    points, pull quotes). ``quote=False``: quotes are inert in text nodes,
+    and generated attribute values (slug anchors, times) never carry this
+    text.
+    """
+    return html.escape(text, quote=False)
 
 
 def fmt_time(seconds: float) -> str:
@@ -169,7 +182,7 @@ def _speaker_prefix(paragraph: dict[str, Any], last_speaker: str | None) -> str:
     speaker = paragraph.get("speaker")
     if speaker is None or speaker == last_speaker:
         return ""
-    return f'<span class="speaker">{_speaker_label(speaker)}</span> '
+    return f'<span class="speaker">{_esc(_speaker_label(speaker))}</span> '
 
 
 TYPE_LABELS = {
@@ -192,7 +205,7 @@ def build_sidebar_nav(chapters: list[dict[str, Any]]) -> str:
         items.append(
             f'<a href="#{anchor}" class="{css_class}" data-section="{anchor}">'
             f'<span class="nav-ts">{ts}</span>'
-            f'<span class="nav-title">{ch["title"]}{badge}</span>'
+            f'<span class="nav-title">{_esc(ch["title"])}{badge}</span>'
             f"</a>"
         )
     return (
@@ -279,7 +292,8 @@ def build_timeline_nav(segments: list[dict[str, Any]], sentences_per_para: int =
     links = "\n".join(
         f'<a href="#{_time_anchor(float(p["start"]))}">'
         f'<span class="timeline-ts">{fmt_time(float(p["start"]))}</span>'
-        f'<span class="timeline-snippet">{"Start" if i == 0 else _timeline_label(p["text"])}</span>'
+        f'<span class="timeline-snippet">'
+        f"{'Start' if i == 0 else _esc(_timeline_label(p['text']))}</span>"
         f"</a>"
         for i, p in enumerate(markers)
     )
@@ -347,7 +361,7 @@ def build_chapter_body(
             last_speaker = p.get("speaker")
             anchor = _time_anchor(float(p["start"]))
             attrs = f' id="{anchor}" data-start="{p["start"]:.3f}" data-end="{p["end"]:.3f}"'
-            parts.append(f'<p{attrs}>{prefix}<span class="ts">{ts}</span> {p["text"]}</p>')
+            parts.append(f'<p{attrs}>{prefix}<span class="ts">{ts}</span> {_esc(p["text"])}</p>')
         return "\n".join(parts)
 
     sorted_chapters = sorted(chapters, key=lambda c: c["start"])
@@ -367,12 +381,13 @@ def build_chapter_body(
         parts.append(f'<section id="{anchor}" class="{section_class}" data-start="{sec_start}">')
         parts.append('<div class="chapter-main">')
         parts.append(
-            f'<h2><span class="ts">{fmt_time(ch["start"])}</span> {ch["title"]}{badge_html}</h2>'
+            f'<h2><span class="ts">{fmt_time(ch["start"])}</span> '
+            f"{_esc(ch['title'])}{badge_html}</h2>"
         )
         parts.append(
             '<div class="chapter-abstract">\n'
             '<h3 class="chapter-abstract-heading">Summary</h3>\n'
-            f"<p>{ch['abstract']}</p>\n"
+            f"<p>{_esc(ch['abstract'])}</p>\n"
             "</div>"
         )
 
@@ -393,16 +408,21 @@ def build_chapter_body(
 
         for p in paragraphs:
             ts = fmt_time(p["start"])
-            text = p["text"]
+            text = _esc(p["text"])
 
-            # Bold the pull quote text inline within the matching paragraph
+            # Bold the pull quote text inline within the matching paragraph.
+            # Matched on the raw text, wrapped on the escaped text: escaping
+            # is a per-character substitution, so a raw substring match
+            # guarantees the escaped quote appears in the escaped paragraph.
             if (
                 not pull_quote_applied
+                and pull_quote is not None
                 and pull_quote_start is not None
                 and p["start"] >= pull_quote_start
-                and pull_quote in text
+                and pull_quote in p["text"]
             ):
-                text = text.replace(pull_quote, f"<strong>{pull_quote}</strong>", 1)
+                quote = _esc(pull_quote)
+                text = text.replace(quote, f"<strong>{quote}</strong>", 1)
                 pull_quote_applied = True
 
             prefix = _speaker_prefix(p, last_speaker)
@@ -414,7 +434,7 @@ def build_chapter_body(
 
         # Key points in right gutter
         if has_gutter:
-            items = "\n".join(f"<li>{point}</li>" for point in key_points)
+            items = "\n".join(f"<li>{_esc(point)}</li>" for point in key_points)
             parts.append(
                 '<div class="chapter-gutter">\n'
                 '<div class="key-points">\n'
@@ -1038,12 +1058,12 @@ def build_html(
         '<!DOCTYPE html>\n<html lang="en">\n<head>\n'
         '<meta charset="UTF-8">\n'
         '<meta name="viewport" content="width=device-width, initial-scale=1.0">\n'
-        f"<title>{title}</title>\n"
+        f"<title>{_esc(title)}</title>\n"
         f"<style>\n{stylesheet}</style>\n"
         f"</head>\n{body_tag}\n",
         sidebar_html,
         '\n<div id="content">\n<header>\n'
-        f"  <h1>{title}</h1>\n"
+        f"  <h1>{_esc(title)}</h1>\n"
         f'  <div class="meta">{_byline(segments, source)}</div>\n'
         "</header>\n<main>\n",
         timeline_html,
