@@ -40,6 +40,13 @@ _MODEL_HINT = (
     "Download the model from the app's setup wizard or Settings → Packs, then retry the job."
 )
 
+_CUDA_REPAIR_HINT = (
+    "In Settings → Packs, uninstall and reinstall NVIDIA CUDA runtime (cuBLAS + cuDNN 9), "
+    "then retry. To keep working without the GPU pack, set Settings → Device to CPU and retry."
+)
+
+_CUDA_LOAD_ERROR_MARKERS = ("cublas64_", "cublaslt64_", "cudnn64_", "cudnn_")
+
 #: Worker progress line protocol: `progress duration=<sec>` once after model
 #: load, `progress segment_end=<sec>` per transcribed segment.
 _PROGRESS_RE = re.compile(r"^progress (duration|segment_end)=(\d+(?:\.\d+)?)$")
@@ -191,6 +198,13 @@ def _transcribe_via_worker(
     result = run_child_streaming(args, on_stderr_line=handle_stderr_line, env=_worker_env(base))
     if result.returncode != 0:
         tail = "\n".join(result.stderr.strip().splitlines()[-5:])
+        if effective_device == "cuda" and _cuda_runtime_load_failed(result.stderr):
+            raise PipelineError(
+                "cuda_runtime_unavailable",
+                "The NVIDIA CUDA runtime could not be loaded for GPU transcription",
+                _CUDA_REPAIR_HINT,
+                tail,
+            )
         raise RuntimeError(f"whisper-worker failed: {tail}")
     return output_dir / f"{audio_path.stem}.json"
 
@@ -217,7 +231,7 @@ def _validated_model_dir(base: Path, model: str) -> Path:
             f"Whisper model {model!r} is not installed",
             _MODEL_HINT,
         )
-    error = packs.compat_error(entry, manifest) or packs.files_error(target, manifest)
+    error = packs.compat_error(entry, manifest) or packs.pack_files_error(entry, target, manifest)
     if error is not None:
         raise PipelineError(
             "model_missing",
@@ -270,9 +284,22 @@ def _cuda_unavailable_reason(base: Path, entry: PackEntry, platform: str) -> str
         return "the CUDA runtime pack is not installed"
     if packs.compat_error(entry, manifest) is not None:
         return "the installed CUDA runtime pack is incompatible with this engine build"
-    if packs.files_error(target, manifest) is not None:
-        return "the installed CUDA runtime pack failed integrity validation"
+    integrity_error = packs.pack_files_error(entry, target, manifest)
+    if integrity_error is not None:
+        return (
+            "the installed CUDA runtime pack is incomplete or damaged "
+            f"({integrity_error}); reinstall it in Settings → Packs"
+        )
     return None
+
+
+def _cuda_runtime_load_failed(stderr: str) -> bool:
+    """True when the worker names a CUDA runtime DLL loader failure."""
+    lowered = stderr.casefold()
+    return any(marker in lowered for marker in _CUDA_LOAD_ERROR_MARKERS) and any(
+        phrase in lowered
+        for phrase in ("not found", "cannot be loaded", "could not load", "failed to load")
+    )
 
 
 def _worker_env(base: Path) -> dict[str, str] | None:

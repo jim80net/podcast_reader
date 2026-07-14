@@ -38,10 +38,10 @@ from podcast_reader.engine.packs import (
     PacksResponse,
     PackStatus,
     compat_error,
-    files_error,
     is_published,
     manifest_path,
     pack_dir,
+    pack_files_error,
     pack_total_size,
     platform_supported,
     read_manifest,
@@ -359,7 +359,7 @@ class PackManager:
             manifest = read_manifest(target)
             if manifest is None:
                 continue
-            error = compat_error(entry, manifest) or files_error(target, manifest)
+            error = compat_error(entry, manifest) or pack_files_error(entry, target, manifest)
             if error is not None:
                 flagged[pack_id] = error
                 logger.warning("Installed pack %s is unusable: %s", pack_id, error)
@@ -411,7 +411,7 @@ class PackManager:
                 status["state"] = "incompatible"
                 status["error"] = PackInstallError(code="incompatible", message=incompat)
                 return status
-            integrity = files_error(target, manifest)
+            integrity = pack_files_error(entry, target, manifest)
             if integrity is not None:
                 status["state"] = "failed"
                 status["error"] = PackInstallError(code="integrity", message=integrity)
@@ -433,7 +433,10 @@ class PackManager:
         manifest = read_manifest(target)
         if manifest is None:
             return False
-        return compat_error(entry, manifest) is None and files_error(target, manifest) is None
+        return (
+            compat_error(entry, manifest) is None
+            and pack_files_error(entry, target, manifest) is None
+        )
 
     # -- installer worker --------------------------------------------------
 

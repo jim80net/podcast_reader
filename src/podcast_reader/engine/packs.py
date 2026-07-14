@@ -11,7 +11,8 @@ A successful install writes ``pack-manifest.json`` into the pack directory
 *last*; a pack directory without a valid manifest is by definition not
 installed (atomic-by-construction install). Startup validation checks the
 manifest against :func:`compat_error` (pack schema + component pairings) and
-:func:`files_error` (existence + recorded size only — no hashing, per S8).
+:func:`pack_files_error` (existence + recorded size plus pack-specific required
+files — no hashing, per S8).
 
 Pin provenance (2026-06-12):
 
@@ -37,6 +38,23 @@ if TYPE_CHECKING:
 
 PACK_SCHEMA = 1
 MANIFEST_FILE = "pack-manifest.json"
+
+#: The complete cuBLAS + cuDNN 9 DLL set required by ctranslate2 4.8.0.
+#: Keep this aligned with packaging/frozen_smoke.py's independent stdlib-only
+#: assertion. A manifest containing only a subset must never be called usable:
+#: cuDNN's DLLs load each other lazily at CUDA model load time.
+CUDA_DLL_STEMS = (
+    "cublas64",
+    "cublasLt64",
+    "cudnn64",
+    "cudnn_graph64",
+    "cudnn_ops64",
+    "cudnn_cnn64",
+    "cudnn_adv64",
+    "cudnn_engines_precompiled64",
+    "cudnn_engines_runtime_compiled64",
+    "cudnn_heuristic64",
+)
 
 PackKind = Literal["runtime", "model", "worker"]
 PackState = Literal[
@@ -557,4 +575,22 @@ def files_error(pack_dir_path: Path, manifest: PackManifest) -> str | None:
                 f"size mismatch for {recorded['path']}: "
                 f"recorded {recorded['size']} bytes, found {actual}"
             )
+    return None
+
+
+def pack_files_error(entry: PackEntry, pack_dir_path: Path, manifest: PackManifest) -> str | None:
+    """Why *entry*'s installed files are unusable, or ``None``.
+
+    The generic manifest existence/size check runs first. The CUDA runtime
+    additionally requires every cuBLAS/cuDNN DLL family from the packaging
+    spike: an older or partial manifest can otherwise pass integrity and fail
+    only when ctranslate2 first loads a CUDA model.
+    """
+    error = files_error(pack_dir_path, manifest)
+    if error is not None or entry["id"] != "cuda-runtime":
+        return error
+    names = {recorded["path"] for recorded in manifest["files"]}
+    missing = [stem for stem in CUDA_DLL_STEMS if not any(name.startswith(stem) for name in names)]
+    if missing:
+        return "missing required CUDA runtime DLLs: " + ", ".join(missing)
     return None

@@ -101,6 +101,13 @@ attributions. Approximate download sizes:
 | NVIDIA CUDA runtime (cuBLAS + cuDNN 9) | 1.2 GB | Windows + NVIDIA only; from NVIDIA's official PyPI wheels |
 | Speaker diarization worker | ~340 MB | not yet published — shows `unavailable` |
 
+**Windows CUDA repair:** if a GPU job reports that `cublas64_12.dll` or a
+`cudnn*_9.dll` cannot be loaded, open **Settings → Packs**, uninstall and
+reinstall **NVIDIA CUDA runtime (cuBLAS + cuDNN 9)**, then retry. The pack is
+separate from the model pack: `large-v3` alone does not include NVIDIA's
+runtime DLLs. To continue without the 1.2 GB runtime pack, set **Settings →
+Device** to **CPU** and retry; CPU transcription does not load these DLLs.
+
 **Unsigned builds:** installers built today are unsigned dev artifacts
 (`npm run dist -- --win` / `-- --mac`): Windows SmartScreen needs
 "Run anyway", macOS needs right-click → Open (and macOS auto-update does

@@ -24,15 +24,25 @@ affect an already-running loader).
 from __future__ import annotations
 
 import argparse
+import ctypes
 import json
 import multiprocessing
 import os
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING, Protocol
 
 from typing_extensions import TypedDict
 
 from podcast_reader.engine.settings import data_dir_path
+
+if TYPE_CHECKING:
+
+    class DllDirectoryHandle(Protocol):
+        """The closeable token returned by ``os.add_dll_directory``."""
+
+        def close(self) -> None:
+            """Remove the registered directory from the DLL search path."""
 
 
 class WorkerSegment(TypedDict):
@@ -123,16 +133,34 @@ def main() -> None:
         prog="whisper-worker",
         description="Transcribe one audio file to whisper-ctranslate2-shaped JSON.",
     )
-    parser.add_argument("audio", type=Path)
-    parser.add_argument("--model", required=True, help="model name or local model directory")
+    parser.add_argument("audio", type=Path, nargs="?")
+    parser.add_argument("--model", help="model name or local model directory")
     parser.add_argument("--device", default="cpu", choices=("cpu", "cuda"))
     parser.add_argument("--compute-type", default="int8")
     parser.add_argument("--language", default=None)
     parser.add_argument("--output-dir", type=Path, default=Path.cwd())
+    parser.add_argument(
+        "--check-cuda-runtime",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
     args = parser.parse_args()
 
-    _prepare_windows_dll_path()  # before the faster_whisper import below
+    if not args.check_cuda_runtime and (args.audio is None or args.model is None):
+        parser.error("audio and --model are required for transcription")
+
+    # Keep the returned token alive until every CUDA load/transcription is
+    # complete. CPython removes the directory when this object is closed (or
+    # garbage-collected); discarding it here unregisters the pack immediately.
+    dll_directory: DllDirectoryHandle | None = None
     try:
+        dll_directory = _prepare_windows_dll_path()  # before faster_whisper/ctypes loads
+        if args.check_cuda_runtime:
+            _check_cuda_runtime_loadable()
+            print("cuda-runtime ready", flush=True)
+            return
+        assert args.audio is not None
+        assert args.model is not None
         json_path = transcribe_audio(
             args.audio,
             args.output_dir,
@@ -145,10 +173,13 @@ def main() -> None:
         # Non-zero exit with a human-readable stderr tail (worker contract).
         print(f"whisper-worker error: {exc}", file=sys.stderr, flush=True)
         raise SystemExit(1) from exc
+    finally:
+        if dll_directory is not None:
+            dll_directory.close()
     print(str(json_path), flush=True)
 
 
-def _prepare_windows_dll_path() -> None:
+def _prepare_windows_dll_path() -> DllDirectoryHandle | None:
     """Join ``<data_dir>/runtime`` to the DLL search path (Windows, iff present).
 
     The CUDA pack installs cuBLAS/cuDNN DLLs there; ``os.add_dll_directory``
@@ -157,10 +188,25 @@ def _prepare_windows_dll_path() -> None:
     the CPU path needs no extra DLLs.
     """
     if sys.platform != "win32":
-        return
+        return None
     runtime = data_dir_path() / "runtime"
     if runtime.is_dir():
-        os.add_dll_directory(str(runtime))
+        return os.add_dll_directory(str(runtime))
+    return None
+
+
+def _check_cuda_runtime_loadable() -> None:
+    """Load the two root CUDA DLLs without requiring an NVIDIA GPU.
+
+    The frozen Windows pack smoke invokes this after installing the runtime
+    pack. Loading by basename proves the worker kept its private runtime
+    directory registered with the Windows loader; the manifest separately
+    proves the complete dependent cuDNN DLL set exists.
+    """
+    if sys.platform != "win32":
+        raise RuntimeError("CUDA runtime loading is supported only on Windows")
+    for name in ("cublas64_12.dll", "cudnn64_9.dll"):
+        ctypes.CDLL(name)
 
 
 if __name__ == "__main__":
