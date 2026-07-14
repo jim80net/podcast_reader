@@ -41,8 +41,8 @@ _MODEL_HINT = (
 )
 
 _CUDA_REPAIR_HINT = (
-    "In Settings → Packs, uninstall and reinstall NVIDIA CUDA runtime (cuBLAS + cuDNN 9), "
-    "then retry. To keep working without the GPU pack, set Settings → Device to CPU and retry."
+    "To keep working, set Settings → Device to CPU and retry. To repair GPU transcription, "
+    "uninstall and reinstall NVIDIA CUDA runtime (cuBLAS + cuDNN 9) in Settings → Packs."
 )
 
 _CUDA_LOAD_ERROR_MARKERS = ("cublas64_", "cublaslt64_", "cudnn64_", "cudnn_")
@@ -307,8 +307,10 @@ def _worker_env(base: Path) -> dict[str, str] | None:
 
     POSIX: ``LD_LIBRARY_PATH`` gains ``<data_dir>/runtime`` (the spec's
     spawn-time contract — an in-process mutation cannot affect an
-    already-running loader). Windows: ``None`` (inherit) — the worker calls
-    ``os.add_dll_directory`` itself before importing faster-whisper.
+    already-running loader). Windows: ``None`` (inherit) — before importing
+    faster-whisper, the worker prepends the runtime directory to its own
+    ``PATH`` for ctranslate2's plain ``LoadLibraryA`` calls and also registers
+    it with ``os.add_dll_directory`` for flagged loads.
     """
     if sys.platform == "win32":
         return None

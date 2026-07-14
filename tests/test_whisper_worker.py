@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import os
 import sys
 import types
 from dataclasses import dataclass, field
@@ -305,6 +306,7 @@ class TestWindowsDllPath:
         runtime = tmp_path / "runtime"
         runtime.mkdir()
         monkeypatch.setenv("PODCAST_READER_DATA_DIR", str(tmp_path))
+        monkeypatch.setenv("PATH", "existing-tools")
         monkeypatch.setattr(whisper_worker.sys, "platform", "win32")
         added: list[str] = []
         handle = object()
@@ -319,6 +321,7 @@ class TestWindowsDllPath:
 
         assert added == [str(runtime)]
         assert result is handle
+        assert os.environ["PATH"] == f"{runtime}{os.pathsep}existing-tools"
 
     def test_skips_absent_runtime_dir_on_windows(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -335,8 +338,8 @@ class TestWindowsDllPath:
     def test_main_keeps_handle_alive_through_cuda_loader_check(
         self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        """Regression: dropping the add_dll_directory token immediately
-        unregisters the runtime path before cublas is loaded."""
+        """The flagged-load registration remains open through the loader check
+        and is explicitly closed afterward; PATH covers flagless loads."""
 
         class Handle:
             closed = False
@@ -358,14 +361,53 @@ class TestWindowsDllPath:
         assert handle.closed is True
         assert capsys.readouterr().out.strip() == "cuda-runtime ready"
 
+    def test_main_preflights_cuda_before_model_load(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        audio = tmp_path / "a.wav"
+        audio.write_bytes(b"RIFF")
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "whisper-worker",
+                str(audio),
+                "--model",
+                "tiny",
+                "--device",
+                "cuda",
+                "--output-dir",
+                str(tmp_path),
+            ],
+        )
+        monkeypatch.setattr(whisper_worker, "_prepare_windows_dll_path", lambda: None)
+        calls: list[str] = []
+        monkeypatch.setattr(
+            whisper_worker, "_check_cuda_runtime_loadable", lambda: calls.append("preflight")
+        )
+
+        def transcribe(*_args: object, **_kwargs: object) -> Path:
+            calls.append("model")
+            return tmp_path / "a.json"
+
+        monkeypatch.setattr(whisper_worker, "transcribe_audio", transcribe)
+
+        whisper_worker.main()
+
+        assert calls == ["preflight", "model"]
+
     def test_loader_check_names_root_cuda_dlls(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(whisper_worker.sys, "platform", "win32")
-        loaded: list[str] = []
-        monkeypatch.setattr(whisper_worker.ctypes, "CDLL", loaded.append)
+        loaded: list[tuple[str, int]] = []
+
+        def load(name: str, *, winmode: int) -> None:
+            loaded.append((name, winmode))
+
+        monkeypatch.setattr(whisper_worker.ctypes, "CDLL", load)
 
         whisper_worker._check_cuda_runtime_loadable()
 
-        assert loaded == ["cublas64_12.dll", "cudnn64_9.dll"]
+        assert loaded == [("cublas64_12.dll", 0), ("cudnn64_9.dll", 0)]
 
 
 class TestDataDirPath:

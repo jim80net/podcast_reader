@@ -16,9 +16,10 @@ computed) so ``html.py`` and the chapters step consume it unchanged.
 faster-whisper is imported lazily inside :func:`transcribe_audio` — the
 module itself imports without the ``worker`` extra, and the main package
 never imports this module at all. On Windows the CUDA runtime pack's
-directory joins the DLL search path *before* that import; on POSIX the
-spawner sets ``LD_LIBRARY_PATH`` instead (an in-process mutation cannot
-affect an already-running loader).
+directory is prepended to ``PATH`` for ctranslate2's plain ``LoadLibraryA``
+calls and registered with ``os.add_dll_directory`` for flagged loads, both
+*before* that import. On POSIX the spawner sets ``LD_LIBRARY_PATH`` instead
+(an in-process mutation cannot affect an already-running loader).
 """
 
 from __future__ import annotations
@@ -149,9 +150,9 @@ def main() -> None:
     if not args.check_cuda_runtime and (args.audio is None or args.model is None):
         parser.error("audio and --model are required for transcription")
 
-    # Keep the returned token alive until every CUDA load/transcription is
-    # complete. CPython removes the directory when this object is closed (or
-    # garbage-collected); discarding it here unregisters the pack immediately.
+    # Retain the token so the flagged-load registration can be explicitly
+    # closed after all CUDA work. PATH below is what covers ctranslate2's
+    # flagless LoadLibraryA calls; token lifetime is not the causal fix.
     dll_directory: DllDirectoryHandle | None = None
     try:
         dll_directory = _prepare_windows_dll_path()  # before faster_whisper/ctypes loads
@@ -161,6 +162,8 @@ def main() -> None:
             return
         assert args.audio is not None
         assert args.model is not None
+        if args.device == "cuda":
+            _check_cuda_runtime_loadable()
         json_path = transcribe_audio(
             args.audio,
             args.output_dir,
@@ -182,16 +185,20 @@ def main() -> None:
 def _prepare_windows_dll_path() -> DllDirectoryHandle | None:
     """Join ``<data_dir>/runtime`` to the DLL search path (Windows, iff present).
 
-    The CUDA pack installs cuBLAS/cuDNN DLLs there; ``os.add_dll_directory``
-    must run before faster-whisper (and transitively ctranslate2) is
-    imported, or CUDA model load fails. A missing directory is harmless —
-    the CPU path needs no extra DLLs.
+    The CUDA pack installs cuBLAS/cuDNN DLLs there. ctranslate2 4.8.0 loads
+    cuBLAS with plain ``LoadLibraryA``, whose legacy search order consults
+    ``PATH`` but not ``os.add_dll_directory`` registrations. Prepending PATH
+    covers that call; retaining the registration covers flagged dependent
+    loads. Both happen before faster-whisper imports ctranslate2. A missing
+    directory is harmless — the CPU path needs no extra DLLs.
     """
     if sys.platform != "win32":
         return None
     runtime = data_dir_path() / "runtime"
     if runtime.is_dir():
-        return os.add_dll_directory(str(runtime))
+        runtime_str = str(runtime)
+        os.environ["PATH"] = runtime_str + os.pathsep + os.environ.get("PATH", "")
+        return os.add_dll_directory(runtime_str)
     return None
 
 
@@ -199,14 +206,15 @@ def _check_cuda_runtime_loadable() -> None:
     """Load the two root CUDA DLLs without requiring an NVIDIA GPU.
 
     The frozen Windows pack smoke invokes this after installing the runtime
-    pack. Loading by basename proves the worker kept its private runtime
-    directory registered with the Windows loader; the manifest separately
-    proves the complete dependent cuDNN DLL set exists.
+    pack, and every CUDA job invokes it before model construction. ``winmode=0``
+    selects the legacy search order used by ctranslate2's plain
+    ``LoadLibraryA``; the manifest separately proves the complete dependent
+    cuDNN DLL set exists.
     """
     if sys.platform != "win32":
         raise RuntimeError("CUDA runtime loading is supported only on Windows")
     for name in ("cublas64_12.dll", "cudnn64_9.dll"):
-        ctypes.CDLL(name)
+        ctypes.CDLL(name, winmode=0)
 
 
 if __name__ == "__main__":
