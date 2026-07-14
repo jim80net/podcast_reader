@@ -272,6 +272,11 @@ h1 {
 .timeline-links a:focus-visible .timeline-ts { color: var(--accent); }
 .timeline-links a:hover .timeline-snippet,
 .timeline-links a:focus-visible .timeline-snippet { color: var(--text-bright); }
+/* Collapsed sticky state (#63): once scrolled, the rail shrinks to compact
+   timestamp chips — every stop stays tappable while occluding less text.
+   Toggled by the rail script; without JS the rail simply stays expanded. */
+.timeline-nav.stuck { padding: 0.4rem 0.75rem; }
+.timeline-nav.stuck .timeline-snippet { display: none; }
 
 /* ---- KEYLESS SECTION LANDMARKS ---- */
 /* Quiet structural rhythm at the rail's marker boundaries: same visual
@@ -284,9 +289,17 @@ h1 {
 .landmark-ts {
   font-family: 'JetBrains Mono', monospace;
   font-size: 0.68rem;
-  color: var(--muted);
+  color: var(--accent-dim);
   letter-spacing: 0.03em;
   user-select: none;
+}
+.landmark-label {
+  font-family: 'Oswald', sans-serif;
+  font-size: 0.8rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+  margin-left: 0.6rem;
 }
 
 /* ---- CHAPTER SECTIONS ---- */

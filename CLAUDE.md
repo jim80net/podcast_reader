@@ -181,6 +181,10 @@ uv run pytest -m "not integration"
 # Run all tests including integration
 uv run pytest
 
+# Refresh the golden HTML fixtures after intentional renderer changes
+# (includes the longform golden measured by app/tests/e2e/artifact-geometry.spec.ts)
+uv run python tests/regen_goldens.py
+
 # Type checking (strict mode)
 uv run mypy src/
 
