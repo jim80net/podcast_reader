@@ -202,6 +202,50 @@ def build_sidebar_nav(chapters: list[dict[str, Any]]) -> str:
     )
 
 
+def _time_anchor(seconds: float) -> str:
+    """Stable fragment identifier for a timestamped keyless passage."""
+    return f"t-{round(seconds * 1000)}"
+
+
+def _timeline_interval(duration: float) -> float:
+    """Choose a coarse interval that keeps the timeline compact."""
+    if duration <= 10 * 60:
+        return 2 * 60
+    if duration <= 30 * 60:
+        return 5 * 60
+    if duration <= 60 * 60:
+        return 10 * 60
+    return 15 * 60
+
+
+def build_timeline_nav(segments: list[dict[str, Any]], sentences_per_para: int = 5) -> str:
+    """Build a compact time-based landmark rail for a keyless transcript."""
+    paragraphs = segments_to_paragraphs(segments, sentences_per_para)
+    if not paragraphs:
+        return ""
+
+    duration = max(float(p["end"]) for p in paragraphs)
+    interval = _timeline_interval(duration)
+    markers = [paragraphs[0]]
+    threshold = interval
+    while threshold < duration:
+        marker = next((p for p in paragraphs if float(p["start"]) >= threshold), None)
+        if marker is not None and marker is not markers[-1]:
+            markers.append(marker)
+        threshold += interval
+
+    links = "\n".join(
+        f'<a href="#{_time_anchor(float(p["start"]))}">{fmt_time(float(p["start"]))}</a>'
+        for p in markers
+    )
+    return (
+        '<nav class="timeline-nav" aria-label="Transcript timeline">\n'
+        '  <span class="timeline-label">Jump to</span>\n'
+        f'  <span class="timeline-links">\n{links}\n  </span>\n'
+        "</nav>"
+    )
+
+
 def build_chapter_body(
     segments: list[dict[str, Any]],
     chapters: list[dict[str, Any]],
@@ -216,7 +260,8 @@ def build_chapter_body(
             ts = fmt_time(p["start"])
             prefix = _speaker_prefix(p, last_speaker)
             last_speaker = p.get("speaker")
-            attrs = f' data-start="{p["start"]:.3f}" data-end="{p["end"]:.3f}"'
+            anchor = _time_anchor(float(p["start"]))
+            attrs = f' id="{anchor}" data-start="{p["start"]:.3f}" data-end="{p["end"]:.3f}"'
             parts.append(f'<p{attrs}>{prefix}<span class="ts">{ts}</span> {p["text"]}</p>')
         return "\n".join(parts)
 
@@ -387,7 +432,7 @@ _STYLESHEET = """\
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
-html { scroll-behavior: smooth; scroll-padding-top: 1.5rem; }
+html { scroll-behavior: smooth; scroll-padding-top: 4rem; }
 
 body {
   font-family: 'Source Serif 4', 'Georgia', serif;
@@ -470,6 +515,7 @@ body {
 #content {
   margin-left: var(--sidebar-w);
   flex: 1;
+  min-width: 0;
   padding: 2.5rem 3rem 4rem;
 }
 
@@ -494,6 +540,52 @@ h1 {
   color: var(--muted);
   font-size: 0.75rem;
   letter-spacing: 0.04em;
+}
+
+/* ---- KEYLESS TIMELINE ---- */
+.timeline-nav {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  margin: -1rem 0 2rem;
+  padding: 0.55rem 0.75rem;
+  background: var(--bg-warm);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  box-shadow: 0 0.35rem 1rem var(--bg);
+}
+.timeline-label {
+  flex: none;
+  color: var(--muted);
+  font-family: 'Oswald', sans-serif;
+  font-size: 0.72rem;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.timeline-links {
+  display: flex;
+  flex: 1 1 auto;
+  gap: 0.35rem;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+.timeline-links a {
+  flex: none;
+  padding: 0.12rem 0.38rem;
+  border-radius: 2px;
+  color: var(--accent-dim);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.68rem;
+}
+.timeline-links a:hover,
+.timeline-links a:focus-visible {
+  background: var(--accent-glow);
+  color: var(--accent);
 }
 
 /* ---- CHAPTER SECTIONS ---- */
@@ -601,6 +693,10 @@ footer {
   text-align: center;
   font-family: 'JetBrains Mono', monospace;
   max-width: var(--reading-column);
+}
+.chapters-note {
+  margin-top: 0.55rem;
+  line-height: 1.55;
 }
 
 /* ---- KEY POINTS (gutter) ---- */
@@ -781,7 +877,14 @@ def build_html(
     has_speakers = any("speaker" in s for s in segments)
     stylesheet = _STYLESHEET + _SPEAKER_STYLESHEET if has_speakers else _STYLESHEET
     sidebar_html = build_sidebar_nav(chapters) if chapters else ""
+    timeline_html = "" if chapters else build_timeline_nav(segments, sentences_per_para)
     body = build_chapter_body(segments, chapters or [], sentences_per_para)
+    chapters_note = (
+        ""
+        if chapters
+        else '  <div class="chapters-note">Chapters, key points, and pull quotes are available '
+        "when a chapter provider key is configured (Settings &rarr; AI model in the app).</div>\n"
+    )
     # The sidebar scroll script is chapter-gated; the media-sync script is
     # always present (it keys off [data-start] passages, which exist in both
     # paths) and is inert when the file is opened standalone.
@@ -801,10 +904,13 @@ def build_html(
         f"  <h1>{title}</h1>\n"
         f'  <div class="meta">Auto-transcribed with {source}</div>\n'
         "</header>\n<main>\n",
+        timeline_html,
+        "\n" if timeline_html else "",
         body,
         "\n</main>\n"
         "<footer>\n"
-        f"  Transcript generated by {source} &middot; Timestamps are approximate\n"
+        f"  Transcript generated by {source} &middot; Timestamps are approximate\n",
+        chapters_note,
         "</footer>\n</div>\n",
         script_tag,
         "\n</body>\n</html>",

@@ -295,6 +295,56 @@ class TestSyncMetadata:
         assert 'data-start="0.000"' in html
 
 
+class TestKeylessTimeline:
+    def test_no_chapters_gets_coarse_timestamp_landmarks_and_upsell(self) -> None:
+        from podcast_reader.html import build_html
+
+        segments = [
+            {"start": 0.0, "end": 10.0, "text": "Opening one."},
+            {"start": 10.0, "end": 20.0, "text": "Opening two."},
+            {"start": 305.0, "end": 315.0, "text": "Five minutes one."},
+            {"start": 315.0, "end": 325.0, "text": "Five minutes two."},
+            {"start": 605.0, "end": 615.0, "text": "Ten minutes one."},
+            {"start": 615.0, "end": 625.0, "text": "Ten minutes two."},
+            {"start": 905.0, "end": 915.0, "text": "Fifteen minutes one."},
+            {"start": 915.0, "end": 925.0, "text": "Fifteen minutes two."},
+        ]
+
+        html = build_html(segments, title="T", sentences_per_para=1, source="test")
+
+        assert 'aria-label="Transcript timeline"' in html
+        assert 'href="#t-0">00:00:00</a>' in html
+        assert 'href="#t-305000">00:05:05</a>' in html
+        assert 'href="#t-605000">00:10:05</a>' in html
+        assert 'href="#t-905000">00:15:05</a>' in html
+        assert 'id="t-305000" data-start="305.000"' in html
+        assert "Chapters, key points, and pull quotes are available" in html
+        assert "Settings &rarr; AI model in the app" in html
+
+    def test_chaptered_artifact_omits_keyless_navigation_and_upsell(self) -> None:
+        from podcast_reader.html import build_html
+
+        chapters = [
+            {
+                "title": "Opening",
+                "start": 0.0,
+                "end": 20.0,
+                "abstract": "The opening.",
+                "type": "content",
+                "key_points": [],
+            }
+        ]
+        html = build_html(
+            [{"start": 0.0, "end": 20.0, "text": "Opening."}],
+            title="T",
+            chapters=chapters,
+            source="test",
+        )
+
+        assert 'aria-label="Transcript timeline"' not in html
+        assert "Chapters, key points, and pull quotes are available" not in html
+
+
 class TestBuildHtmlIntegration:
     def test_os_light_theme_does_not_override_explicit_dark_theme(self) -> None:
         from podcast_reader.html import build_html
