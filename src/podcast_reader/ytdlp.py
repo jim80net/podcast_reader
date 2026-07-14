@@ -54,9 +54,41 @@ _AUTH_STDERR_MARKERS = (
     "use --cookies",
     "authentication needed",
 )
-_AUTH_HINT = (
-    "Share your login for this site via the browser extension, or import a "
-    "cookies file in Settings."
+
+#: Face-neutral hints for common non-auth download failures. Keep these tied
+#: to stable yt-dlp phrases: the pipeline cannot assume whether the caller is
+#: the terminal CLI or the desktop app.
+_DOWNLOAD_FAILURE_HINTS = (
+    (
+        (
+            "geo-restricted",
+            "geo restriction",
+            "not available in your country",
+            "not available in your region",
+            "blocked in your country",
+        ),
+        "This media is not available in your region.",
+    ),
+    (
+        (
+            "private video",
+            "video is private",
+            "private content",
+            "has been removed",
+            "removed by the uploader",
+            "video unavailable",
+        ),
+        "This media is private or has been removed. Check that it is still available to you.",
+    ),
+    (
+        (
+            "http error 404",
+            "404: not found",
+            "404 not found",
+            "requested url returned error: 404",
+        ),
+        "The media was not found. Check that the URL is correct and still available.",
+    ),
 )
 
 
@@ -75,9 +107,13 @@ def _terminal_error_line(stderr: str) -> str:
 
 
 def _download_hint(code: str, stderr: str) -> str:
-    """Author a short hint for common download failures."""
-    if code == "download_auth_required":
-        return _AUTH_HINT
+    """Return a face-neutral hint for a recognized non-auth failure."""
+    if code != "download_failed":
+        return ""
+    stderr_lower = stderr.lower()
+    for markers, hint in _DOWNLOAD_FAILURE_HINTS:
+        if any(marker in stderr_lower for marker in markers):
+            return hint
     return ""
 
 
@@ -269,8 +305,10 @@ def _run_download(args: list[str]) -> None:
     """Run a yt-dlp download, raising the structured error on a non-zero exit.
 
     Auth-detected failures get the distinct ``download_auth_required`` code
-    with a short hint and the terminal stderr line as the user-facing
-    message (per U2/V6); everything else is ``download_failed``.
+    with a neutral hint and the terminal stderr line as the user-facing
+    message (per U2/V6). The raise site cannot know which face is running, so
+    the CLI and engine author their own auth affordances. Recognized
+    ``download_failed`` classes receive only face-neutral hints.
     """
     result = run_child(args)
     if result.returncode != 0:

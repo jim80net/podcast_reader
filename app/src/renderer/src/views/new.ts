@@ -280,7 +280,14 @@ export function mountNew(container: HTMLElement, store: AppStore): ViewCleanup {
           { class: 'job-error', attrs: { role: 'alert' } },
           el('p', { class: 'job-error-message', text: `${job.error.code}: ${job.error.message}` }),
           job.error.hint !== '' ? el('p', { class: 'job-error-hint', text: job.error.hint }) : '',
-          job.error.detail !== '' ? el('p', { class: 'job-error-detail', text: job.error.detail }) : ''
+          job.error.detail !== ''
+            ? el(
+                'details',
+                { class: 'job-error-detail' },
+                el('summary', { text: 'Technical details' }),
+                el('pre', { class: 'job-error-detail-body', text: job.error.detail })
+              )
+            : ''
         )
       )
     }

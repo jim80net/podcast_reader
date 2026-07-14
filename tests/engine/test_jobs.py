@@ -509,6 +509,37 @@ class TestPersistence:
         assert seen["result"] == _RESULT
         assert [e["kind"] for e in seen["events"]][-1] == "job_done"
 
+    def test_old_failed_job_backfills_empty_error_detail(self, tmp_path: Path) -> None:
+        old_error: dict[str, object] = {
+            "code": "download_failed",
+            "message": "media unavailable",
+            "hint": "Check the URL.",
+        }
+        assert "detail" not in old_error
+        journal: list[dict[str, object]] = [
+            {
+                "id": "j-old-failure",
+                "source": "https://example.com/missing",
+                "title": None,
+                "state": "failed",
+                "error": old_error,
+                "events": [],
+                "result": None,
+                "created_at": 1.0,
+                "updated_at": 1.0,
+            }
+        ]
+        (tmp_path / "jobs.json").write_text(json.dumps(journal))
+
+        store = JobStore(tmp_path, _ok_runner)
+
+        assert store.get("j-old-failure")["error"] == {
+            "code": "download_failed",
+            "message": "media unavailable",
+            "hint": "Check the URL.",
+            "detail": "",
+        }
+
     def test_startup_marks_running_as_interrupted(self, tmp_path: Path) -> None:
         journal: list[dict[str, object]] = [
             {

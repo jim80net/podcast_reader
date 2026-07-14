@@ -749,9 +749,20 @@ a.job-title:hover {
 }
 
 .job-error-detail {
-  margin: 0.15rem 0 0;
+  margin-top: var(--space-2);
   color: var(--muted);
   font-size: var(--text-sm);
+}
+
+.job-error-detail summary {
+  cursor: pointer;
+  width: fit-content;
+}
+
+.job-error-detail-body {
+  margin: var(--space-2) 0 0;
+  font: inherit;
+  overflow-wrap: anywhere;
   white-space: pre-wrap;
 }
 

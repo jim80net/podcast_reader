@@ -429,9 +429,13 @@ class JobStore:
             queued: list[JobRecord] = []
             interrupted = False
             for record in records:
-                # Migrate journals written before per-job overrides/models existed.
+                # Migrate journals written before per-job overrides/models and
+                # structured error detail existed.
                 record.setdefault("overrides", None)
                 record.setdefault("models", None)
+                error = record["error"]
+                if error is not None:
+                    error.setdefault("detail", "")
                 if record["state"] == "running":
                     record["state"] = "interrupted"
                     record["updated_at"] = time.time()

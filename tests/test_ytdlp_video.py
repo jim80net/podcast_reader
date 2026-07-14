@@ -130,7 +130,7 @@ class TestDownloadVideo:
             with pytest.raises(PipelineError) as excinfo:
                 download_video(self.URL, tmp_path)
         assert excinfo.value.code == "download_auth_required"
-        assert "cookies file" in excinfo.value.hint
+        assert excinfo.value.hint == ""
         assert excinfo.value.detail == "ERROR: login required"
 
 
