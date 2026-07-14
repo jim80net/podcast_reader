@@ -65,6 +65,7 @@ export interface JobError {
   code: string
   message: string
   hint: string
+  detail: string
 }
 
 // -- src/podcast_reader/types.py:84 (PipelineResult) --
@@ -89,9 +90,9 @@ export interface JobOverrides {
 // irrelevant for caption sources; the UI derives the transcription source from
 // the step timeline and uses whisper_model only otherwise.
 export interface JobModels {
-  whisper_model: string
-  chapter_provider: string
-  chapter_model: string
+  whisper_model: string | null
+  chapter_provider: string | null
+  chapter_model: string | null
 }
 
 // -- src/podcast_reader/types.py:91 (JobRecord) --

@@ -3,11 +3,8 @@
 A failed download raises a structured ``PipelineError`` (per S7) —
 extractor breakage is an expected, user-explainable failure, not an
 internal error. Authentication-required failures carry the distinct code
-``download_auth_required`` with a neutral, hint-free message (per U2): the
-raise site cannot know which face is running, so the hint is authored by
-the face — the CLI prints the ``YT_DLP_COOKIES`` advice, the engine job
-store maps the extension + cookies-file-import hint. Everything else is
-``download_failed``.
+``download_auth_required`` with a short, reader-modeled hint; the full
+stderr stays in the error detail. Everything else is ``download_failed``.
 
 When the resolved yt-dlp is the *managed* copy (it resides in the
 user-data tools dir), a ``download_failed`` failure triggers one
@@ -57,6 +54,67 @@ _AUTH_STDERR_MARKERS = (
     "use --cookies",
     "authentication needed",
 )
+
+#: Face-neutral hints for common non-auth download failures. Keep these tied
+#: to stable yt-dlp phrases: the pipeline cannot assume whether the caller is
+#: the terminal CLI or the desktop app.
+_DOWNLOAD_FAILURE_HINTS = (
+    (
+        (
+            "geo-restricted",
+            "geo restriction",
+            "not available in your country",
+            "not available in your region",
+            "blocked in your country",
+        ),
+        "This media is not available in your region.",
+    ),
+    (
+        (
+            "private video",
+            "video is private",
+            "private content",
+            "has been removed",
+            "removed by the uploader",
+            "video unavailable",
+        ),
+        "This media is private or has been removed. Check that it is still available to you.",
+    ),
+    (
+        (
+            "http error 404",
+            "404: not found",
+            "404 not found",
+            "requested url returned error: 404",
+        ),
+        "The media was not found. Check that the URL is correct and still available.",
+    ),
+)
+
+
+def _terminal_error_line(stderr: str) -> str:
+    """Return the last yt-dlp ``ERROR:`` line, or a reasonable fallback."""
+    for line in reversed(stderr.strip().splitlines()):
+        line = line.strip()
+        if line.startswith("ERROR:"):
+            message = line.removeprefix("ERROR:").strip()
+            return message if message else line
+    for line in reversed(stderr.strip().splitlines()):
+        line = line.strip()
+        if line:
+            return line
+    return "yt-dlp failed"
+
+
+def _download_hint(code: str, stderr: str) -> str:
+    """Return a face-neutral hint for a recognized non-auth failure."""
+    if code != "download_failed":
+        return ""
+    stderr_lower = stderr.lower()
+    for markers, hint in _DOWNLOAD_FAILURE_HINTS:
+        if any(marker in stderr_lower for marker in markers):
+            return hint
+    return ""
 
 
 def build_download_args(url: str, output_dir: Path, cookies: Path | None = None) -> list[str]:
@@ -246,14 +304,20 @@ def _download_once_video(url: str, output_dir: Path, cookies: Path | None) -> Pa
 def _run_download(args: list[str]) -> None:
     """Run a yt-dlp download, raising the structured error on a non-zero exit.
 
-    Auth-detected failures get the distinct ``download_auth_required`` code with
-    a neutral, hint-free message (per U2) — the face authors its own
-    affordances — anchored on yt-dlp's actual phrasings (per V6); everything
-    else is ``download_failed``.
+    Auth-detected failures get the distinct ``download_auth_required`` code
+    with a neutral hint and the terminal stderr line as the user-facing
+    message (per U2/V6). The raise site cannot know which face is running, so
+    the CLI and engine author their own auth affordances. Recognized
+    ``download_failed`` classes receive only face-neutral hints.
     """
     result = run_child(args)
     if result.returncode != 0:
         stderr = result.stderr.strip()
         auth_required = any(marker in stderr.lower() for marker in _AUTH_STDERR_MARKERS)
         code = "download_auth_required" if auth_required else "download_failed"
-        raise PipelineError(code, f"yt-dlp failed: {stderr}", "")
+        raise PipelineError(
+            code,
+            _terminal_error_line(stderr),
+            _download_hint(code, stderr),
+            stderr,
+        )

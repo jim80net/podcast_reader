@@ -83,7 +83,7 @@ describe('applyPipelineEvent', () => {
         kind: 'job_failed',
         step: null,
         message: 'download failed',
-        data: { job_id: 'j1', code: 'download', hint: 'check the URL' }
+        data: { job_id: 'j1', code: 'download', hint: 'check the URL', detail: 'stderr...' }
       })
     )
     const record = next.get('j1')
@@ -91,7 +91,8 @@ describe('applyPipelineEvent', () => {
     expect(record?.error).toEqual({
       code: 'download',
       message: 'download failed',
-      hint: 'check the URL'
+      hint: 'check the URL',
+      detail: 'stderr...'
     })
   })
 

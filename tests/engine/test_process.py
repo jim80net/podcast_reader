@@ -10,7 +10,7 @@ import sys
 import threading
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 from unittest.mock import MagicMock, patch
 
 import httpx
@@ -45,6 +45,8 @@ if TYPE_CHECKING:
 
     import uvicorn
 
+    from podcast_reader.engine.media import MediaManager
+    from podcast_reader.engine.pack_manager import PackManager
     from podcast_reader.engine.settings import EngineState
 
 
@@ -66,7 +68,8 @@ def _noop(event: object) -> None:
 
 def _fake_run_pipeline(request: object, on_event: object) -> PipelineResult:
     """Stand-in pipeline: writes minimal artifacts into the staging dir."""
-    out = Path(request["output_dir"])  # type: ignore[index]
+    request_dict = cast("dict[str, object]", request)
+    out = Path(cast("str", request_dict["output_dir"]))
     (out / "ep.json").write_text('{"segments": []}')
     (out / "ep.html").write_text("<html>done</html>")
     return PipelineResult(
@@ -348,6 +351,45 @@ class TestPipelineRunner:
         assert request["chapter_api_key"] == "sk-ant-env"
         assert request["model"] is None  # chapter_model "" -> provider default
 
+    def test_youtube_caption_jobs_do_not_claim_a_whisper_model(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("PODCAST_READER_DATA_DIR", str(tmp_path))
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-env")
+
+        with patch(
+            "podcast_reader.engine.process.run_pipeline", side_effect=_fake_run_pipeline
+        ) as mock_run:
+            runner = make_pipeline_runner(tmp_path)
+            record = new_job_record(
+                job_id="j1", source="https://www.youtube.com/watch?v=abc123", title=None
+            )
+            runner(record, _noop)
+
+        assert record["models"] == {
+            "whisper_model": None,
+            "chapter_provider": "anthropic",
+            "chapter_model": None,
+        }
+        assert mock_run.call_args.args[0]["chapter_api_key"] == "sk-ant-env"
+
+    def test_jobs_without_chapter_keys_record_null_chapter_models(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("PODCAST_READER_DATA_DIR", str(tmp_path))
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+        with patch("podcast_reader.engine.process.run_pipeline", side_effect=_fake_run_pipeline):
+            runner = make_pipeline_runner(tmp_path)
+            record = new_job_record(job_id="j1", source="https://example.com/e", title=None)
+            runner(record, _noop)
+
+        assert record["models"] == {
+            "whisper_model": "large-v3",
+            "chapter_provider": None,
+            "chapter_model": None,
+        }
+
     def test_runner_provider_comes_from_settings_snapshot(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -440,15 +482,15 @@ class TestServeKeyStoreWiring:
 
         def spy_create(
             data_dir: Path,
-            store: object,
+            store: JobStore,
             *,
             key_store: dict[str, str] | None = None,
             on_shutdown: Callable[[], None] | None = None,
-            pack_manager: object = None,
-            media_manager: object = None,
+            pack_manager: PackManager | None = None,
+            media_manager: MediaManager | None = None,
         ) -> object:
             captured["app_store"] = key_store
-            return real_create(  # type: ignore[arg-type]
+            return real_create(
                 data_dir,
                 store,
                 key_store=key_store,

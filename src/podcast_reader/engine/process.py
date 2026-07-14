@@ -47,7 +47,7 @@ from podcast_reader.engine.settings import (
     save_engine_state,
     token_fingerprint,
 )
-from podcast_reader.pipeline import PipelineError, run_pipeline
+from podcast_reader.pipeline import InputType, PipelineError, classify_input, run_pipeline
 from podcast_reader.providers import PROVIDERS
 from podcast_reader.tools import (
     kill_children,
@@ -198,13 +198,15 @@ def make_pipeline_runner(base: Path, key_store: dict[str, str] | None = None) ->
         jar = resolve_jar_for_source(base, source)
         provider = overrides.get("chapter_provider") or settings["chapter_provider"]
         whisper_model = overrides.get("whisper_model") or settings["whisper_model"]
-        # Record the resolved models on the working record; _run_job persists
-        # them so the UI shows what this job actually ran with (per source kind:
-        # captions sources ignore the whisper model — the UI derives that).
+        chapter_api_key = _resolve_chapter_key(provider, keys)
+        # Record only the model claims that actually applied to this job. The
+        # app renders null fields as absent rows, so skipped steps do not leave
+        # behind stale provider/model strings.
+        input_type = classify_input(source)
         record["models"] = JobModels(
-            whisper_model=whisper_model,
-            chapter_provider=provider,
-            chapter_model=chapter_model or "",
+            whisper_model=None if input_type == InputType.YOUTUBE else whisper_model,
+            chapter_provider=provider if chapter_api_key else None,
+            chapter_model=(chapter_model if chapter_api_key else None) or None,
         )
         request = PipelineRequest(
             source=record["source"],
@@ -218,7 +220,7 @@ def make_pipeline_runner(base: Path, key_store: dict[str, str] | None = None) ->
             sentences=settings["sentences"],
             cookies=str(jar) if jar is not None else os.environ.get("YT_DLP_COOKIES"),
             chapter_provider=provider,
-            chapter_api_key=_resolve_chapter_key(provider, keys),
+            chapter_api_key=chapter_api_key,
             custom_provider_url=overrides.get("custom_provider_url")
             or settings["custom_provider_url"],
             diarize=settings["diarize"],

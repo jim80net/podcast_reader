@@ -66,6 +66,7 @@ function nextError(record: JobRecord, event: PipelineEvent): JobRecord['error'] 
   return {
     code: typeof event.data['code'] === 'string' ? event.data['code'] : '',
     message: event.message,
-    hint: typeof event.data['hint'] === 'string' ? event.data['hint'] : ''
+    hint: typeof event.data['hint'] === 'string' ? event.data['hint'] : '',
+    detail: typeof event.data['detail'] === 'string' ? event.data['detail'] : ''
   }
 }

@@ -143,7 +143,12 @@ describe('evaluatePoll (stateless alarm wake)', () => {
 
   it('carries the failure message into the notification', () => {
     const failed = record('j1', 'failed', {
-      error: { code: 'download_auth_required', message: 'needs login', hint: 'share it' }
+      error: {
+        code: 'download_auth_required',
+        message: 'needs login',
+        hint: 'share it',
+        detail: 'ERROR: needs login'
+      }
     })
     const outcome = evaluatePoll([tracked('j1')], new Map<string, PolledRecord>([['j1', failed]]))
     expect(outcome.notifications[0]).toEqual({
