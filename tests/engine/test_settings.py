@@ -135,6 +135,7 @@ class TestUserSettings:
         assert settings["library_dir"] == str(tmp_path / "library")
         # diarization-worker spec: disabled by default.
         assert settings["diarize"] is False
+        assert settings["caption_cleanup"] is False
         # media-playback spec: lazy media cache cap, 5 GiB default.
         assert settings["media_cache_max_bytes"] == 5 * 1024**3
 
@@ -187,6 +188,7 @@ class TestUserSettings:
         settings = load_settings(tmp_path)
 
         assert settings["diarize"] is False
+        assert settings["caption_cleanup"] is False
         assert settings["whisper_model"] == "medium"  # file values still win
 
     def test_pre_media_cache_file_upgrades_to_default(self, tmp_path: Path) -> None:

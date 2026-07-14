@@ -35,6 +35,7 @@ def _request(*, input_arg: str, output_dir: Path) -> PipelineRequest:
         sentences=5,
         cookies=None,
         diarize=False,
+        caption_cleanup=False,
     )
 
 

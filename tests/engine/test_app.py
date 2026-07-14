@@ -773,6 +773,24 @@ class TestSettings:
         assert put.status_code == 200
         assert load_settings(tmp_path)["diarize"] is True
 
+    def test_caption_cleanup_is_opt_in_and_old_puts_preserve_it(
+        self, engine: _Engine, tmp_path: Path
+    ) -> None:
+        current = engine.client.get("/v1/settings", headers=engine.headers).json()
+        assert current["caption_cleanup"] is False
+
+        current["caption_cleanup"] = True
+        assert (
+            engine.client.put("/v1/settings", json=current, headers=engine.headers).status_code
+            == 200
+        )
+        del current["caption_cleanup"]
+        assert (
+            engine.client.put("/v1/settings", json=current, headers=engine.headers).status_code
+            == 200
+        )
+        assert load_settings(tmp_path)["caption_cleanup"] is True
+
     def test_put_settings_unknown_provider_400(self, engine: _Engine, tmp_path: Path) -> None:
         """M1: an unknown chapter_provider is rejected at PUT time (mirrors
         PUT /v1/keys) instead of surfacing later as an opaque job warning."""

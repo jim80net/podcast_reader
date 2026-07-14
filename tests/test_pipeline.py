@@ -77,6 +77,7 @@ def _request(
     chapter_provider: str = "anthropic",
     chapter_api_key: str | None = None,
     diarize: bool = False,
+    caption_cleanup: bool = False,
 ) -> PipelineRequest:
     """Build a PipelineRequest with test defaults."""
     return PipelineRequest(
@@ -94,6 +95,7 @@ def _request(
         chapter_api_key=chapter_api_key,
         custom_provider_url="",
         diarize=diarize,
+        caption_cleanup=caption_cleanup,
     )
 
 
@@ -681,6 +683,47 @@ class TestRunPipelineChapters:
 
         # build_html should receive the chapters as keyword arg
         assert mock_build_html.call_args.kwargs["chapters"] == _SAMPLE_CHAPTERS
+
+    @patch("podcast_reader.pipeline._wsl_path", return_value=None)
+    @patch("podcast_reader.pipeline.build_html", return_value="<html></html>")
+    @patch("podcast_reader.pipeline.snap_chapters_to_segments", return_value=_SAMPLE_CHAPTERS)
+    @patch(
+        "podcast_reader.pipeline.generate_chapters_with_cleanup",
+        return_value=(
+            _SAMPLE_CHAPTERS,
+            [{"segment_start": 5.0, "original": "Goodbye", "replacement": "GoodBye"}],
+        ),
+    )
+    @patch("podcast_reader.pipeline.format_transcript", return_value="[0.0] Hello.")
+    @patch("podcast_reader.pipeline.fetch_transcript")
+    @patch("podcast_reader.pipeline.snippets_to_whisper_segments", return_value=_SAMPLE_SEGMENTS)
+    def test_opt_in_cleanup_changes_render_copy_and_preserves_raw_captions(
+        self,
+        _mock_snippets: MagicMock,
+        _mock_fetch: MagicMock,
+        _mock_format: MagicMock,
+        mock_generate: MagicMock,
+        _mock_snap: MagicMock,
+        mock_build_html: MagicMock,
+        _mock_wsl: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        run_pipeline(
+            _request(
+                input_arg=_YT_URL,
+                output_dir=tmp_path,
+                chapter_api_key="test-key",
+                caption_cleanup=True,
+            ),
+            on_event=lambda e: None,
+        )
+
+        mock_generate.assert_called_once()
+        rendered_segments = mock_build_html.call_args.args[0]
+        assert rendered_segments[1]["text"] == "GoodBye world."
+        assert mock_build_html.call_args.kwargs["caption_cleanup"] is True
+        assert json.loads((tmp_path / "abc123XYZqq.json").read_text()) == _SAMPLE_SEGMENTS
+        assert (tmp_path / "abc123XYZqq_caption_cleanup.json").exists()
 
     @patch("podcast_reader.pipeline._wsl_path", return_value=None)
     @patch("podcast_reader.pipeline.build_html", return_value="<html></html>")

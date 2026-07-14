@@ -13,6 +13,7 @@ const settings: EngineSettings = {
   chapter_provider: 'anthropic',
   custom_provider_url: '',
   diarize: false,
+  caption_cleanup: false,
   media_cache_max_bytes: 5 * 1024 ** 3
 }
 
@@ -31,7 +32,8 @@ describe('formFromSettings', () => {
       library_dir: '/home/jim/PodcastReader/library',
       chapter_model: '',
       chapter_provider: 'anthropic',
-      custom_provider_url: ''
+      custom_provider_url: '',
+      caption_cleanup: false
     })
   })
 })
@@ -48,7 +50,8 @@ describe('toSettingsUpdate', () => {
         library_dir: '/home/jim/PodcastReader/library',
         chapter_model: '',
         chapter_provider: 'anthropic',
-        custom_provider_url: ''
+        custom_provider_url: '',
+        caption_cleanup: false
       }
     })
   })

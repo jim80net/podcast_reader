@@ -17,6 +17,7 @@ export interface SettingsFormValues {
   chapter_model: string
   chapter_provider: string
   custom_provider_url: string
+  caption_cleanup: boolean
 }
 
 export type SettingsUpdateResult =
@@ -32,7 +33,8 @@ export function formFromSettings(settings: EngineSettings): SettingsFormValues {
     library_dir: settings.library_dir,
     chapter_model: settings.chapter_model,
     chapter_provider: settings.chapter_provider,
-    custom_provider_url: settings.custom_provider_url
+    custom_provider_url: settings.custom_provider_url,
+    caption_cleanup: settings.caption_cleanup
   }
 }
 
@@ -51,7 +53,8 @@ export function toSettingsUpdate(values: SettingsFormValues): SettingsUpdateResu
       library_dir: values.library_dir.trim(),
       chapter_model: values.chapter_model.trim(),
       chapter_provider: values.chapter_provider,
-      custom_provider_url: values.custom_provider_url.trim()
+      custom_provider_url: values.custom_provider_url.trim(),
+      caption_cleanup: values.caption_cleanup
     }
   }
 }

@@ -18,6 +18,7 @@ def _seed(staging: Path) -> None:
     staging.mkdir(parents=True, exist_ok=True)
     (staging / "ep.json").write_text("{}")  # whisper transcript
     (staging / "ep_chapters.json").write_text("[]")  # chapters
+    (staging / "ep_caption_cleanup.json").write_text("[]")  # correction suggestions
     (staging / "ep.html").write_text("<html></html>")  # render
     (staging / "ep.mp3").write_text("audio")  # downloaded source audio
 
@@ -31,6 +32,7 @@ class TestClearRerunArtifacts:
         # Re-transcribe: every JSON (whisper + chapters) and the HTML go...
         assert not (tmp_path / "ep.json").exists()
         assert not (tmp_path / "ep_chapters.json").exists()
+        assert not (tmp_path / "ep_caption_cleanup.json").exists()
         assert not (tmp_path / "ep.html").exists()
         # ...but the downloaded audio is kept (no needless re-download).
         assert (tmp_path / "ep.mp3").exists()
@@ -53,12 +55,19 @@ class TestClearRerunArtifacts:
         assert (tmp_path / "ep.json").exists()
         assert (tmp_path / "ep.mp3").exists()
         assert not (tmp_path / "ep_chapters.json").exists()
+        assert not (tmp_path / "ep_caption_cleanup.json").exists()
         assert not (tmp_path / "ep.html").exists()
 
     def test_no_overrides_clears_nothing(self, tmp_path: Path) -> None:
         _seed(tmp_path)
         _clear_rerun_artifacts(tmp_path, {})
-        for name in ("ep.json", "ep_chapters.json", "ep.html", "ep.mp3"):
+        for name in (
+            "ep.json",
+            "ep_chapters.json",
+            "ep_caption_cleanup.json",
+            "ep.html",
+            "ep.mp3",
+        ):
             assert (tmp_path / name).exists()
 
     def test_whisper_takes_precedence_over_chapter_fields(self, tmp_path: Path) -> None:

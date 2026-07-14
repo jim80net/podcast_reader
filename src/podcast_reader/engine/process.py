@@ -224,6 +224,7 @@ def make_pipeline_runner(base: Path, key_store: dict[str, str] | None = None) ->
             custom_provider_url=overrides.get("custom_provider_url")
             or settings["custom_provider_url"],
             diarize=settings["diarize"],
+            caption_cleanup=settings["caption_cleanup"],
         )
         staged = run_pipeline(request, on_event)
         result = _commit_artifacts(staged, library.entry_dir(library_dir, source_id))
@@ -249,9 +250,10 @@ def _clear_rerun_artifacts(staging: Path, overrides: JobOverrides) -> None:
     A ``whisper_model`` change invalidates the transcript: drop every ``*.json``
     (whisper output + chapters) and the ``*.html`` render, forcing a
     re-transcribe — but keep any downloaded source audio so it isn't re-fetched.
-    A chapter-only change keeps the whisper JSON and drops only ``*_chapters.json``
-    + ``*.html`` (re-chapter + re-render, no re-transcribe). With no overrides,
-    nothing is cleared (a plain re-submission still reuses the cache).
+    A chapter-only change keeps the whisper JSON and drops ``*_chapters.json``,
+    ``*_caption_cleanup.json``, and ``*.html`` (re-chapter + re-render, no
+    re-transcribe). With no overrides, nothing is cleared (a plain
+    re-submission still reuses the cache).
     """
     if overrides.get("whisper_model"):
         _unlink_all(staging.glob("*.json"))
@@ -260,6 +262,7 @@ def _clear_rerun_artifacts(staging: Path, overrides: JobOverrides) -> None:
         overrides.get(k) for k in ("chapter_provider", "chapter_model", "custom_provider_url")
     ):
         _unlink_all(staging.glob("*_chapters.json"))
+        _unlink_all(staging.glob("*_caption_cleanup.json"))
         _unlink_all(staging.glob("*.html"))
 
 
