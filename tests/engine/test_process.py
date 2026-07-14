@@ -19,8 +19,6 @@ import pytest
 from podcast_reader.engine.app import create_app
 from podcast_reader.engine.cookies import jar_path, store_jar
 from podcast_reader.engine.jobs import JobStore
-from podcast_reader.engine.media import MediaManager
-from podcast_reader.engine.pack_manager import PackManager
 from podcast_reader.engine.library import entry_dir, list_entries, source_identity
 from podcast_reader.engine.process import (
     READY_SENTINEL,
@@ -47,6 +45,8 @@ if TYPE_CHECKING:
 
     import uvicorn
 
+    from podcast_reader.engine.media import MediaManager
+    from podcast_reader.engine.pack_manager import PackManager
     from podcast_reader.engine.settings import EngineState
 
 
@@ -68,8 +68,8 @@ def _noop(event: object) -> None:
 
 def _fake_run_pipeline(request: object, on_event: object) -> PipelineResult:
     """Stand-in pipeline: writes minimal artifacts into the staging dir."""
-    request_dict = cast(dict[str, object], request)
-    out = Path(cast(str, request_dict["output_dir"]))
+    request_dict = cast("dict[str, object]", request)
+    out = Path(cast("str", request_dict["output_dir"]))
     (out / "ep.json").write_text('{"segments": []}')
     (out / "ep.html").write_text("<html>done</html>")
     return PipelineResult(

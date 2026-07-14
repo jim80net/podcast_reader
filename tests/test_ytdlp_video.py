@@ -117,9 +117,10 @@ class TestDownloadVideo:
             mock_run.return_value = subprocess.CompletedProcess(
                 args=[], returncode=1, stdout="", stderr="ERROR: unable to extract"
             )
-            with pytest.raises(PipelineError, match="yt-dlp failed") as excinfo:
+            with pytest.raises(PipelineError, match="unable to extract") as excinfo:
                 download_video(self.URL, tmp_path)
         assert excinfo.value.code == "download_failed"
+        assert excinfo.value.detail == "ERROR: unable to extract"
 
     def test_auth_failure_raises_download_auth_required(self, tmp_path: Path) -> None:
         with patch("podcast_reader.ytdlp.run_child") as mock_run:
@@ -129,7 +130,8 @@ class TestDownloadVideo:
             with pytest.raises(PipelineError) as excinfo:
                 download_video(self.URL, tmp_path)
         assert excinfo.value.code == "download_auth_required"
-        assert excinfo.value.hint == ""
+        assert "cookies file" in excinfo.value.hint
+        assert excinfo.value.detail == "ERROR: login required"
 
 
 class TestDownloadVideoSelfHeal:
