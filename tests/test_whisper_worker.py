@@ -312,6 +312,21 @@ class TestMain:
         assert instance.device == "cpu"
         assert instance.compute_type == "int8"
 
+    def test_cuda_runtime_check_mode_needs_no_audio_or_model(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        monkeypatch.setattr(sys, "argv", ["whisper-worker", "--check-cuda-runtime"])
+        monkeypatch.setattr(whisper_worker, "_prepare_windows_dll_path", lambda: None)
+        checked: list[bool] = []
+        monkeypatch.setattr(
+            whisper_worker, "_check_cuda_runtime_loadable", lambda: checked.append(True)
+        )
+
+        whisper_worker.main()
+
+        assert checked == [True]
+        assert capsys.readouterr().out.strip() == "cuda-runtime ready"
+
 
 class TestWindowsDllPath:
     def test_noop_on_posix(self) -> None:
@@ -376,18 +391,23 @@ class TestCudaPreflight:
     def test_windows_cuda_loads_roots_before_preserving_gpu_settings(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        loaded: list[str] = []
-        monkeypatch.setattr(whisper_worker.ctypes, "CDLL", loaded.append)
+        loaded: list[tuple[str, int]] = []
+
+        def load(name: str, *, winmode: int) -> None:
+            loaded.append((name, winmode))
+
+        monkeypatch.setattr(whisper_worker.ctypes, "CDLL", load)
 
         result = whisper_worker._preflight_cuda("cuda", "float16", platform="win32")
 
         assert result == ("cuda", "float16")
-        assert loaded == ["cublas64_12.dll", "cudnn64_9.dll"]
+        assert loaded == [("cublas64_12.dll", 0), ("cudnn64_9.dll", 0)]
 
     def test_windows_cuda_load_failure_warns_without_raw_dll_and_uses_cpu(
         self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        def fail(_name: str) -> None:
+        def fail(_name: str, *, winmode: int) -> None:
+            assert winmode == 0
             raise OSError("Library cublas64_12.dll is not found or cannot be loaded")
 
         monkeypatch.setattr(whisper_worker.ctypes, "CDLL", fail)

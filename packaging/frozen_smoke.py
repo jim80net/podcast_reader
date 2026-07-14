@@ -15,8 +15,9 @@ Modes:
   --boot-only        handshake + version assert only (the Q1 flake fallback)
   --pack cuda-runtime --no-transcribe
                      the S9 workflow_dispatch job: install the CUDA pack on a
-                     stock Windows runner and verify wheel extraction +
-                     manifest contents (no GPU needed)
+                     stock Windows runner, verify wheel extraction + manifest
+                     contents, and prove legacy loader resolution through the
+                     frozen worker (no GPU needed)
 
 Exit code 0 on success; non-zero with a reason on stderr otherwise.
 """
@@ -209,6 +210,29 @@ def assert_pack_manifest(engine: Engine, pack_id: str) -> None:
         print("complete cuBLAS + cuDNN 9 DLL set present")
 
 
+def assert_cuda_loader(engine_binary: Path, data_dir: Path) -> None:
+    """The frozen worker resolves installed CUDA DLLs using legacy semantics."""
+    suffix = ".exe" if engine_binary.suffix.lower() == ".exe" else ""
+    worker = engine_binary.parent / f"whisper-worker{suffix}"
+    if not worker.is_file():
+        raise SmokeError(f"frozen whisper worker not found: {worker}")
+    result = subprocess.run(
+        [str(worker), "--check-cuda-runtime"],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "PODCAST_READER_DATA_DIR": str(data_dir)},
+        check=False,
+    )
+    if result.returncode != 0:
+        raise SmokeError(
+            "frozen worker could not load the CUDA runtime through legacy DLL search:\n"
+            + result.stderr.strip()
+        )
+    if result.stdout.strip() != "cuda-runtime ready":
+        raise SmokeError(f"unexpected CUDA loader check output: {result.stdout!r}")
+    print("frozen worker resolved cuBLAS + cuDNN through legacy DLL search")
+
+
 def transcribe_fixture(engine: Engine, fixture: Path, model: str, timeout: float) -> None:
     settings = engine.expect("GET", "/v1/settings")
     settings["whisper_model"] = model
@@ -262,6 +286,8 @@ def main(argv: list[str] | None = None) -> None:
         if not args.boot_only:
             install_pack(engine, args.pack, args.timeout)
             assert_pack_manifest(engine, args.pack)
+            if args.pack == "cuda-runtime":
+                assert_cuda_loader(args.engine.resolve(), data_dir)
             if not args.no_transcribe:
                 model = args.pack.removeprefix("model-")
                 transcribe_fixture(engine, args.fixture, model, args.timeout)

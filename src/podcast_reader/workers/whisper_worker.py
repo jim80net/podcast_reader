@@ -147,16 +147,26 @@ def main() -> None:
         prog="whisper-worker",
         description="Transcribe one audio file to whisper-ctranslate2-shaped JSON.",
     )
-    parser.add_argument("audio", type=Path)
-    parser.add_argument("--model", required=True, help="model name or local model directory")
+    parser.add_argument("audio", type=Path, nargs="?")
+    parser.add_argument("--model", help="model name or local model directory")
     parser.add_argument("--device", default="cpu", choices=("cpu", "cuda"))
     parser.add_argument("--compute-type", default="int8")
     parser.add_argument("--language", default=None)
     parser.add_argument("--output-dir", type=Path, default=Path.cwd())
+    parser.add_argument("--check-cuda-runtime", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
+
+    if not args.check_cuda_runtime and (args.audio is None or args.model is None):
+        parser.error("audio and --model are required for transcription")
 
     dll_directory = _prepare_windows_dll_path()  # before faster_whisper/ctypes loads
     try:
+        if args.check_cuda_runtime:
+            _check_cuda_runtime_loadable()
+            print("cuda-runtime ready", flush=True)
+            return
+        assert args.audio is not None
+        assert args.model is not None
         device, compute_type = _preflight_cuda(args.device, args.compute_type)
         json_path = transcribe_audio(
             args.audio,
@@ -204,12 +214,19 @@ def _preflight_cuda(
     if device != "cuda" or platform != "win32":
         return device, compute_type
     try:
-        ctypes.CDLL("cublas64_12.dll")
-        ctypes.CDLL("cudnn64_9.dll")
+        _check_cuda_runtime_loadable(platform)
     except OSError:
         print(f"{_CUDA_WARNING_PREFIX}{_CUDA_WARNING_MESSAGE}", file=sys.stderr, flush=True)
         return "cpu", "int8"
     return device, compute_type
+
+
+def _check_cuda_runtime_loadable(platform: str = sys.platform) -> None:
+    """Load CUDA roots with ctranslate2's legacy ``LoadLibraryA`` semantics."""
+    if platform != "win32":
+        raise RuntimeError("CUDA runtime loading is supported only on Windows")
+    for name in ("cublas64_12.dll", "cudnn64_9.dll"):
+        ctypes.CDLL(name, winmode=0)
 
 
 if __name__ == "__main__":
