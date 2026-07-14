@@ -539,6 +539,90 @@ class TestSidebarMarginGating:
         assert "margin-left" not in unscoped
 
 
+class TestEscaping:
+    """Issue #56: transcript- and provider-derived text is escaped at every
+    interpolation site; markup the renderer authors itself is unaffected."""
+
+    def test_hostile_segment_text_renders_as_text_not_markup(self) -> None:
+        from podcast_reader.html import build_html
+
+        segs = [
+            {
+                "start": 0.0,
+                "end": 2.0,
+                "text": "<script>alert('x')</script> & <i>tags</i> stay text",
+            }
+        ]
+        out = build_html(segs, title="T <unsafe> & Title", source="test")
+        # The artifact's own <script> blocks (sync) are the renderer's; the
+        # transcript's script tag must never appear unescaped.
+        assert "<script>alert" not in out
+        assert (
+            "&lt;script&gt;alert('x')&lt;/script&gt; &amp; &lt;i&gt;tags&lt;/i&gt; stay text" in out
+        )
+        assert "<title>T &lt;unsafe&gt; &amp; Title</title>" in out
+        assert "<h1>T &lt;unsafe&gt; &amp; Title</h1>" in out
+
+    def test_rail_label_survives_hostile_text(self) -> None:
+        from podcast_reader.html import build_html
+
+        segs = [
+            {"start": 0.0, "end": 10.0, "text": "Opening one."},
+            {"start": 10.0, "end": 20.0, "text": "Opening two."},
+            {"start": 305.0, "end": 315.0, "text": "Five <b>minutes</b> & one."},
+            {"start": 315.0, "end": 325.0, "text": "Ok."},
+            {"start": 605.0, "end": 615.0, "text": "Ten minutes one."},
+            {"start": 615.0, "end": 625.0, "text": "Ten minutes two."},
+        ]
+        out = build_html(segs, title="T", sentences_per_para=1, source="test")
+        assert '<span class="timeline-snippet">Five &lt;b&gt;minutes&lt;/b&gt; &amp; one.' in out
+        assert "<b>minutes</b>" not in out
+
+    def test_raw_caption_entities_and_quotes_render_literally(self) -> None:
+        from podcast_reader.html import build_html
+
+        # Some caption tracks carry raw entities in the text; the reader must
+        # see the literal characters the source contained ("&amp;" displays
+        # as "&amp;", not "&"). Quotes stay untouched: quote=False, inert in
+        # text nodes, and no generated attribute carries transcript text.
+        segs = [{"start": 0.0, "end": 2.0, "text": 'She said "don\'t" &amp; smiled.'}]
+        out = build_html(segs, title="T", source="test")
+        assert 'She said "don\'t" &amp;amp; smiled.' in out
+
+    def test_hostile_speaker_label_is_escaped(self) -> None:
+        from podcast_reader.html import build_html
+
+        segs = [{"start": 0.0, "end": 2.0, "text": "Hi.", "speaker": "<img src=x>"}]
+        out = build_html(segs, title="T", source="test")
+        assert '<span class="speaker">&lt;img src=x&gt;</span>' in out
+        assert "<img" not in out
+
+    def test_hostile_chapter_fields_are_escaped_and_pull_quote_still_bolds(self) -> None:
+        from podcast_reader.html import build_html
+
+        segs = [{"start": 0.0, "end": 10.0, "text": "He said <hi> & bye now."}]
+        chapters = [
+            {
+                "title": "Ch & <Title>",
+                "start": 0.0,
+                "end": 10.0,
+                "abstract": "A & <b>bstract</b>",
+                "type": "content",
+                "key_points": ["P & <li>oint"],
+                "pull_quote": "<hi> & bye",
+                "pull_quote_start": 0.0,
+            }
+        ]
+        out = build_html(segs, title="T", chapters=chapters, source="test")
+        # Chapter title (h2 + sidebar nav), abstract, key point all inert.
+        assert out.count("Ch &amp; &lt;Title&gt;") == 2
+        assert "A &amp; &lt;b&gt;bstract&lt;/b&gt;" in out
+        assert "<li>P &amp; &lt;li&gt;oint</li>" in out
+        # The pull quote still bolds — matched raw, wrapped escaped.
+        assert "<strong>&lt;hi&gt; &amp; bye</strong>" in out
+        assert "<b>bstract" not in out
+
+
 class TestBuildHtmlIntegration:
     def test_cleanup_label_is_separate_from_source_provenance(self) -> None:
         from podcast_reader.html import build_html
