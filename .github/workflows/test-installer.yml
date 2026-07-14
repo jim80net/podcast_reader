@@ -78,18 +78,16 @@ jobs:
           INSTALLER=$(ls app/dist/*.exe)
           echo "installer: $INSTALLER"
           powershell -Command "Start-Process -FilePath '$(cygpath -w "$INSTALLER")' -ArgumentList '/S' -Wait"
-          # electron-builder NSIS per-user default:
-          # %LOCALAPPDATA%\Programs\<productName>. Poll rather than trust
-          # process exit — NSIS finishes asynchronously in some shells.
-          INSTALLED="$LOCALAPPDATA/Programs/Podcast Reader/Podcast Reader.exe"
+          # electron-builder NSIS per-user layout (verified from run
+          # 29316962855's own listing): %LOCALAPPDATA%\Programs\<package name>
+          # containing "<productName>.exe". Poll rather than trust process
+          # exit — NSIS finishes asynchronously in some shells.
+          INSTALLED="$LOCALAPPDATA/Programs/podcast-reader-app/Podcast Reader.exe"
           for i in $(seq 1 60); do
             [ -f "$INSTALLED" ] && break
-            # fallback: the package-name directory variant
-            ALT="$LOCALAPPDATA/Programs/podcast-reader/Podcast Reader.exe"
-            [ -f "$ALT" ] && INSTALLED="$ALT" && break
             sleep 2
           done
-          [ -f "$INSTALLED" ] || { echo "installed exe not found"; ls -R "$LOCALAPPDATA/Programs" || true; exit 1; }
+          [ -f "$INSTALLED" ] || { echo "installed exe not found"; ls "$LOCALAPPDATA/Programs" || true; exit 1; }
           echo "INSTALLED_EXE=$INSTALLED" >> "$GITHUB_ENV"
           echo "INSTALL_DIR=$(dirname "$INSTALLED")" >> "$GITHUB_ENV"
       - name: Walk the installed app (engine handshake + screenshots)
