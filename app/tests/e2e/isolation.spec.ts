@@ -64,6 +64,7 @@ test('engine bearer token is unreachable from the renderer', async ({ harness })
   expect(probe.apiKeys).toEqual(
     [
       'getEngineStatus',
+      'getPrivateWebStatus',
       'submitJob',
       'listJobs',
       'getJob',
@@ -91,8 +92,10 @@ test('engine bearer token is unreachable from the renderer', async ({ harness })
       'getUpdateStatus',
       'installUpdate',
       'engineRestart',
+      'setPrivateWebEnabled',
       'onEngineStatus',
       'onPipelineEvent',
+      'onPrivateWebStatus',
       'onJobsHydrated',
       'onProtocolRequest',
       'onUpdateStatus'
