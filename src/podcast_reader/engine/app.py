@@ -17,6 +17,7 @@ import re
 import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
+from urllib.parse import urlsplit
 
 import httpx
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, Response, status
@@ -57,6 +58,7 @@ from podcast_reader.engine.settings import (
     save_settings,
     token_fingerprint,
 )
+from podcast_reader.engine.web_session import SESSION_LIFETIME_S, WebSessionSigner
 from podcast_reader.providers import (
     build_provider_registry,
     canonicalize_custom_providers,
@@ -91,6 +93,81 @@ _SOURCE_ID_RE = re.compile(r"^[0-9a-f]{64}$")
 #: so a path like /v1/embed/ or /v1/embed/a/b never bypasses auth — minimizing
 #: the unauthenticated surface as routes are added under the prefix.
 _EMBED_PATH = re.compile(r"^/v1/embed/[A-Za-z0-9_-]{1,32}$")
+
+_WEB_SESSION_COOKIE = "__Secure-podcast_reader_web"
+_WEB_SESSION_GENERATION = 1
+_WEB_MUTATIONS = frozenset(
+    {
+        ("POST", "/web/api/pair/claim"),
+        ("POST", "/web/api/session"),
+        ("POST", "/web/api/logout"),
+    }
+)
+_WEB_BEARER_EXEMPT = frozenset(
+    {
+        ("POST", "/web/api/pair/claim"),
+        ("POST", "/web/api/logout"),
+    }
+)
+
+
+def _https_authority(value: str, *, origin: bool) -> tuple[str, int] | None:
+    """Normalize an HTTPS Origin or request Host to ``(hostname, port)``."""
+    try:
+        parsed = urlsplit(value if origin else f"//{value}")
+        port = parsed.port
+    except ValueError:
+        return None
+    if origin:
+        if parsed.scheme.lower() != "https" or parsed.path or parsed.query or parsed.fragment:
+            return None
+    elif parsed.scheme or parsed.path or parsed.query or parsed.fragment:
+        return None
+    if parsed.username is not None or parsed.password is not None or parsed.hostname is None:
+        return None
+    return parsed.hostname.lower(), port if port is not None else 443
+
+
+def _trusted_web_mutation(request: Request) -> bool:
+    """Fail-closed header gate for browser claims and session mutations."""
+    media_type = request.headers.get("content-type", "").partition(";")[0].strip().lower()
+    raw_content_length = request.headers.get("content-length", "").strip()
+    content_length = (
+        int(raw_content_length)
+        if 0 < len(raw_content_length) <= 10
+        and raw_content_length.isascii()
+        and raw_content_length.isdigit()
+        else None
+    )
+    origin = _https_authority(request.headers.get("origin", ""), origin=True)
+    host = _https_authority(request.headers.get("host", ""), origin=False)
+    return (
+        media_type == "application/json"
+        and content_length is not None
+        and 0 <= content_length <= MAX_CLAIM_BODY_BYTES
+        and request.headers.get("sec-fetch-site", "").lower() == "same-origin"
+        and origin is not None
+        and origin == host
+    )
+
+
+def _web_rejection() -> JSONResponse:
+    """Return the one response used for every browser request gate failure."""
+    return JSONResponse(
+        {"detail": "web request rejected"},
+        status_code=403,
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+def _apply_web_security_headers(path: str, response: Response) -> Response:
+    """Apply the mandatory headers to every response under ``/web/``."""
+    if path.startswith("/web/"):
+        response.headers["Referrer-Policy"] = "no-referrer"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        if path.startswith("/web/api/"):
+            response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 class JobOverridesBody(BaseModel):
@@ -264,6 +341,12 @@ class PairClaimResponse(BaseModel):
     token: str
 
 
+class EmptyWebBody(BaseModel):
+    """An explicit empty JSON object for browser session mutations."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
 #: Cap on the unauthenticated claim body (per V4): a legitimate claim is a
 #: tiny JSON object, so anything declaring more — or declaring nothing
 #: (chunked) — is rejected before the body is read.
@@ -281,6 +364,7 @@ def create_app(
     pack_manager: PackManager | None = None,
     pairing: PairingState | None = None,
     media_manager: MediaManager | None = None,
+    web_session_signer: WebSessionSigner | None = None,
 ) -> FastAPI:
     """Build the engine's FastAPI app bound to *store* and *data_dir*.
 
@@ -302,16 +386,24 @@ def create_app(
 
     *pairing* is the in-memory pairing-code state backing ``POST /v1/pair``
     and ``POST /v1/pair/claim``; tests inject one with a settable clock.
+
+    *web_session_signer* is the test seam for the stateless browser-session
+    clock and revoke generation. Production derives it from the engine bearer.
     """
     app = FastAPI(title="podcast-reader engine", version=engine_version())
     expected_token = load_engine_state(data_dir)["token"].encode()
     keys: dict[str, str] = key_store if key_store is not None else {}
     pairing_state = pairing if pairing is not None else PairingState()
+    web_sessions = (
+        web_session_signer
+        if web_session_signer is not None
+        else WebSessionSigner(expected_token, generation=_WEB_SESSION_GENERATION)
+    )
     provider_config_lock = threading.RLock()
 
     @app.exception_handler(RequestValidationError)
     async def _validation_error_without_inputs(
-        _request: Request, exc: RequestValidationError
+        request: Request, exc: RequestValidationError
     ) -> JSONResponse:
         """Return useful validation locations without echoing submitted secrets.
 
@@ -323,12 +415,17 @@ def create_app(
             {key: value for key, value in error.items() if key not in {"input", "ctx", "url"}}
             for error in exc.errors()
         ]
-        return JSONResponse({"detail": safe_errors}, status_code=422)
+        headers = {"Cache-Control": "no-store"} if request.url.path.startswith("/web/") else None
+        return JSONResponse({"detail": safe_errors}, status_code=422, headers=headers)
 
     @app.middleware("http")
     async def _require_bearer_token(
         request: Request, call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:
+        route = (request.method, request.url.path)
+        if route in _WEB_MUTATIONS and not _trusted_web_mutation(request):
+            return _web_rejection()
+
         # The engine's unauthenticated routes:
         #  - POST /v1/pair/claim issues the token to a not-yet-authenticated
         #    extension (matched exactly — any other method still needs the token).
@@ -338,6 +435,8 @@ def create_app(
         #    to expose, and it MUST be tokenless so YouTube sees the loopback
         #    http origin (the Error 152/153 fix).
         if request.method == "POST" and request.url.path == "/v1/pair/claim":
+            return await call_next(request)
+        if route in _WEB_BEARER_EXEMPT:
             return await call_next(request)
         if request.method == "GET" and _EMBED_PATH.match(request.url.path):
             return await call_next(request)
@@ -351,9 +450,22 @@ def create_app(
             return JSONResponse(
                 {"detail": "unauthorized"},
                 status_code=401,
-                headers={"WWW-Authenticate": "Bearer"},
+                headers={"WWW-Authenticate": "Bearer", "Cache-Control": "no-store"},
             )
         return await call_next(request)
+
+    @app.middleware("http")
+    async def _secure_web_responses(
+        request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
+        """Apply privacy headers to successes and framework-generated errors."""
+        try:
+            response = await call_next(request)
+        except Exception:
+            if not request.url.path.startswith("/web/"):
+                raise
+            response = JSONResponse({"detail": "internal server error"}, status_code=500)
+        return _apply_web_security_headers(request.url.path, response)
 
     @app.get("/v1/health")
     def health() -> HealthInfo:
@@ -409,6 +521,61 @@ def create_app(
         if not isinstance(code, str) or not pairing_state.claim(code):
             raise rejection
         return PairClaimResponse(token=expected_token.decode())
+
+    @app.post("/web/api/pair/claim", response_model=PairClaimResponse)
+    async def web_pair_claim(request: Request, response: Response) -> PairClaimResponse | Response:
+        """Claim the shared pairing code from the exact tailnet HTTPS origin.
+
+        The middleware applies the bounded-JSON and same-origin gate before the
+        body is read. Every body/code rejection remains uniform and never
+        reveals whether a pending code exists.
+        """
+        try:
+            body = json.loads(await request.body())
+        except ValueError:
+            body = None
+        code = body.get("code") if isinstance(body, dict) else None
+        if not isinstance(code, str) or not pairing_state.claim(code):
+            return _web_rejection()
+        response.headers["Cache-Control"] = "no-store"
+        return PairClaimResponse(token=expected_token.decode())
+
+    @app.post("/web/api/session", status_code=status.HTTP_204_NO_CONTENT)
+    def web_session_create(_body: EmptyWebBody) -> Response:
+        """Exchange a verified candidate bearer for a scoped HttpOnly session."""
+        response = Response(status_code=status.HTTP_204_NO_CONTENT)
+        response.set_cookie(
+            key=_WEB_SESSION_COOKIE,
+            value=web_sessions.issue(),
+            max_age=SESSION_LIFETIME_S,
+            secure=True,
+            httponly=True,
+            samesite="strict",
+            path="/web/",
+        )
+        response.headers["Cache-Control"] = "no-store"
+        return response
+
+    @app.post("/web/api/logout", status_code=status.HTTP_204_NO_CONTENT)
+    def web_logout(request: Request, _body: EmptyWebBody) -> Response:
+        """Clear this browser's session after validating its current cookie."""
+        credential = request.cookies.get(_WEB_SESSION_COOKIE, "")
+        if not web_sessions.verify(credential):
+            return JSONResponse(
+                {"detail": "unauthorized"},
+                status_code=401,
+                headers={"Cache-Control": "no-store"},
+            )
+        response = Response(status_code=status.HTTP_204_NO_CONTENT)
+        response.delete_cookie(
+            key=_WEB_SESSION_COOKIE,
+            secure=True,
+            httponly=True,
+            samesite="strict",
+            path="/web/",
+        )
+        response.headers["Cache-Control"] = "no-store"
+        return response
 
     @app.post("/v1/shutdown", status_code=status.HTTP_202_ACCEPTED)
     def shutdown(background: BackgroundTasks) -> None:
