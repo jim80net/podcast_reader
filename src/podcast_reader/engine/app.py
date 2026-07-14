@@ -60,6 +60,7 @@ from podcast_reader.engine.settings import (
 )
 from podcast_reader.engine.web_session import SESSION_LIFETIME_S, WebSessionSigner
 from podcast_reader.engine.web_surface import SHELL_CSP, asset_bytes, transcript_csp
+from podcast_reader.html import without_legacy_remote_font_import
 from podcast_reader.providers import (
     build_provider_registry,
     canonicalize_custom_providers,
@@ -644,7 +645,7 @@ def create_app(
         path = Path(entry["html_path"])
         if not path.is_file():
             raise HTTPException(status_code=404, detail="transcript not found")
-        document = path.read_bytes()
+        document = without_legacy_remote_font_import(path.read_bytes())
         return Response(
             document,
             media_type="text/html",
@@ -838,11 +839,12 @@ def create_app(
         return list_entries(_library_dir(data_dir))
 
     @app.get("/v1/transcripts/{source_id}.html")
-    def transcript_html(source_id: str) -> FileResponse:
+    def transcript_html(source_id: str) -> Response:
         entry = get_entry(_library_dir(data_dir), source_id)
         if entry is None or not Path(entry["html_path"]).exists():
             raise HTTPException(status_code=404, detail="transcript not found")
-        return FileResponse(entry["html_path"], media_type="text/html")
+        document = without_legacy_remote_font_import(Path(entry["html_path"]).read_bytes())
+        return Response(document, media_type="text/html")
 
     @app.put("/v1/keys", status_code=status.HTTP_204_NO_CONTENT)
     def put_key(body: KeyBody) -> None:

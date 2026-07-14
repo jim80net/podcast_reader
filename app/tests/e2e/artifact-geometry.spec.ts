@@ -29,6 +29,54 @@ const chapteredArtifactUrl = pathToFileURL(
   path.resolve(__dirname, '../../../tests/fixtures/sample_expected.html')
 ).href
 
+for (const viewport of [
+  { width: 390, height: 844 },
+  { width: 1280, height: 900 }
+]) {
+  for (const theme of ['dark', 'light'] as const) {
+    test(`full reader stays usable at ${viewport.width}px in ${theme} theme (#81)`, async ({}, testInfo) => {
+      const browser = await chromium.launch()
+      try {
+        const page = await browser.newPage({ viewport })
+        await page.goto(chapteredArtifactUrl)
+        await page.evaluate((selectedTheme) => {
+          document.documentElement.dataset.theme = selectedTheme
+        }, theme)
+
+        const layout = await page.evaluate(() => {
+          const content = document.querySelector('#content')
+          const heading = document.querySelector('h1')
+          const paragraph = document.querySelector('p[data-start]')
+          if (content === null || heading === null || paragraph === null) {
+            throw new Error('chaptered artifact lacks reader landmarks')
+          }
+          return {
+            viewportWidth: document.documentElement.clientWidth,
+            documentWidth: document.documentElement.scrollWidth,
+            contentWidth: content.getBoundingClientRect().width,
+            headingHeight: heading.getBoundingClientRect().height,
+            paragraphHeight: paragraph.getBoundingClientRect().height
+          }
+        })
+        expect(layout.documentWidth).toBeLessThanOrEqual(layout.viewportWidth + 1)
+        expect(layout.contentWidth).toBeGreaterThan(0)
+        expect(layout.headingHeight).toBeGreaterThan(0)
+        expect(layout.paragraphHeight).toBeGreaterThan(0)
+
+        const screenshotName = `full-reader-${viewport.width}-${theme}.png`
+        const screenshotPath = testInfo.outputPath(screenshotName)
+        await page.screenshot({ path: screenshotPath, fullPage: true })
+        await testInfo.attach(screenshotName, {
+          path: screenshotPath,
+          contentType: 'image/png'
+        })
+      } finally {
+        await browser.close()
+      }
+    })
+  }
+}
+
 interface GeometryProbe {
   pad: number
   railHeight: number

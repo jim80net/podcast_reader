@@ -480,9 +480,25 @@ def build_chapter_body(
 
 
 # CSS and JS are kept as plain strings (no f-string) to avoid brace escaping issues.
-_STYLESHEET = """\
-@import url('https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;0,8..60,700;1,8..60,400&family=JetBrains+Mono:wght@400;600&family=Oswald:wght@400;500;600&display=swap');
+_LEGACY_REMOTE_FONT_IMPORT = (
+    b"@import url('https://fonts.googleapis.com/css2?"
+    b"family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;"
+    b"0,8..60,700;1,8..60,400&family=JetBrains+Mono:wght@400;600&"
+    b"family=Oswald:wght@400;500;600&display=swap');"
+)
+_LEGACY_REMOTE_FONT_MARKER = b"<style>\n" + _LEGACY_REMOTE_FONT_IMPORT + b"\n\n"
 
+
+def without_legacy_remote_font_import(document: bytes) -> bytes:
+    """Remove the one remote import emitted by pre-#81 transcript artifacts.
+
+    The exact-match rewrite keeps every other stored artifact byte intact while
+    ensuring both engine reader surfaces share the no-third-party-font policy.
+    """
+    return document.replace(_LEGACY_REMOTE_FONT_MARKER, b"<style>\n", 1)
+
+
+_STYLESHEET = """\
 :root {
   --bg: #111318;
   --bg-warm: #14161c;

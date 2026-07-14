@@ -827,6 +827,25 @@ class TestBuildHtmlIntegration:
         assert ":root[data-theme='dark'] {" in result
         assert ":root:not([data-theme='dark']) {" in result
 
+    def test_artifact_uses_no_remote_font_provider(self) -> None:
+        from podcast_reader.html import build_html
+
+        result = build_html([], title="Private transcript", source="test")
+
+        assert "fonts.googleapis.com" not in result
+        assert "fonts.gstatic.com" not in result
+        assert "@import url(" not in result
+
+    def test_legacy_font_filter_does_not_rewrite_noncanonical_content(self) -> None:
+        from podcast_reader.html import (
+            _LEGACY_REMOTE_FONT_IMPORT,
+            without_legacy_remote_font_import,
+        )
+
+        document = b"<p>quoted CSS: " + _LEGACY_REMOTE_FONT_IMPORT + b"</p>"
+
+        assert without_legacy_remote_font_import(document) == document
+
     def test_speakerless_output_byte_identical_no_chapters(self) -> None:
         """Spec scenario: speakerless transcripts unchanged — golden file
         generated before speaker rendering existed."""

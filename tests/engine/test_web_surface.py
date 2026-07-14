@@ -66,3 +66,11 @@ def test_unknown_injected_script_is_never_blessed_by_csp() -> None:
     csp = transcript_csp(injected)
     assert "script-src 'none'" in csp
     assert _hash("alert('not renderer code')") not in csp
+
+
+def test_artifact_csp_permits_no_remote_font_provider() -> None:
+    csp = transcript_csp(build_html(_SEGMENTS, "Private transcript").encode())
+    assert "fonts.googleapis.com" not in csp
+    assert "fonts.gstatic.com" not in csp
+    assert "style-src 'unsafe-inline';" in csp
+    assert "font-src 'none';" in csp
