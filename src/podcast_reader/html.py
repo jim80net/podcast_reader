@@ -218,6 +218,31 @@ def _timeline_interval(duration: float) -> float:
     return 15 * 60
 
 
+_TIMELINE_LABEL_MAX_CHARS = 42
+
+
+def _timeline_label(text: str) -> str:
+    """The opening words of a marker paragraph, as a compact rail label.
+
+    Whole words only, up to the character budget; an ellipsis marks any
+    truncation. No meaning is invented — the label IS the transcript text.
+    """
+    words = text.split()
+    label = ""
+    for word in words:
+        candidate = f"{label} {word}" if label else word
+        if len(candidate) > _TIMELINE_LABEL_MAX_CHARS:
+            break
+        label = candidate
+    if not label and words:
+        # A single word longer than the budget: hard-truncate rather than
+        # emit an empty label.
+        label = words[0][:_TIMELINE_LABEL_MAX_CHARS]
+    if label != text.strip():
+        label += "…"
+    return label
+
+
 def build_timeline_nav(segments: list[dict[str, Any]], sentences_per_para: int = 5) -> str:
     """Build a compact time-based landmark rail for a keyless transcript."""
     paragraphs = segments_to_paragraphs(segments, sentences_per_para)
@@ -235,7 +260,10 @@ def build_timeline_nav(segments: list[dict[str, Any]], sentences_per_para: int =
         threshold += interval
 
     links = "\n".join(
-        f'<a href="#{_time_anchor(float(p["start"]))}">{fmt_time(float(p["start"]))}</a>'
+        f'<a href="#{_time_anchor(float(p["start"]))}">'
+        f'<span class="timeline-ts">{fmt_time(float(p["start"]))}</span>'
+        f'<span class="timeline-snippet">{_timeline_label(p["text"])}</span>'
+        f"</a>"
         for p in markers
     )
     return (
@@ -513,10 +541,14 @@ body {
 
 /* ---- MAIN CONTENT ---- */
 #content {
-  margin-left: var(--sidebar-w);
   flex: 1;
   min-width: 0;
   padding: 2.5rem 3rem 4rem;
+}
+/* The sidebar margin is paid only when a sidebar exists: keyless artifacts
+   have no chapters, emit no sidebar, and center the reading column instead. */
+.has-sidebar #content {
+  margin-left: var(--sidebar-w);
 }
 
 header {
@@ -555,7 +587,9 @@ h1 {
   background: var(--bg-warm);
   border: 1px solid var(--border);
   border-radius: 3px;
-  box-shadow: 0 0.35rem 1rem var(--bg);
+  /* Tight shadow: the solid rail occludes a passing line crisply instead of
+     fading it out early under a long blur. */
+  box-shadow: 0 0.15rem 0.35rem var(--bg);
 }
 .timeline-label {
   flex: none;
@@ -576,17 +610,35 @@ h1 {
 }
 .timeline-links a {
   flex: none;
-  padding: 0.12rem 0.38rem;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  max-width: 15rem;
+  padding: 0.12rem 0.45rem;
   border-radius: 2px;
-  color: var(--accent-dim);
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 0.68rem;
 }
 .timeline-links a:hover,
 .timeline-links a:focus-visible {
   background: var(--accent-glow);
-  color: var(--accent);
 }
+.timeline-ts {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.68rem;
+  color: var(--accent-dim);
+  letter-spacing: 0.02em;
+}
+.timeline-snippet {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+.timeline-links a:hover .timeline-ts,
+.timeline-links a:focus-visible .timeline-ts { color: var(--accent); }
+.timeline-links a:hover .timeline-snippet,
+.timeline-links a:focus-visible .timeline-snippet { color: var(--text-bright); }
 
 /* ---- CHAPTER SECTIONS ---- */
 main {
@@ -902,6 +954,10 @@ def build_html(
     scroll_tag = f"<script>\n{_SCROLL_SCRIPT}</script>\n" if chapters else ""
     script_tag = f"{scroll_tag}<script>\n{_SYNC_SCRIPT}</script>"
 
+    # The sidebar and the margin that reserves space for it travel together:
+    # keyless artifacts emit neither (issue #52).
+    body_tag = '<body class="has-sidebar">' if chapters else "<body>"
+
     # Use string concatenation instead of f-string to avoid CSS brace escaping
     parts = [
         '<!DOCTYPE html>\n<html lang="en">\n<head>\n'
@@ -909,7 +965,7 @@ def build_html(
         '<meta name="viewport" content="width=device-width, initial-scale=1.0">\n'
         f"<title>{title}</title>\n"
         f"<style>\n{stylesheet}</style>\n"
-        "</head>\n<body>\n",
+        f"</head>\n{body_tag}\n",
         sidebar_html,
         '\n<div id="content">\n<header>\n'
         f"  <h1>{title}</h1>\n"

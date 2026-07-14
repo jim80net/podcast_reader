@@ -172,10 +172,14 @@ body {
 
 /* ---- MAIN CONTENT ---- */
 #content {
-  margin-left: var(--sidebar-w);
   flex: 1;
   min-width: 0;
   padding: 2.5rem 3rem 4rem;
+}
+/* The sidebar margin is paid only when a sidebar exists: keyless artifacts
+   have no chapters, emit no sidebar, and center the reading column instead. */
+.has-sidebar #content {
+  margin-left: var(--sidebar-w);
 }
 
 header {
@@ -214,7 +218,9 @@ h1 {
   background: var(--bg-warm);
   border: 1px solid var(--border);
   border-radius: 3px;
-  box-shadow: 0 0.35rem 1rem var(--bg);
+  /* Tight shadow: the solid rail occludes a passing line crisply instead of
+     fading it out early under a long blur. */
+  box-shadow: 0 0.15rem 0.35rem var(--bg);
 }
 .timeline-label {
   flex: none;
@@ -235,17 +241,35 @@ h1 {
 }
 .timeline-links a {
   flex: none;
-  padding: 0.12rem 0.38rem;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  max-width: 15rem;
+  padding: 0.12rem 0.45rem;
   border-radius: 2px;
-  color: var(--accent-dim);
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 0.68rem;
 }
 .timeline-links a:hover,
 .timeline-links a:focus-visible {
   background: var(--accent-glow);
-  color: var(--accent);
 }
+.timeline-ts {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.68rem;
+  color: var(--accent-dim);
+  letter-spacing: 0.02em;
+}
+.timeline-snippet {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+.timeline-links a:hover .timeline-ts,
+.timeline-links a:focus-visible .timeline-ts { color: var(--accent); }
+.timeline-links a:hover .timeline-snippet,
+.timeline-links a:focus-visible .timeline-snippet { color: var(--text-bright); }
 
 /* ---- CHAPTER SECTIONS ---- */
 main {
@@ -428,7 +452,7 @@ footer {
 <nav class="timeline-nav" aria-label="Transcript timeline">
   <span class="timeline-label">Jump to</span>
   <span class="timeline-links">
-<a href="#t-0">00:00:00</a>
+<a href="#t-0"><span class="timeline-ts">00:00:00</span><span class="timeline-snippet">Welcome to the show. I'm your host. Today…</span></a>
   </span>
 </nav>
 <p id="t-0" data-start="0.000" data-end="15.000"><span class="ts">00:00:00</span> Welcome to the show. I'm your host. Today we're talking about Python packaging. First, let's discuss pyproject.toml files.</p>
