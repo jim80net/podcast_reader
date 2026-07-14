@@ -129,6 +129,7 @@ class TestExecution:
             "code": "not_found",
             "message": "File not found: /nope",
             "hint": "Check the path.",
+            "detail": "",
         }
         assert failed["events"][-1]["kind"] == "job_failed"
         store.shutdown()
@@ -156,6 +157,7 @@ class TestExecution:
         assert "browser extension" in error["hint"]
         assert "cookies file" in error["hint"]
         assert "--cookies-from-browser" not in error["hint"]
+        assert error["detail"] == ""
         # the job_failed event carries the same authored hint
         assert store.get(record["id"])["events"][-1]["data"]["hint"] == error["hint"]
         store.shutdown()
@@ -174,6 +176,7 @@ class TestExecution:
         error = store.get(record["id"])["error"]
         assert error is not None
         assert error["hint"] == "Try again later."
+        assert error["detail"] == ""
         store.shutdown()
 
     def test_unexpected_exception_maps_to_internal_error(self, tmp_path: Path) -> None:
@@ -507,7 +510,7 @@ class TestPersistence:
         assert [e["kind"] for e in seen["events"]][-1] == "job_done"
 
     def test_startup_marks_running_as_interrupted(self, tmp_path: Path) -> None:
-        journal = [
+        journal: list[dict[str, object]] = [
             {
                 "id": "j-running",
                 "source": "https://example.com/a",
@@ -558,7 +561,7 @@ class TestPersistence:
             }
 
         # journal order deliberately disagrees with created_at order
-        journal = [
+        journal: list[dict[str, object]] = [
             _record("j-running", "running", 1.0),
             _record("j-queued-late", "queued", 3.0),
             _record("j-queued-early", "queued", 2.0),
@@ -583,7 +586,7 @@ class TestPersistence:
         store.shutdown()
 
     def test_retry_by_resubmission(self, tmp_path: Path) -> None:
-        journal = [
+        journal: list[dict[str, object]] = [
             {
                 "id": "j-old",
                 "source": "https://example.com/a",

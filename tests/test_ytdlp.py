@@ -17,6 +17,14 @@ if TYPE_CHECKING:
     from podcast_reader.types import PipelineEvent
 
 
+def _stderr_message(stderr: str) -> str:
+    for line in stderr.strip().splitlines()[::-1]:
+        line = line.strip()
+        if line.startswith("ERROR:"):
+            return line.removeprefix("ERROR:").strip() or line
+    return stderr.strip()
+
+
 @patch("podcast_reader.ytdlp.resolve_tool", return_value="yt-dlp")
 class TestBuildDownloadArgs:
     def test_basic_url(self, _mock_resolve: MagicMock) -> None:
@@ -111,9 +119,11 @@ class TestDownloadAudio:
             mock_run.return_value = subprocess.CompletedProcess(
                 args=[], returncode=1, stdout="", stderr="ERROR: unable to extract"
             )
-            with pytest.raises(PipelineError, match="yt-dlp failed") as excinfo:
+            with pytest.raises(PipelineError) as excinfo:
                 download_audio("https://x.com/user/status/123", tmp_path)
         assert excinfo.value.code == "download_failed"
+        assert excinfo.value.message == "unable to extract"
+        assert excinfo.value.detail == "ERROR: unable to extract"
 
     @pytest.mark.parametrize(
         "stderr",
@@ -131,16 +141,21 @@ class TestDownloadAudio:
     )
     def test_auth_failure_raises_download_auth_required(self, tmp_path: Path, stderr: str) -> None:
         """Per U2: auth-detected failures carry the distinct code
-        download_auth_required with a neutral, hint-free message — the hint
-        is authored by the face (CLI: env var; engine: extension + import)."""
+        download_auth_required with a reader-modeled message and hint; the
+        full stderr stays in the detail field."""
         with patch("podcast_reader.ytdlp.run_child") as mock_run:
             mock_run.return_value = subprocess.CompletedProcess(
                 args=[], returncode=1, stdout="", stderr=stderr
             )
-            with pytest.raises(PipelineError, match="yt-dlp failed") as excinfo:
+            with pytest.raises(PipelineError) as excinfo:
                 download_audio("https://x.com/user/status/123", tmp_path)
         assert excinfo.value.code == "download_auth_required"
-        assert excinfo.value.hint == ""
+        assert excinfo.value.message == _stderr_message(stderr)
+        assert excinfo.value.hint == (
+            "Share your login for this site via the browser extension, or "
+            "import a cookies file in Settings."
+        )
+        assert excinfo.value.detail == stderr.strip()
 
     @pytest.mark.parametrize(
         "stderr",
@@ -167,9 +182,10 @@ class TestDownloadAudio:
             mock_run.return_value = subprocess.CompletedProcess(
                 args=[], returncode=1, stdout="", stderr=stderr
             )
-            with pytest.raises(PipelineError, match="yt-dlp failed") as excinfo:
+            with pytest.raises(PipelineError) as excinfo:
                 download_audio("https://x.com/user/status/123", tmp_path)
         assert excinfo.value.code == "download_failed"
+        assert excinfo.value.detail == stderr.strip()
 
     def test_auth_marker_matching_is_case_insensitive(self, tmp_path: Path) -> None:
         with patch("podcast_reader.ytdlp.run_child") as mock_run:
@@ -179,6 +195,10 @@ class TestDownloadAudio:
             with pytest.raises(PipelineError) as excinfo:
                 download_audio("https://x.com/user/status/123", tmp_path)
         assert excinfo.value.code == "download_auth_required"
+        assert excinfo.value.hint == (
+            "Share your login for this site via the browser extension, or "
+            "import a cookies file in Settings."
+        )
 
 
 class TestDownloadSelfUpdateRetry:

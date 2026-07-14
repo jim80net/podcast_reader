@@ -12,7 +12,7 @@ import type { JobOverrides, JobRecord } from '../../../shared/types'
  * submission, awaiting-confirmation jobs with Run/Dismiss (the landing spot
  * for protocol-initiated jobs — nothing here auto-executes), and live
  * step-level progress from forwarded events on top of record hydration.
- * Failed jobs show the structured {code, message, hint}; interrupted jobs
+ * Failed jobs show the structured {code, message, hint, detail}; interrupted jobs
  * offer one-click retry (a fresh submission for the same source).
  */
 export function mountNew(container: HTMLElement, store: AppStore): ViewCleanup {
@@ -252,20 +252,21 @@ export function mountNew(container: HTMLElement, store: AppStore): ViewCleanup {
     // Model rows (Transcription + Chapters) — what the job actually ran with.
     if (job.models !== null) {
       const usedCaptions = progress.steps.some((s) => s.step === 'captions')
-      const chapterModel = job.models.chapter_model
-      table.append(
-        el('span', { class: 'job-row-key', text: 'transcription' }),
-        el('span', {
-          class: 'job-row-val',
-          text: usedCaptions ? 'YouTube captions' : job.models.whisper_model
-        }),
-        el('span', { class: 'job-row-key', text: 'chapters' }),
-        el('span', {
-          class: 'job-row-val',
-          text:
-            job.models.chapter_provider + (chapterModel !== '' ? ` · ${chapterModel}` : ' · default')
-        })
-      )
+      const appendModelRow = (label: string, value: string | null): void => {
+        if (value === null) return
+        table.append(
+          el('span', { class: 'job-row-key', text: label }),
+          el('span', { class: 'job-row-val', text: value })
+        )
+      }
+      appendModelRow('transcription', usedCaptions ? 'YouTube captions' : job.models.whisper_model)
+      const chapterValue =
+        job.models.chapter_provider === null
+          ? null
+          : job.models.chapter_model === null
+            ? job.models.chapter_provider
+            : `${job.models.chapter_provider} · ${job.models.chapter_model}`
+      appendModelRow('chapters', chapterValue)
     }
     if (table.childElementCount > 0) card.append(table)
 
@@ -278,7 +279,8 @@ export function mountNew(container: HTMLElement, store: AppStore): ViewCleanup {
           'div',
           { class: 'job-error', attrs: { role: 'alert' } },
           el('p', { class: 'job-error-message', text: `${job.error.code}: ${job.error.message}` }),
-          job.error.hint !== '' ? el('p', { class: 'job-error-hint', text: job.error.hint }) : ''
+          job.error.hint !== '' ? el('p', { class: 'job-error-hint', text: job.error.hint }) : '',
+          job.error.detail !== '' ? el('p', { class: 'job-error-detail', text: job.error.detail }) : ''
         )
       )
     }

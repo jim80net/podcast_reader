@@ -68,7 +68,7 @@ def _job_error(exc: PipelineError) -> JobError:
     hint = exc.hint
     if exc.code == "download_auth_required" and not hint:
         hint = _AUTH_REQUIRED_HINT
-    return JobError(code=exc.code, message=exc.message, hint=hint)
+    return JobError(code=exc.code, message=exc.message, hint=hint, detail=exc.detail)
 
 
 class JobStateError(Exception):
@@ -310,7 +310,7 @@ class JobStore:
                     self._transition(
                         job_id,
                         self._failure_state(),
-                        error=JobError(code="internal", message=str(exc), hint=""),
+                        error=JobError(code="internal", message=str(exc), hint="", detail=""),
                     )
 
     def _run_job(self, job_id: str) -> None:
@@ -337,7 +337,9 @@ class JobStore:
         except PipelineError as exc:
             self._fail(job_id, _job_error(exc), on_event)
         except Exception as exc:  # worker must never die; unexpected → internal
-            self._fail(job_id, JobError(code="internal", message=str(exc), hint=""), on_event)
+            self._fail(
+                job_id, JobError(code="internal", message=str(exc), hint="", detail=""), on_event
+            )
         else:
             self._transition(job_id, "done", result=result)
         finally:
@@ -371,7 +373,7 @@ class JobStore:
                 kind="job_failed",
                 step=None,
                 message=error["message"],
-                data={"code": error["code"], "hint": error["hint"]},
+                data={"code": error["code"], "hint": error["hint"], "detail": error["detail"]},
             )
         )
 

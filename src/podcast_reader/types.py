@@ -47,7 +47,7 @@ class PipelineEvent(TypedDict):
 
 
 class PipelineError(Exception):
-    """Unrecoverable pipeline failure with a structured code/message/hint.
+    """Unrecoverable pipeline failure with a structured code/message/hint/detail.
 
     The exception twin of :class:`JobError`. Lives here (bottom of the import
     graph) so step modules below ``pipeline.py`` — ``ytdlp.py``
@@ -56,17 +56,19 @@ class PipelineError(Exception):
     its existing consumers (CLI, engine job store).
     """
 
-    def __init__(self, code: str, message: str, hint: str = "") -> None:
+    def __init__(self, code: str, message: str, hint: str = "", detail: str = "") -> None:
         super().__init__(message)
         self.code = code
         self.message = message
         self.hint = hint
+        self.detail = detail
 
 
 class JobError(TypedDict):
     code: str
     message: str
     hint: str
+    detail: str
 
 
 class PipelineRequest(TypedDict):
@@ -114,9 +116,9 @@ class JobModels(TypedDict):
     irrelevant for caption sources (YouTube) — the UI derives the transcription
     source from the step timeline and uses ``whisper_model`` only otherwise."""
 
-    whisper_model: str
-    chapter_provider: str
-    chapter_model: str  # "" means the provider's default
+    whisper_model: str | None
+    chapter_provider: str | None
+    chapter_model: str | None
 
 
 class JobRecord(TypedDict):

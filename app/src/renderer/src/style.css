@@ -748,6 +748,13 @@ a.job-title:hover {
   font-size: var(--text-sm);
 }
 
+.job-error-detail {
+  margin: 0.15rem 0 0;
+  color: var(--muted);
+  font-size: var(--text-sm);
+  white-space: pre-wrap;
+}
+
 /* The URL/file field is the New view's primary action — give it presence. */
 .new-source-input {
   font-size: var(--text-md);

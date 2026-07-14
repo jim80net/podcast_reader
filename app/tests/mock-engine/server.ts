@@ -35,6 +35,7 @@ interface JobError {
   code: string
   message: string
   hint: string
+  detail: string
 }
 
 interface PipelineEvent {
