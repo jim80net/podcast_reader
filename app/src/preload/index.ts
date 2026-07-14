@@ -1,7 +1,12 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 
 import { CHANNELS, PUSH_CHANNELS } from '../shared/ipc'
-import type { EngineStatus, PodcastReaderApi, UpdateStatus } from '../shared/ipc'
+import type {
+  EngineStatus,
+  PodcastReaderApi,
+  PrivateWebStatus,
+  UpdateStatus
+} from '../shared/ipc'
 import type { JobRecord, PipelineEvent, SettingsUpdate } from '../shared/types'
 
 /**
@@ -39,6 +44,8 @@ const api: PodcastReaderApi = {
   uninstallPack: (packId) => ipcRenderer.invoke(CHANNELS.packsUninstall, packId),
   isFirstRunComplete: () => ipcRenderer.invoke(CHANNELS.firstRunGet),
   markFirstRunComplete: () => ipcRenderer.invoke(CHANNELS.firstRunComplete),
+  getPrivateWebStatus: () => ipcRenderer.invoke(CHANNELS.privateWebGetStatus),
+  setPrivateWebEnabled: (enabled) => ipcRenderer.invoke(CHANNELS.privateWebSetEnabled, enabled),
   startPairing: () => ipcRenderer.invoke(CHANNELS.pairStart),
   listCookieJars: () => ipcRenderer.invoke(CHANNELS.cookiesList),
   deleteCookieJar: (domain) => ipcRenderer.invoke(CHANNELS.cookiesDelete, domain),
@@ -55,7 +62,9 @@ const api: PodcastReaderApi = {
   onProtocolRequest: (listener: (job: JobRecord) => void) =>
     subscribe(PUSH_CHANNELS.protocolRequest, listener),
   onUpdateStatus: (listener: (status: UpdateStatus) => void) =>
-    subscribe(PUSH_CHANNELS.updateStatus, listener)
+    subscribe(PUSH_CHANNELS.updateStatus, listener),
+  onPrivateWebStatus: (listener: (status: PrivateWebStatus) => void) =>
+    subscribe(PUSH_CHANNELS.privateWebStatus, listener)
 }
 
 contextBridge.exposeInMainWorld('api', api)

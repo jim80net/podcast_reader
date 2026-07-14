@@ -1,0 +1,13 @@
+{
+  "TCP": {
+    "443": { "HTTPS": true }
+  },
+  "Web": {
+    "desktop.example.ts.net:443": {
+      "Handlers": {
+        "/notes": { "Proxy": "http://127.0.0.1:43127" }
+      }
+    }
+  },
+  "AllowFunnel": {}
+}

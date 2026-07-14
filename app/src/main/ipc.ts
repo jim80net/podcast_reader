@@ -1,5 +1,6 @@
 import { CHANNELS } from '../shared/ipc'
 import type { EngineManager } from './engine-manager'
+import type { PrivateWebController } from './private-web'
 import type { SubmitJobRequest, UpdateStatus } from '../shared/ipc'
 import type { SettingsUpdate } from '../shared/types'
 
@@ -29,11 +30,14 @@ export interface AppConfigAccess {
   markFirstRunComplete(): void
 }
 
+export type PrivateWebAccess = Pick<PrivateWebController, 'status' | 'setEnabled'>
+
 export function registerIpcHandlers(
   ipcMain: IpcMainLike,
   manager: EngineManager,
   updates: UpdaterAccess,
-  config: AppConfigAccess
+  config: AppConfigAccess,
+  privateWeb?: PrivateWebAccess
 ): void {
   const client = () => {
     const c = manager.client
@@ -108,6 +112,11 @@ export function registerIpcHandlers(
   // First-run flag (setup wizard gate) — app-side state, no engine involved.
   ipcMain.handle(CHANNELS.firstRunGet, () => config.isFirstRunComplete())
   ipcMain.handle(CHANNELS.firstRunComplete, () => config.markFirstRunComplete())
+  ipcMain.handle(CHANNELS.privateWebGetStatus, () => privateWeb?.status ?? { state: 'disabled' })
+  ipcMain.handle(CHANNELS.privateWebSetEnabled, (_e, enabled: boolean) => {
+    if (privateWeb === undefined) throw new Error('private web access is unavailable')
+    return privateWeb.setEnabled(enabled)
+  })
 
   ipcMain.handle(CHANNELS.updateGetStatus, () => updates.status())
   ipcMain.handle(CHANNELS.updateInstall, () => updates.installNow())

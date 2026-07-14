@@ -14,8 +14,12 @@ import { EngineManager } from './engine-manager'
 import { RespawnPolicy } from './respawn-policy'
 import { registerIpcHandlers } from './ipc'
 import { createMediaProtocolHandler } from './media-protocol'
+import { PrivateWebController } from './private-web'
 import { parseProtocolUrl, selectProtocolArgv } from './protocol'
 import { pidIsAlive } from './quit'
+import { ServeOwnershipJournal } from './serve-journal'
+import { ServeManager } from './serve-manager'
+import { defaultServeManagerDeps } from './serve-process'
 import { BUILD_SIGNED, UpdaterController, updaterGate } from './updater'
 import { KeyVault } from './vault'
 import { PUSH_CHANNELS } from '../shared/ipc'
@@ -129,6 +133,28 @@ async function start(): Promise<void> {
     log
   })
 
+  const appConfig = new AppConfigStore(join(app.getPath('userData'), 'app-config.json'), log)
+  const serveManager = new ServeManager(
+    defaultServeManagerDeps({
+      journal: new ServeOwnershipJournal(
+        join(app.getPath('userData'), 'private-web-serve.json')
+      ),
+      env: process.env as Record<string, string | undefined>,
+      resourcesPath: app.isPackaged ? process.resourcesPath : null,
+      devCwd: app.isPackaged ? null : resolve(app.getAppPath(), '..'),
+      platform: process.platform,
+      fileExists: supervisorDeps.fileExists,
+      log
+    })
+  )
+  const privateWeb = new PrivateWebController({
+    config: appConfig,
+    serve: serveManager,
+    enginePort: () => manager?.port ?? null,
+    send: (status) => broadcast(PUSH_CHANNELS.privateWebStatus, status),
+    log
+  })
+
   manager = new EngineManager({
     ensure: () => ensureEngine(supervisorDeps),
     createClient: (handle) => new EngineClient(handle.port, handle.token),
@@ -142,10 +168,10 @@ async function start(): Promise<void> {
     // Jitter (0–250ms) de-syncs simultaneous crash bursts; Math.random is fine
     // here — this is backoff spread, not anything security-sensitive.
     policy: new RespawnPolicy({ jitter: () => Math.floor(Math.random() * 250) }),
+    privateWeb,
     log
   })
-  const appConfig = new AppConfigStore(join(app.getPath('userData'), 'app-config.json'), log)
-  registerIpcHandlers(ipcMain, manager, setupUpdater(), appConfig)
+  registerIpcHandlers(ipcMain, manager, setupUpdater(), appConfig, privateWeb)
 
   // Install the app://media handler now that the engine manager (token source)
   // exists. The handler reads loopback coordinates lazily on each request, so

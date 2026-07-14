@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { resolveEngineCommand, splitEngineCmd } from './engine-cmd'
+import { resolveEngineCommand, resolveGuardianCommand, splitEngineCmd } from './engine-cmd'
 
 describe('splitEngineCmd', () => {
   it('splits on whitespace runs (per P6: documented whitespace split)', () => {
@@ -92,5 +92,32 @@ describe('resolveEngineCommand', () => {
       platform: 'linux'
     })
     expect(resolved.posture).toBe('dev')
+  })
+})
+
+describe('resolveGuardianCommand', () => {
+  it('uses the same packaged executable with the guardian subcommand', () => {
+    expect(
+      resolveGuardianCommand({
+        resourcesPath: '/install/resources',
+        env: {},
+        fileExists: () => true,
+        platform: 'linux'
+      })
+    ).toEqual({
+      argv: ['/install/resources/engine/podcast-reader-engine', 'serve-guardian'],
+      posture: 'packaged'
+    })
+  })
+
+  it('rejects an override whose subcommand cannot be safely replaced', () => {
+    expect(() =>
+      resolveGuardianCommand({
+        resourcesPath: null,
+        env: { PODCAST_READER_ENGINE_CMD: '/custom/wrapper' },
+        fileExists: () => false,
+        platform: 'linux'
+      })
+    ).toThrow('must end in "serve"')
   })
 })

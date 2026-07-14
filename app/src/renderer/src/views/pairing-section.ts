@@ -3,7 +3,7 @@ import { extractEngineDetail } from '../engine-error'
 import { combinedPairingString, pairingCountdown } from '../pairing-ui'
 
 /**
- * Settings → "Connect browser extension" section (app-views spec, design
+ * Settings → "Connect another device" section (app-views spec, design
  * decision 11): a mint button → `pair:start` IPC → the combined
  * `<port>-<code>` paste string as the primary affordance, separate port/code
  * fields as fallback (per review adjudication), and a live expiry countdown.
@@ -17,7 +17,7 @@ export interface PairingSection {
 
 export function mountPairingSection(container: HTMLElement): PairingSection {
   const mintButton = el('button', {
-    text: 'Connect browser extension',
+    text: 'Create pairing code',
     attrs: { type: 'button', id: 'settings-pair-start' }
   })
   const display = el('div', { class: 'pairing-display' })
@@ -32,20 +32,21 @@ export function mountPairingSection(container: HTMLElement): PairingSection {
   const error = el('p', { class: 'error-text', attrs: { role: 'alert' } })
   error.hidden = true
   display.append(
-    el('p', { text: 'Paste this into the extension popup:' }),
-    combined,
+    el('p', { text: 'Enter this code in the private web reader:' }),
+    codeField,
     el(
       'p',
       { class: 'pairing-fallback' },
-      el('span', { text: 'Or enter separately — ' }),
+      el('span', { text: 'Chrome extension — paste ' }),
+      combined,
+      el('span', { text: ' or enter separately: ' }),
       portField,
-      el('span', { text: ' ' }),
-      codeField
+      el('span', { text: ' plus the code above.' })
     ),
     countdown
   )
   container.append(
-    el('h3', { text: 'Browser extension' }),
+    el('h3', { text: 'Connect another device' }),
     el('p', {
       class: 'section-note',
       text:
@@ -55,7 +56,7 @@ export function mountPairingSection(container: HTMLElement): PairingSection {
     el('p', {
       class: 'section-note',
       text:
-        'Pair the Chrome extension to transcribe pages and share logins. ' +
+        'Pair the private web reader or Chrome extension. ' +
         'The code below is single-use and expires after five minutes.'
     }),
     mintButton,

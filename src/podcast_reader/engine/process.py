@@ -483,7 +483,9 @@ if sys.platform == "win32":  # pragma: no cover — exercised on Windows only
             ctypes.sizeof(limits),
         )
         if not ok:
-            raise ctypes.WinError(ctypes.get_last_error())
+            error = ctypes.WinError(ctypes.get_last_error())
+            _kernel32.CloseHandle(job)
+            raise error
         return int(job)
 
     _job_handle: int | None = None

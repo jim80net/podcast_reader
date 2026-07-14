@@ -3,14 +3,14 @@ import { dirname } from 'node:path'
 
 /**
  * App-side configuration (design decision 10 of the download-manager change):
- * a small JSON file under Electron's userData dir. Today it holds exactly one
- * flag — `first_run_complete`, set when the setup wizard is completed or
- * skipped — gating whether the wizard auto-opens on launch. Engine-owned
- * state (settings, packs, jobs) never lives here.
+ * a small JSON file under Electron's userData dir. It holds desktop-shell
+ * preferences only: first-run completion and the explicit private-web opt-in.
+ * Engine-owned state (settings, packs, jobs) never lives here.
  */
 
 interface AppConfig {
   first_run_complete?: boolean
+  private_web_enabled?: boolean
 }
 
 export class AppConfigStore {
@@ -26,6 +26,14 @@ export class AppConfigStore {
 
   markFirstRunComplete(): void {
     this.write({ ...this.read(), first_run_complete: true })
+  }
+
+  privateWebEnabled(): boolean {
+    return this.read().private_web_enabled === true
+  }
+
+  setPrivateWebEnabled(enabled: boolean): void {
+    this.write({ ...this.read(), private_web_enabled: enabled })
   }
 
   private read(): AppConfig {

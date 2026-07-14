@@ -42,6 +42,8 @@ export const CHANNELS = {
   packsUninstall: 'packs:uninstall',
   firstRunGet: 'first-run:get',
   firstRunComplete: 'first-run:complete',
+  privateWebGetStatus: 'private-web:get-status',
+  privateWebSetEnabled: 'private-web:set-enabled',
   pairStart: 'pair:start',
   cookiesList: 'cookies:list',
   cookiesDelete: 'cookies:delete',
@@ -61,7 +63,9 @@ export const PUSH_CHANNELS = {
   /** A validated podcast-reader:// request landed as an awaiting-confirmation job. */
   protocolRequest: 'protocol:request',
   /** Auto-update lifecycle (UpdateStatus) from the main-process UpdaterController. */
-  updateStatus: 'update:status'
+  updateStatus: 'update:status',
+  /** Managed tailnet transport lifecycle. */
+  privateWebStatus: 'private-web:status'
 } as const
 
 export type EngineStatus =
@@ -97,6 +101,13 @@ export type UpdateStatus =
   | { state: 'ready'; version: string }
   | { state: 'deferred'; version: string }
   | { state: 'installing'; version: string }
+  | { state: 'error'; message: string }
+
+export type PrivateWebStatus =
+  | { state: 'disabled' }
+  | { state: 'starting' }
+  | { state: 'ready'; url: string }
+  | { state: 'conflict'; message: string }
   | { state: 'error'; message: string }
 
 /** The `jobs:submit` request — one shared shape for the renderer call and the main handler. */
@@ -157,6 +168,8 @@ export interface PodcastReaderApi {
   /** App-side first-run flag (setup wizard): true once setup was completed or skipped. */
   isFirstRunComplete(): Promise<boolean>
   markFirstRunComplete(): Promise<void>
+  getPrivateWebStatus(): Promise<PrivateWebStatus>
+  setPrivateWebEnabled(enabled: boolean): Promise<PrivateWebStatus>
   /** Mint an extension pairing code (engine `POST /v1/pair`) plus the engine port. */
   startPairing(): Promise<PairingDisplay>
   /** Captured cookie-jar metadata (`GET /v1/cookies`) — domains and dates, never values. */
@@ -174,4 +187,5 @@ export interface PodcastReaderApi {
   onJobsHydrated(listener: (jobs: JobRecord[]) => void): () => void
   onProtocolRequest(listener: (job: JobRecord) => void): () => void
   onUpdateStatus(listener: (status: UpdateStatus) => void): () => void
+  onPrivateWebStatus(listener: (status: PrivateWebStatus) => void): () => void
 }

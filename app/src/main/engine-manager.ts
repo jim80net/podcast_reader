@@ -41,6 +41,11 @@ export interface ManagerDeps {
   /** The bounded respawn policy (injected so the boundary is deterministic in tests). */
   policy: RespawnPolicy
   log(message: string): void
+  privateWeb?: {
+    beforeEngineSpawn(): Promise<void>
+    afterEngineReady(port: number): Promise<void>
+    beforeEngineStop(): Promise<void>
+  }
 }
 
 export class EngineManager {
@@ -87,6 +92,7 @@ export class EngineManager {
   async start(): Promise<void> {
     this.setStatus({ state: 'starting' })
     this.spawning = true
+    await this.deps.privateWeb?.beforeEngineSpawn()
     let handle: EngineHandle
     try {
       handle = await this.deps.ensure()
@@ -156,6 +162,13 @@ export class EngineManager {
       ...(keyPushFailures.length > 0 ? { keyPushFailures } : {})
     })
 
+    await this.deps.privateWeb?.afterEngineReady(handle.port)
+
+    // Private-web startup is async and may take seconds. A crash or quit can
+    // win during that await just as it can during key push; never let this
+    // stale continuation recreate an event stream for the dead handle.
+    if (this.quitting || this.handle !== handle) return
+
     // Abort any prior stream BEFORE creating the new one: the per-install port
     // and token are stable across respawns, so a crashed engine's reconnecting
     // stream would otherwise silently re-attach to the new engine, duplicating
@@ -185,6 +198,7 @@ export class EngineManager {
     // this flag after every await, so a quit that begins mid-respawn wins the
     // race and no engine is spawned (or left running) afterward (C1/C2).
     this.quitting = true
+    await this.deps.privateWeb?.beforeEngineStop()
     const handle = this.handle
     const client = this.engineClient
     if (handle === null || client === null) return
@@ -220,6 +234,8 @@ export class EngineManager {
     if (this.spawning) return
     this.spawning = true
     this.quitting = false
+    await this.deps.privateWeb?.beforeEngineStop()
+    await this.deps.privateWeb?.beforeEngineSpawn()
     this.deps.policy.reset()
     this.stream?.abort()
     this.stream = null
@@ -281,6 +297,8 @@ export class EngineManager {
     this.stream?.abort()
     this.stream = null
 
+    await this.deps.privateWeb?.beforeEngineStop()
+
     await this.scheduleRespawn(this.deps.policy.recordFailure(this.deps.now()))
   }
 
@@ -322,6 +340,7 @@ export class EngineManager {
       this.setStatus({ state: 'stopped' })
       return
     }
+    await this.deps.privateWeb?.beforeEngineSpawn()
     let handle: EngineHandle
     try {
       handle = await this.deps.ensure()

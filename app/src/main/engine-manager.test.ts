@@ -178,6 +178,63 @@ describe('EngineManager.media (app:// media-protocol access)', () => {
 })
 
 describe('EngineManager.start', () => {
+  it('reconciles before spawn, starts Serve after readiness, and stops it before engine shutdown', async () => {
+    const world = makeWorld()
+    const deps = (world.manager as unknown as { deps: ManagerDeps }).deps
+    deps.privateWeb = {
+      beforeEngineSpawn: async () => {
+        world.calls.push('privateWeb.reconcile')
+      },
+      afterEngineReady: async (port) => {
+        world.calls.push(`privateWeb.start:${port}`)
+      },
+      beforeEngineStop: async () => {
+        world.calls.push('privateWeb.stop')
+      }
+    }
+    await world.manager.start()
+    expect(world.calls.indexOf('privateWeb.reconcile')).toBeLessThan(world.calls.indexOf('ensure'))
+    expect(world.calls.lastIndexOf('send:engine:status')).toBeLessThan(
+      world.calls.indexOf('privateWeb.start:50000')
+    )
+
+    world.calls.length = 0
+    await world.manager.quit({ timeoutMs: 5 })
+    expect(world.calls.indexOf('privateWeb.stop')).toBeLessThan(world.calls.indexOf('shutdown'))
+  })
+
+  it('does not create a stale stream when the engine dies during private-web startup', async () => {
+    let exitChild!: () => void
+    const childExited = new Promise<void>((resolve) => {
+      exitChild = resolve
+    })
+    let releasePrivateWeb!: () => void
+    const privateWebGate = new Promise<void>((resolve) => {
+      releasePrivateWeb = resolve
+    })
+    const world = makeWorld({
+      handle: spawnedWorldHandle(childExited),
+      handles: [
+        spawnedWorldHandle(childExited),
+        spawnedWorldHandle(new Promise<void>(() => {}))
+      ],
+      deferSleep: true
+    })
+    const deps = (world.manager as unknown as { deps: ManagerDeps }).deps
+    deps.privateWeb = {
+      beforeEngineSpawn: async () => undefined,
+      afterEngineReady: async () => privateWebGate,
+      beforeEngineStop: async () => undefined
+    }
+    void world.manager.start()
+    await flush()
+    exitChild()
+    await flush()
+    releasePrivateWeb()
+    await flush()
+    expect(world.streamCount()).toBe(0)
+  })
+
   it('pushes all vault keys BEFORE broadcasting engine-ready (task 3.2 ordering)', async () => {
     const world = makeWorld({ vaultKeys: { anthropic: 'sk-1', openai: 'sk-2' } })
     await world.manager.start()
