@@ -8,7 +8,7 @@ import logging
 import stat
 import threading
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import httpx
 import pytest
@@ -28,6 +28,11 @@ from podcast_reader.engine.packs import (
 )
 from podcast_reader.engine.pairing import CODE_ALPHABET, CODE_LENGTH, CODE_TTL_S, PairingState
 from podcast_reader.engine.settings import load_engine_state, load_settings, save_settings
+from podcast_reader.engine.web_session import (
+    SESSION_LIFETIME_S,
+    SESSION_PREFIX,
+    WebSessionSigner,
+)
 from podcast_reader.providers import PROVIDERS
 from podcast_reader.types import LibraryEntry, PipelineEvent, PipelineResult
 
@@ -177,6 +182,12 @@ class _Engine:
         # Pairing with a settable clock so expiry is testable via TestClient.
         self.pairing_now = time.time()
         self.pairing = PairingState(clock=lambda: self.pairing_now)
+        self.web_session_now = self.pairing_now
+        self.web_session_signer = WebSessionSigner(
+            load_engine_state(data_dir)["token"].encode(),
+            generation=1,
+            clock=lambda: self.web_session_now,
+        )
 
         self.app = create_app(
             data_dir,
@@ -187,10 +198,12 @@ class _Engine:
             key_test_transport=httpx.MockTransport(key_test_transport_handler),
             pack_manager=self.pack_manager,
             pairing=self.pairing,
+            web_session_signer=self.web_session_signer,
         )
         self.token = load_engine_state(data_dir)["token"]
         self.headers = {"Authorization": f"Bearer {self.token}"}
         self.client = TestClient(self.app)
+        self.web_client = TestClient(self.app, base_url="https://web.test")
         self.base_url = ""  # filled in by the live_engine fixture
 
 
@@ -2004,6 +2017,283 @@ class TestPairing:
         for path in engine.data_dir.rglob("*"):
             if path.is_file():
                 assert code not in path.read_text(errors="replace"), path
+
+
+class TestWebPairingSession:
+    """The browser claim -> verify -> HttpOnly-session boundary."""
+
+    _WEB_HEADERS = {
+        "Origin": "https://web.test",
+        "Sec-Fetch-Site": "same-origin",
+    }
+
+    def _mint(self, engine: _Engine) -> str:
+        response = engine.client.post("/v1/pair", headers=engine.headers)
+        assert response.status_code == 200
+        return str(response.json()["code"])
+
+    def _web_claim(
+        self, engine: _Engine, code: str, *, headers: dict[str, str] | None = None
+    ) -> httpx.Response:
+        return cast(
+            "httpx.Response",
+            engine.web_client.post(
+                "/web/api/pair/claim",
+                json={"code": code},
+                headers=headers if headers is not None else self._WEB_HEADERS,
+            ),
+        )
+
+    def _create_session(self, engine: _Engine) -> httpx.Response:
+        return cast(
+            "httpx.Response",
+            engine.web_client.post(
+                "/web/api/session",
+                json={},
+                headers={**engine.headers, **self._WEB_HEADERS},
+            ),
+        )
+
+    def test_web_claim_shares_pairing_state_and_returns_candidate_bearer(
+        self, engine: _Engine
+    ) -> None:
+        code = self._mint(engine)
+        response = self._web_claim(engine, code)
+        assert response.status_code == 200
+        assert response.json() == {"token": engine.token}
+        assert response.headers["cache-control"] == "no-store"
+        assert "access-control-allow-origin" not in response.headers
+        assert engine.client.get("/v1/health", headers=engine.headers).status_code == 200
+        assert engine.client.post("/v1/pair/claim", json={"code": code}).status_code == 403
+
+    @pytest.mark.parametrize(
+        "headers",
+        [
+            {},
+            {"Origin": "http://web.test", "Sec-Fetch-Site": "same-origin"},
+            {"Origin": "https://evil.test", "Sec-Fetch-Site": "same-origin"},
+            {"Origin": "https://web.test", "Sec-Fetch-Site": "cross-site"},
+        ],
+    )
+    def test_web_claim_origin_gates_fail_uniformly_without_burning_code(
+        self, engine: _Engine, headers: dict[str, str]
+    ) -> None:
+        code = self._mint(engine)
+        for _ in range(6):
+            response = self._web_claim(engine, code, headers=headers)
+            assert response.status_code == 403
+            assert response.json() == {"detail": "web request rejected"}
+        assert self._web_claim(engine, code).status_code == 200
+
+    def test_default_https_port_is_normalized_but_nondefault_mismatch_rejects(
+        self, engine: _Engine
+    ) -> None:
+        code = self._mint(engine)
+        accepted = self._web_claim(
+            engine,
+            code,
+            headers={
+                "Host": "web.test:443",
+                "Origin": "https://web.test",
+                "Sec-Fetch-Site": "same-origin",
+            },
+        )
+        assert accepted.status_code == 200
+
+        code = self._mint(engine)
+        rejected = self._web_claim(
+            engine,
+            code,
+            headers={
+                "Host": "web.test:8443",
+                "Origin": "https://web.test",
+                "Sec-Fetch-Site": "same-origin",
+            },
+        )
+        assert rejected.status_code == 403
+        assert self._web_claim(engine, code).status_code == 200
+
+    def test_web_claim_requires_bounded_json_without_burning_code(self, engine: _Engine) -> None:
+        code = self._mint(engine)
+        response = engine.web_client.post(
+            "/web/api/pair/claim",
+            content=json.dumps({"code": code}),
+            headers={**self._WEB_HEADERS, "Content-Type": "text/plain"},
+        )
+        assert response.status_code == 403
+        oversized = json.dumps({"code": code, "padding": "x" * 4096})
+        response = engine.web_client.post(
+            "/web/api/pair/claim",
+            content=oversized,
+            headers={**self._WEB_HEADERS, "Content-Type": "application/json"},
+        )
+        assert response.status_code == 403
+        assert self._web_claim(engine, code).status_code == 200
+
+    def test_pathological_numeric_content_length_fails_closed_without_burning_code(
+        self, engine: _Engine
+    ) -> None:
+        code = self._mint(engine)
+        response = engine.web_client.post(
+            "/web/api/pair/claim",
+            content=json.dumps({"code": code}),
+            headers={
+                **self._WEB_HEADERS,
+                "Content-Type": "application/json",
+                "Content-Length": "9" * 5000,
+            },
+        )
+        assert response.status_code == 403
+        assert response.json() == {"detail": "web request rejected"}
+        assert self._web_claim(engine, code).status_code == 200
+
+    def test_session_requires_verified_bearer_and_sets_scoped_cookie(self, engine: _Engine) -> None:
+        assert (
+            engine.web_client.post(
+                "/web/api/session", json={}, headers=self._WEB_HEADERS
+            ).status_code
+            == 401
+        )
+
+        response = self._create_session(engine)
+
+        assert response.status_code == 204
+        assert response.headers["cache-control"] == "no-store"
+        cookie = response.headers["set-cookie"]
+        assert cookie.startswith(f"__Secure-podcast_reader_web={SESSION_PREFIX}.")
+        assert "HttpOnly" in cookie
+        assert "Max-Age=15552000" in cookie
+        assert "Path=/web/" in cookie
+        assert "SameSite=strict" in cookie
+        assert "Secure" in cookie
+        assert engine.token not in cookie
+
+    def test_cookie_never_authorizes_v1(self, engine: _Engine) -> None:
+        assert self._create_session(engine).status_code == 204
+        assert engine.web_client.get("/v1/health").status_code == 401
+
+    def test_logout_requires_valid_cookie_and_clears_it(self, engine: _Engine) -> None:
+        assert (
+            engine.web_client.post(
+                "/web/api/logout", json={}, headers=self._WEB_HEADERS
+            ).status_code
+            == 401
+        )
+        assert self._create_session(engine).status_code == 204
+
+        response = engine.web_client.post("/web/api/logout", json={}, headers=self._WEB_HEADERS)
+
+        assert response.status_code == 204
+        cookie = response.headers["set-cookie"]
+        assert cookie.startswith("__Secure-podcast_reader_web=")
+        assert "Max-Age=0" in cookie
+        assert "Path=/web/" in cookie
+        assert response.headers["cache-control"] == "no-store"
+
+    def test_expired_cookie_rejected(self, engine: _Engine) -> None:
+        assert self._create_session(engine).status_code == 204
+        engine.web_session_now += SESSION_LIFETIME_S
+        response = engine.web_client.post("/web/api/logout", json={}, headers=self._WEB_HEADERS)
+        assert response.status_code == 401
+
+    def test_session_and_logout_apply_same_origin_gate(self, engine: _Engine) -> None:
+        assert self._create_session(engine).status_code == 204
+        hostile = {"Origin": "https://evil.test", "Sec-Fetch-Site": "cross-site"}
+        session = engine.web_client.post(
+            "/web/api/session", json={}, headers={**engine.headers, **hostile}
+        )
+        logout = engine.web_client.post("/web/api/logout", json={}, headers=hostile)
+        assert session.status_code == logout.status_code == 403
+        assert session.text == logout.text
+
+    def test_session_credential_never_persists_or_echoes(
+        self, engine: _Engine, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        created = self._create_session(engine)
+        credential = created.cookies.get("__Secure-podcast_reader_web")
+        assert credential is not None and credential.startswith(f"{SESSION_PREFIX}.")
+
+        with caplog.at_level(logging.DEBUG):
+            rejected = engine.web_client.post(
+                "/web/api/session",
+                json={"unexpected": credential},
+                headers={**engine.headers, **self._WEB_HEADERS},
+            )
+        assert rejected.status_code == 422
+        self._assert_security_headers(rejected)
+        assert credential not in rejected.text
+        assert credential not in caplog.text
+        for path in engine.data_dir.rglob("*"):
+            if path.is_file():
+                assert credential not in path.read_text(errors="replace"), path
+
+    def test_security_headers_cover_success_gate_and_framework_errors(
+        self, engine: _Engine
+    ) -> None:
+        code = self._mint(engine)
+        success = self._web_claim(engine, code)
+        gated = engine.web_client.post("/web/api/pair/claim", json={"code": code})
+        missing = engine.web_client.get("/web/api/not-a-route", headers=engine.headers)
+        wrong_method = engine.web_client.get("/web/api/session", headers=engine.headers)
+
+        assert success.status_code == 200
+        assert gated.status_code == 403
+        assert missing.status_code == 404
+        assert wrong_method.status_code == 405
+        for response in (success, gated, missing, wrong_method):
+            self._assert_security_headers(response)
+
+    def test_unhandled_web_failure_is_generic_hardened_and_unlogged(
+        self, engine: _Engine, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        secret = "prws1.must-never-escape-the-web-error"
+
+        @engine.app.get("/web/api/_injected_failure")
+        def injected_failure() -> None:
+            raise RuntimeError(secret)
+
+        client = TestClient(
+            engine.app,
+            base_url="https://web.test",
+            raise_server_exceptions=False,
+        )
+        with caplog.at_level(logging.DEBUG):
+            response = client.get("/web/api/_injected_failure", headers=engine.headers)
+
+        assert response.status_code == 500
+        assert response.json() == {"detail": "internal server error"}
+        self._assert_security_headers(response)
+        assert secret not in response.text
+        assert secret not in caplog.text
+
+    def test_non_web_unhandled_failure_retains_framework_behavior(self, engine: _Engine) -> None:
+        @engine.app.get("/v1/_injected_failure")
+        def injected_failure() -> None:
+            raise RuntimeError("non-web failure")
+
+        client = TestClient(engine.app, raise_server_exceptions=False)
+        response = client.get("/v1/_injected_failure", headers=engine.headers)
+        assert response.status_code == 500
+        assert response.text == "Internal Server Error"
+        assert "referrer-policy" not in response.headers
+        assert "x-content-type-options" not in response.headers
+
+    @staticmethod
+    def _assert_security_headers(response: httpx.Response) -> None:
+        assert response.headers["referrer-policy"] == "no-referrer"
+        assert response.headers["x-content-type-options"] == "nosniff"
+        assert response.headers["cache-control"] == "no-store"
+
+    @pytest.mark.parametrize(
+        ("method", "path"),
+        [
+            ("GET", "/web/api/pair/claim"),
+            ("GET", "/web/api/session"),
+            ("GET", "/web/api/logout"),
+        ],
+    )
+    def test_web_auth_exemptions_are_exact(self, engine: _Engine, method: str, path: str) -> None:
+        assert engine.web_client.request(method, path).status_code == 401
 
 
 def _cookie_line(domain: str, value: str = "secret-cookie-value") -> str:
