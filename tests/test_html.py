@@ -437,16 +437,26 @@ class TestKeylessLandmarks:
 
         html = build_html(list(self._SEGMENTS), title="T", sentences_per_para=1, source="test")
         for ts in ("00:05:05", "00:10:05", "00:15:05"):
-            assert f'<div class="landmark"><span class="landmark-ts">{ts}</span></div>' in html
+            assert f'<div class="landmark"><span class="landmark-ts">{ts}</span>' in html
         # No landmark under the masthead for the first stop.
         assert '<span class="landmark-ts">00:00:00</span>' not in html
         assert html.count('class="landmark"') == 3
+
+    def test_landmark_carries_the_rail_label(self) -> None:
+        """Issue #64: sections have names, not a bare timestamp duplicate."""
+        from podcast_reader.html import build_html
+
+        html = build_html(list(self._SEGMENTS), title="T", sentences_per_para=1, source="test")
+        assert (
+            '<span class="landmark-ts">00:05:05</span>'
+            '<span class="landmark-label">Five minutes one. Five minutes two.</span>' in html
+        )
 
     def test_landmark_precedes_its_marker_paragraph(self) -> None:
         from podcast_reader.html import build_html
 
         html = build_html(list(self._SEGMENTS), title="T", sentences_per_para=1, source="test")
-        landmark = '<div class="landmark"><span class="landmark-ts">00:05:05</span></div>'
+        landmark = '<div class="landmark"><span class="landmark-ts">00:05:05</span>'
         assert html.index(landmark) < html.index('id="t-305000"')
 
     def test_chaptered_artifact_has_no_landmarks(self) -> None:
@@ -471,31 +481,120 @@ class TestKeylessLandmarks:
         assert 'class="landmark"' not in html
 
 
+class TestTimelineInterval:
+    """Issue #64: tiers one notch denser — ~2-3 min stops for short talks."""
+
+    def test_interval_tiers(self) -> None:
+        from podcast_reader.html import _timeline_interval
+
+        assert _timeline_interval(10 * 60) == 2 * 60
+        assert _timeline_interval(15 * 60) == 3 * 60
+        assert _timeline_interval(30 * 60) == 3 * 60
+        assert _timeline_interval(45 * 60) == 5 * 60
+        assert _timeline_interval(2 * 60 * 60) == 10 * 60
+
+
 class TestTimelineLabel:
     def test_short_text_is_kept_whole_without_ellipsis(self) -> None:
         from podcast_reader.html import _timeline_label
 
         assert _timeline_label("I dropped out of Reed.") == "I dropped out of Reed."
 
-    def test_long_text_truncates_at_word_boundary_with_ellipsis(self) -> None:
+    def test_clause_boundary_cut_drops_the_comma_and_needs_no_ellipsis(self) -> None:
+        from podcast_reader.html import _timeline_label
+
+        label = _timeline_label(
+            "The second story is about love and loss, which changed everything for me"
+        )
+        assert label == "The second story is about love and loss"
+
+    def test_sentence_boundary_cut_keeps_the_period(self) -> None:
+        from podcast_reader.html import _timeline_label
+
+        label = _timeline_label(
+            "I dropped out of Reed College. The rest of this sentence runs well past the budget."
+        )
+        assert label == "I dropped out of Reed College."
+
+    def test_no_boundary_falls_back_to_word_cut_with_ellipsis(self) -> None:
         from podcast_reader.html import _timeline_label
 
         label = _timeline_label(
             "I dropped out of Reed College after the first six months but then stayed around"
         )
-        assert label == "I dropped out of Reed College after the…"
-        assert len(label) <= 43  # budget + ellipsis
+        assert label == "I dropped out of Reed College after the first six months but…"
+        assert len(label) <= 61  # budget + ellipsis
+
+    def test_mid_word_punctuation_is_not_a_boundary(self) -> None:
+        from podcast_reader.html import _timeline_label
+
+        label = _timeline_label(
+            "sort of 5:00 pm daily and then we kept going on and on well past the budget"
+        )
+        # The colon inside "5:00" must not be treated as a clause end: the
+        # label keeps the whole token and falls back to a word cut.
+        assert label != "sort of 5"
+        assert "5:00 pm" in label
+        assert label.endswith("…")
 
     def test_single_overlong_word_hard_truncates(self) -> None:
         from podcast_reader.html import _timeline_label
 
-        label = _timeline_label("a" * 60)
-        assert label == "a" * 42 + "…"
+        label = _timeline_label("a" * 80)
+        assert label == "a" * 60 + "…"
 
     def test_surrounding_whitespace_does_not_force_ellipsis(self) -> None:
         from podcast_reader.html import _timeline_label
 
-        assert _timeline_label("  Short text.  ") == "Short text."
+        assert _timeline_label("  Short   text.  ") == "Short text."
+
+
+class TestRailGeometryScript:
+    """Issue #63: scroll offset is measured from the live rail height, and
+    the rail collapses to timestamp chips once scrolled."""
+
+    _SEGS = [
+        {"start": 0.0, "end": 10.0, "text": "Opening one."},
+        {"start": 305.0, "end": 315.0, "text": "Five minutes one."},
+        {"start": 605.0, "end": 615.0, "text": "Ten minutes one."},
+    ]
+
+    def test_keyless_artifact_ships_the_rail_script(self) -> None:
+        from podcast_reader.html import build_html
+
+        html = build_html(list(self._SEGS), title="T", sentences_per_para=1, source="test")
+        assert "scrollPaddingTop" in html
+        # Re-measured on resize and on stuck-state changes, not just load.
+        assert "addEventListener('resize', pad)" in html
+        assert "classList.toggle('stuck', v)" in html
+        # Collapsed sticky state hides snippets, keeping timestamp chips.
+        assert ".timeline-nav.stuck .timeline-snippet { display: none; }" in html
+
+    def test_chaptered_artifact_omits_the_rail_script(self) -> None:
+        from podcast_reader.html import build_html
+
+        html = build_html(
+            list(self._SEGS),
+            title="T",
+            chapters=[
+                {
+                    "title": "All",
+                    "start": 0.0,
+                    "end": 615.0,
+                    "abstract": "Everything.",
+                    "type": "content",
+                    "key_points": [],
+                }
+            ],
+            source="test",
+        )
+        assert "scrollPaddingTop" not in html
+
+    def test_empty_artifact_omits_the_rail_script(self) -> None:
+        from podcast_reader.html import build_html
+
+        html = build_html([], title="T", source="test")
+        assert "scrollPaddingTop" not in html
 
 
 class TestSidebarMarginGating:
@@ -656,6 +755,22 @@ class TestBuildHtmlIntegration:
         result = build_html(segments, title="Test Episode", sentences_per_para=5, source="test")
 
         expected = (FIXTURES / "sample_expected_nochapters.html").read_text()
+        assert result == expected
+
+    def test_longform_keyless_golden_stays_current(self) -> None:
+        """The longform golden is doubly load-bearing: byte-compared here AND
+        measured in a real browser by app/tests/e2e/artifact-geometry.spec.ts
+        (the #63 anchor-offset regression gate). Regenerate via
+        ``uv run python tests/regen_goldens.py`` after intentional renderer
+        changes so the browser gate always measures current output."""
+        from podcast_reader.html import build_html
+
+        whisper_data = json.loads((FIXTURES / "longform_whisper.json").read_text())
+        segments = [s for s in whisper_data["segments"] if s.get("text", "").strip()]
+
+        result = build_html(segments, title="Longform Test Episode", source="test")
+
+        expected = (FIXTURES / "sample_expected_longform.html").read_text()
         assert result == expected
 
     def test_full_pipeline_with_chapters(self) -> None:

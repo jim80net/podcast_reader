@@ -221,26 +221,53 @@ def _time_anchor(seconds: float) -> str:
 
 
 def _timeline_interval(duration: float) -> float:
-    """Choose a coarse interval that keeps the timeline compact."""
+    """Choose a marker interval dense enough to navigate by (#64).
+
+    Every ~2-3 minutes for short talks; the wrapped rail absorbs the extra
+    stops by design (#57).
+    """
     if duration <= 10 * 60:
         return 2 * 60
     if duration <= 30 * 60:
-        return 5 * 60
+        return 3 * 60
     if duration <= 60 * 60:
-        return 10 * 60
-    return 15 * 60
+        return 5 * 60
+    return 10 * 60
 
 
-_TIMELINE_LABEL_MAX_CHARS = 42
+_TIMELINE_LABEL_MAX_CHARS = 60
+
+#: Clause boundaries a label may end on. Sentence enders stay in the label;
+#: soft breaks (comma/semicolon/colon/dashes) are trimmed off the end.
+_LABEL_SENTENCE_ENDERS = ".!?"
+_LABEL_SOFT_BREAKS = ",;:—–"
+#: Don't cut at a boundary so early the label carries no meaning.
+_LABEL_MIN_CUT = 20
 
 
 def _timeline_label(text: str) -> str:
-    """The opening words of a marker paragraph, as a compact rail label.
+    """The opening clause of a marker paragraph, as a rail/landmark label.
 
-    Whole words only, up to the character budget; an ellipsis marks any
-    truncation. No meaning is invented — the label IS the transcript text.
+    Prefer completing the clause or sentence within the budget — a label
+    that ends at real punctuation reads as editorial, not as a machine cut.
+    An ellipsis appears only when no usable boundary exists (#64). No
+    meaning is invented — the label IS the transcript text.
     """
-    words = text.split()
+    clean = " ".join(text.split())
+    if len(clean) <= _TIMELINE_LABEL_MAX_CHARS:
+        return clean
+
+    # Last clause boundary inside the budget: punctuation followed by a
+    # space (so "5:00" or "U.S." interiors never match).
+    window = clean[: _TIMELINE_LABEL_MAX_CHARS + 1]
+    boundary_chars = _LABEL_SENTENCE_ENDERS + _LABEL_SOFT_BREAKS
+    for i in range(len(window) - 2, _LABEL_MIN_CUT - 1, -1):
+        if window[i] in boundary_chars and window[i + 1] == " ":
+            label = clean[: i + 1]
+            return label.rstrip(_LABEL_SOFT_BREAKS)
+
+    # No boundary: whole words up to the budget, ellipsis marks the cut.
+    words = clean.split()
     label = ""
     for word in words:
         candidate = f"{label} {word}" if label else word
@@ -251,9 +278,7 @@ def _timeline_label(text: str) -> str:
         # A single word longer than the budget: hard-truncate rather than
         # emit an empty label.
         label = words[0][:_TIMELINE_LABEL_MAX_CHARS]
-    if label != text.strip():
-        label += "…"
-    return label
+    return label + "…"
 
 
 def _timeline_markers(paragraphs: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -356,7 +381,12 @@ def build_chapter_body(
         for p in paragraphs:
             ts = fmt_time(p["start"])
             if id(p) in landmark_ids:
-                parts.append(f'<div class="landmark"><span class="landmark-ts">{ts}</span></div>')
+                # The landmark carries the rail's label so sections have
+                # names, not a bare duplicate of the paragraph chip (#64).
+                parts.append(
+                    f'<div class="landmark"><span class="landmark-ts">{ts}</span>'
+                    f'<span class="landmark-label">{_esc(_timeline_label(p["text"]))}</span></div>'
+                )
             prefix = _speaker_prefix(p, last_speaker)
             last_speaker = p.get("speaker")
             anchor = _time_anchor(float(p["start"]))
@@ -718,6 +748,11 @@ h1 {
 .timeline-links a:focus-visible .timeline-ts { color: var(--accent); }
 .timeline-links a:hover .timeline-snippet,
 .timeline-links a:focus-visible .timeline-snippet { color: var(--text-bright); }
+/* Collapsed sticky state (#63): once scrolled, the rail shrinks to compact
+   timestamp chips — every stop stays tappable while occluding less text.
+   Toggled by the rail script; without JS the rail simply stays expanded. */
+.timeline-nav.stuck { padding: 0.4rem 0.75rem; }
+.timeline-nav.stuck .timeline-snippet { display: none; }
 
 /* ---- KEYLESS SECTION LANDMARKS ---- */
 /* Quiet structural rhythm at the rail's marker boundaries: same visual
@@ -730,9 +765,17 @@ h1 {
 .landmark-ts {
   font-family: 'JetBrains Mono', monospace;
   font-size: 0.68rem;
-  color: var(--muted);
+  color: var(--accent-dim);
   letter-spacing: 0.03em;
   user-select: none;
+}
+.landmark-label {
+  font-family: 'Oswald', sans-serif;
+  font-size: 0.8rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+  margin-left: 0.6rem;
 }
 
 /* ---- CHAPTER SECTIONS ---- */
@@ -945,6 +988,45 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 """
 
+# Keyless jump-rail geometry (#63). A fixed scroll-padding cannot track a
+# variable-height sticky rail (the #57 wrap made its height depend on stop
+# count and viewport width; the 4rem constant left jump targets 11-39px
+# under it). This script keeps two invariants:
+#   1. scroll-padding-top always equals the rail's CURRENT height + a gap,
+#      re-measured on load, resize, and stuck-state changes — so an anchor
+#      jump can never land the target under the rail. (Collapse only ever
+#      SHRINKS the rail mid-scroll, so a jump computed against the taller
+#      at-rest measurement still clears it.)
+#   2. Once scrolled (a zero-height sentinel above the rail leaves the
+#      viewport), the rail collapses to a compact timestamps-only state
+#      (.stuck hides snippets) — less mid-scroll text occlusion.
+# The static 4rem in the stylesheet stays as the no-JS fallback.
+_RAIL_SCRIPT = """\
+(function() {
+  var rail = document.querySelector('.timeline-nav');
+  if (!rail) return;
+  var sentinel = document.createElement('div');
+  rail.parentNode.insertBefore(sentinel, rail);
+  function pad() {
+    document.documentElement.style.scrollPaddingTop = (rail.offsetHeight + 8) + 'px';
+  }
+  var stuck = false;
+  function setStuck(v) {
+    if (v === stuck) return;
+    stuck = v;
+    rail.classList.toggle('stuck', v);
+    pad();
+  }
+  if ('IntersectionObserver' in window) {
+    new IntersectionObserver(function(entries) {
+      setStuck(!entries[0].isIntersecting);
+    }).observe(sentinel);
+  }
+  window.addEventListener('resize', pad);
+  pad();
+})();
+"""
+
 # Bidirectional transcript<->media sync (media-playback). Inert when the
 # artifact is opened standalone (no parent player): the very first guard
 # returns, so a directly-opened file behaves exactly as before. Inside the
@@ -1047,7 +1129,8 @@ def build_html(
     # always present (it keys off [data-start] passages, which exist in both
     # paths) and is inert when the file is opened standalone.
     scroll_tag = f"<script>\n{_SCROLL_SCRIPT}</script>\n" if chapters else ""
-    script_tag = f"{scroll_tag}<script>\n{_SYNC_SCRIPT}</script>"
+    rail_tag = f"<script>\n{_RAIL_SCRIPT}</script>\n" if timeline_html else ""
+    script_tag = f"{scroll_tag}{rail_tag}<script>\n{_SYNC_SCRIPT}</script>"
 
     # The sidebar and the margin that reserves space for it travel together:
     # keyless artifacts emit neither (issue #52).
