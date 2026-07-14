@@ -426,6 +426,34 @@ class TestPipelineRunner:
 
         assert mock_run.call_args.args[0]["chapter_api_key"] == "sk-ant-pushed"
 
+    def test_named_provider_uses_snapshot_and_per_name_env(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("PODCAST_READER_PROVIDER_OFFICE_GATEWAY_KEY", "sk-office-env")
+        settings = load_settings(tmp_path)
+        settings["chapter_provider"] = "office-gateway"
+        settings["custom_providers"] = [
+            {
+                "name": "office-gateway",
+                "base_url": "https://llm.corp.example/v1",
+                "default_model": "corp-small",
+                "max_tokens": 32768,
+            }
+        ]
+        save_settings(tmp_path, settings)
+
+        with patch(
+            "podcast_reader.engine.process.run_pipeline", side_effect=_fake_run_pipeline
+        ) as mock_run:
+            runner = make_pipeline_runner(tmp_path)
+            runner(new_job_record(job_id="j1", source="https://example.com/e", title=None), _noop)
+        request = mock_run.call_args.args[0]
+
+        assert request["chapter_api_key"] == "sk-office-env"
+        assert request["custom_providers"] == settings["custom_providers"]
+        settings["custom_providers"][0]["default_model"] = "mutated-after-run"
+        assert request["custom_providers"][0]["default_model"] == "corp-small"
+
     def test_restart_loses_pushed_keys(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

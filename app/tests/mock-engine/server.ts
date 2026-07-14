@@ -76,6 +76,12 @@ interface EngineSettings {
   chapter_model: string
   chapter_provider: string
   custom_provider_url: string
+  custom_providers: Array<{
+    name: string
+    base_url: string
+    default_model: string
+    max_tokens: number
+  }>
   diarize: boolean
   caption_cleanup: boolean
   media_cache_max_bytes: number
@@ -153,11 +159,14 @@ let settings: EngineSettings = {
   chapter_model: '',
   chapter_provider: 'anthropic',
   custom_provider_url: '',
+  custom_providers: [],
   diarize: false,
   caption_cleanup: false,
   media_cache_max_bytes: 5 * 1024 ** 3
 }
 let keyTestResult: { ok: boolean; detail: string | null } = { ok: true, detail: null }
+let keyTestDelayMs = 0
+let settingsPutDelayMs = 0
 const pushedKeys = new Set<string>()
 
 // Pack surface defaults: recommended packs ALREADY installed, so the setup
@@ -336,8 +345,12 @@ function broadcast(event: PipelineEvent): void {
 }
 
 function validateSettingsPut(body: Record<string, unknown>): string | null {
+  const customProviders =
+    (body.custom_providers as EngineSettings['custom_providers'] | undefined) ??
+    settings.custom_providers
+  const providerIds = [...PROVIDERS, ...customProviders.map((entry) => entry.name)]
   const provider = (body.chapter_provider as string | undefined) ?? settings.chapter_provider
-  if (!PROVIDERS.includes(provider)) return `unknown chapter provider: '${provider}'`
+  if (!providerIds.includes(provider)) return `unknown chapter provider: '${provider}'`
   const url = (body.custom_provider_url as string | undefined) ?? settings.custom_provider_url
   if (provider === 'custom' || url !== '') {
     if (url === '') {
@@ -458,6 +471,8 @@ async function handleControl(
     if (body.keyTestResult !== undefined) {
       keyTestResult = body.keyTestResult as { ok: boolean; detail: string | null }
     }
+    if (body.keyTestDelayMs !== undefined) keyTestDelayMs = Number(body.keyTestDelayMs)
+    if (body.settingsPutDelayMs !== undefined) settingsPutDelayMs = Number(body.settingsPutDelayMs)
     if (body.hardware !== undefined) {
       hardware = body.hardware as HardwareInfo
     }
@@ -788,7 +803,8 @@ async function handleV1(req: IncomingMessage, res: ServerResponse, path: string)
   if (req.method === 'PUT' && path === '/v1/keys') {
     const body = await readBody(req)
     const provider = body.provider as string
-    if (!PROVIDERS.includes(provider)) {
+    const known = [...PROVIDERS, ...settings.custom_providers.map((entry) => entry.name)]
+    if (!known.includes(provider) && (body.api_key as string) !== '') {
       return detail(res, 400, `unknown chapter provider: '${provider}'`)
     }
     // NEVER log the key value — only that a push happened for the provider.
@@ -800,10 +816,12 @@ async function handleV1(req: IncomingMessage, res: ServerResponse, path: string)
   }
   if (req.method === 'POST' && path === '/v1/keys/test') {
     const body = await readBody(req)
-    if (!PROVIDERS.includes(body.provider as string)) {
+    const known = [...PROVIDERS, ...settings.custom_providers.map((entry) => entry.name)]
+    if (!known.includes(body.provider as string)) {
       return detail(res, 400, `unknown chapter provider: '${String(body.provider)}'`)
     }
     record('keys-test', body.provider as string)
+    if (keyTestDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, keyTestDelayMs))
     sendJson(res, 200, keyTestResult)
     return
   }
@@ -811,9 +829,15 @@ async function handleV1(req: IncomingMessage, res: ServerResponse, path: string)
     sendJson(
       res,
       200,
-      PROVIDERS.map((id) => ({
+      [
+        ...PROVIDERS.map((id) => ({ id, default_model: id === 'custom' ? '' : `${id}-default-model` })),
+        ...settings.custom_providers.map((provider) => ({
+          id: provider.name,
+          default_model: provider.default_model
+        }))
+      ].map(({ id, default_model }) => ({
         id,
-        default_model: id === 'custom' ? '' : `${id}-default-model`,
+        default_model,
         key_available: pushedKeys.has(id)
       }))
     )
@@ -825,6 +849,9 @@ async function handleV1(req: IncomingMessage, res: ServerResponse, path: string)
   }
   if (req.method === 'PUT' && path === '/v1/settings') {
     const body = await readBody(req)
+    if (settingsPutDelayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, settingsPutDelayMs))
+    }
     const invalid = validateSettingsPut(body)
     if (invalid !== null) return detail(res, 400, invalid)
     settings = { ...settings, ...(body as Partial<EngineSettings>) }

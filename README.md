@@ -283,9 +283,26 @@ request. Without a key, the transcript still renders — just without chapters.
 requests to `PODCAST_READER_CUSTOM_PROVIDER_URL` (must be `https`, or `http`
 on localhost — e.g. a local OpenAI-compatible server).
 
+The desktop Settings view can also save multiple named OpenAI-compatible
+providers, each with its own base URL, default model, and max-token cap. Only
+that nonsecret configuration is written to engine settings; keys continue
+through the app's encrypted vault and the engine's memory-only key endpoint.
+One-shot CLI runs read the named definitions from
+`$PODCAST_READER_DATA_DIR/settings.json`. A name such as `office-gateway` uses
+`PODCAST_READER_PROVIDER_OFFICE_GATEWAY_KEY`:
+
+```bash
+PODCAST_READER_PROVIDER_OFFICE_GATEWAY_KEY=sk-xxx \
+  podcast-reader --provider office-gateway episode.mp3
+```
+
+Named provider URLs must use HTTPS, except HTTP loopback endpoints are allowed.
+URLs containing embedded credentials, query strings, or fragments are rejected
+so secrets cannot be persisted accidentally.
+
 In engine mode, the provider and model are engine settings
 (`PUT /v1/settings`: `chapter_provider`, `chapter_model`,
-`custom_provider_url`), and API keys are pushed into process memory via
+`custom_provider_url`, `custom_providers`), and API keys are pushed into process memory via
 `PUT /v1/keys {provider, api_key}` — they are never written to disk, never
 readable back through the API, and are lost on engine restart. Headless
 `podcast-reader serve` deployments can keep exporting the provider's key

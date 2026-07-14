@@ -14,13 +14,15 @@ import json
 import os
 import queue
 import re
+import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 import httpx
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, Response, status
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from starlette.background import BackgroundTask
 
 from podcast_reader.chapters import verify_key
@@ -55,11 +57,17 @@ from podcast_reader.engine.settings import (
     save_settings,
     token_fingerprint,
 )
-from podcast_reader.providers import PROVIDERS, resolve_provider, validate_custom_url
+from podcast_reader.providers import (
+    build_provider_registry,
+    canonicalize_custom_providers,
+    resolve_provider,
+    validate_custom_url,
+)
 
 # JobRecord/LibraryEntry back FastAPI response models, so they must be
 # importable at runtime (a TYPE_CHECKING import leaves unresolvable ForwardRefs).
 from podcast_reader.types import (
+    CustomProviderConfig,
     EngineSettings,
     JobOverrides,  # noqa: TC001 — used in a runtime cast
     JobRecord,  # noqa: TC001 — runtime response model
@@ -148,12 +156,25 @@ class ProviderInfo(BaseModel):
     key_available: bool
 
 
+class CustomProviderBody(BaseModel):
+    """Strict nonsecret configuration for one user-defined provider."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    name: str
+    base_url: str
+    default_model: str
+    max_tokens: int
+
+
 class SettingsBody(BaseModel):
     """Body of ``PUT /v1/settings`` — mirrors :class:`EngineSettings`.
 
     Fields added after Phase 1 default to ``None`` ("keep the current value"),
     so PUTs from pre-change clients keep succeeding without resetting them.
     """
+
+    model_config = ConfigDict(extra="forbid")
 
     whisper_model: str
     whisper_lang: str
@@ -163,6 +184,7 @@ class SettingsBody(BaseModel):
     chapter_model: str
     chapter_provider: str | None = None
     custom_provider_url: str | None = None
+    custom_providers: list[CustomProviderBody] | None = None
     diarize: bool | None = None
     caption_cleanup: bool | None = None
     media_cache_max_bytes: int | None = None
@@ -184,6 +206,14 @@ class SettingsBody(BaseModel):
                 self.custom_provider_url
                 if self.custom_provider_url is not None
                 else current["custom_provider_url"]
+            ),
+            custom_providers=(
+                cast(
+                    "list[CustomProviderConfig]",
+                    [entry.model_dump() for entry in self.custom_providers],
+                )
+                if self.custom_providers is not None
+                else current["custom_providers"]
             ),
             diarize=self.diarize if self.diarize is not None else current["diarize"],
             caption_cleanup=(
@@ -277,6 +307,23 @@ def create_app(
     expected_token = load_engine_state(data_dir)["token"].encode()
     keys: dict[str, str] = key_store if key_store is not None else {}
     pairing_state = pairing if pairing is not None else PairingState()
+    provider_config_lock = threading.RLock()
+
+    @app.exception_handler(RequestValidationError)
+    async def _validation_error_without_inputs(
+        _request: Request, exc: RequestValidationError
+    ) -> JSONResponse:
+        """Return useful validation locations without echoing submitted secrets.
+
+        Pydantic's default 422 body includes each rejected ``input`` value. A
+        misspelled key field in settings (or a malformed key request) would
+        therefore reflect credential material even though the route never ran.
+        """
+        safe_errors = [
+            {key: value for key, value in error.items() if key not in {"input", "ctx", "url"}}
+            for error in exc.errors()
+        ]
+        return JSONResponse({"detail": safe_errors}, status_code=422)
 
     @app.middleware("http")
     async def _require_bearer_token(
@@ -383,25 +430,29 @@ def create_app(
             if body.overrides is not None
             else None
         )
-        if overrides is not None:
-            # Fail fast (like PUT /v1/settings) so a bad rerun input is a 400,
-            # not a job that runs and degrades. Only present fields are checked
-            # (a custom base URL may legitimately come from the settings).
-            prov = overrides.get("chapter_provider")
-            if prov is not None and prov not in PROVIDERS:
-                raise HTTPException(status_code=400, detail=f"unknown chapter provider: {prov!r}")
-            custom_url = overrides.get("custom_provider_url")
-            if custom_url:
-                try:
-                    validate_custom_url(custom_url)
-                except ValueError as exc:
-                    raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return store.submit(
-            body.source,
-            body.title,
-            requires_confirmation=body.requires_confirmation,
-            overrides=overrides,
-        )
+        with provider_config_lock:
+            if overrides is not None:
+                # Fail fast (like PUT /v1/settings) so a bad rerun input is a 400,
+                # not a job that runs and degrades. Only present fields are checked
+                # (a custom base URL may legitimately come from the settings).
+                prov = overrides.get("chapter_provider")
+                registry = build_provider_registry(load_settings(data_dir)["custom_providers"])
+                if prov is not None and prov not in registry:
+                    raise HTTPException(
+                        status_code=400, detail=f"unknown chapter provider: {prov!r}"
+                    )
+                custom_url = overrides.get("custom_provider_url")
+                if custom_url:
+                    try:
+                        validate_custom_url(custom_url)
+                    except ValueError as exc:
+                        raise HTTPException(status_code=400, detail=str(exc)) from exc
+            return store.submit(
+                body.source,
+                body.title,
+                requires_confirmation=body.requires_confirmation,
+                overrides=overrides,
+            )
 
     @app.get("/v1/jobs")
     def list_jobs() -> list[JobRecord]:
@@ -561,11 +612,16 @@ def create_app(
         stored value as "no pushed key" (intentional truthiness in
         ``_resolve_chapter_key``) and reads the provider's ``key_env`` instead.
         """
-        if body.provider not in PROVIDERS:
-            raise HTTPException(
-                status_code=400, detail=f"unknown chapter provider: {body.provider!r}"
-            )
-        keys[body.provider] = body.api_key
+        with provider_config_lock:
+            registry = build_provider_registry(load_settings(data_dir)["custom_providers"])
+            if body.provider not in registry and body.api_key:
+                raise HTTPException(
+                    status_code=400, detail=f"unknown chapter provider: {body.provider!r}"
+                )
+            if body.api_key:
+                keys[body.provider] = body.api_key
+            else:
+                keys.pop(body.provider, None)
 
     @app.post("/v1/keys/test")
     def test_key(body: KeyTestBody) -> KeyTestResult:
@@ -577,13 +633,18 @@ def create_app(
         self-authored: provider response bodies echo key fragments, so they
         never reach the response or the logs (K4).
         """
-        if body.provider not in PROVIDERS:
+        settings = load_settings(data_dir)
+        registry = build_provider_registry(settings["custom_providers"])
+        if body.provider not in registry:
             raise HTTPException(
                 status_code=400, detail=f"unknown chapter provider: {body.provider!r}"
             )
-        settings = load_settings(data_dir)
         try:
-            spec = resolve_provider(body.provider, custom_base_url=settings["custom_provider_url"])
+            spec = resolve_provider(
+                body.provider,
+                custom_base_url=settings["custom_provider_url"],
+                custom_providers=settings["custom_providers"],
+            )
         except ValueError as exc:  # missing/invalid custom URL — self-authored (per P9)
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         api_key = body.api_key or keys.get(body.provider) or os.environ.get(spec["key_env"]) or ""
@@ -617,13 +678,15 @@ def create_app(
         ``key_available`` mirrors job-time key resolution: a pushed key counts
         (empty = cleared), else the provider's env variable.
         """
+        settings = load_settings(data_dir)
+        registry = build_provider_registry(settings["custom_providers"])
         return [
             ProviderInfo(
                 id=name,
                 default_model=spec["default_model"],
                 key_available=bool(keys.get(name) or os.environ.get(spec["key_env"])),
             )
-            for name, spec in PROVIDERS.items()
+            for name, spec in registry.items()
         ]
 
     @app.put("/v1/cookies", status_code=status.HTTP_204_NO_CONTENT)
@@ -661,22 +724,53 @@ def create_app(
         # Validate at write time (symmetric with PUT /v1/keys) so a bad value
         # fails the request, not a later job with an opaque warning. The
         # validator messages are self-authored, so safe to echo as detail.
-        if body.chapter_provider is not None and body.chapter_provider not in PROVIDERS:
-            raise HTTPException(
-                status_code=400, detail=f"unknown chapter provider: {body.chapter_provider!r}"
-            )
-        # Validate the EFFECTIVE values (body merged over current settings):
-        # the custom provider needs a non-empty, valid base URL no matter
-        # whether it arrives in this PUT or was persisted earlier, and any
-        # explicitly supplied URL must be valid regardless of provider.
-        settings = body.to_settings(load_settings(data_dir))
-        if settings["chapter_provider"] == "custom" or settings["custom_provider_url"]:
+        with provider_config_lock:
+            current = load_settings(data_dir)
+            settings = body.to_settings(current)
             try:
-                validate_custom_url(settings["custom_provider_url"])
+                settings["custom_providers"] = canonicalize_custom_providers(
+                    settings["custom_providers"]
+                )
+                registry = build_provider_registry(settings["custom_providers"])
             except ValueError as exc:
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
-        save_settings(data_dir, settings)
-        return settings
+            if settings["chapter_provider"] not in registry:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"unknown chapter provider: {settings['chapter_provider']!r}",
+                )
+            removed = {entry["name"] for entry in current["custom_providers"]} - {
+                entry["name"] for entry in settings["custom_providers"]
+            }
+            if removed:
+                for job in store.list_jobs():
+                    overrides = job.get("overrides") or {}
+                    provider = overrides.get("chapter_provider")
+                    if (
+                        job["state"] not in {"done", "failed", "interrupted"}
+                        and provider in removed
+                    ):
+                        raise HTTPException(
+                            status_code=409,
+                            detail=(
+                                f"provider {provider!r} is referenced by "
+                                f"nonterminal job {job['id']!r}; "
+                                "finish or discard that job before removing the provider"
+                            ),
+                        )
+            # Validate the EFFECTIVE values (body merged over current settings):
+            # the custom provider needs a non-empty, valid base URL no matter
+            # whether it arrives in this PUT or was persisted earlier, and any
+            # explicitly supplied URL must be valid regardless of provider.
+            if settings["chapter_provider"] == "custom" or settings["custom_provider_url"]:
+                try:
+                    validate_custom_url(settings["custom_provider_url"])
+                except ValueError as exc:
+                    raise HTTPException(status_code=400, detail=str(exc)) from exc
+            save_settings(data_dir, settings)
+            for name in removed:
+                keys.pop(name, None)
+            return settings
 
     return app
 

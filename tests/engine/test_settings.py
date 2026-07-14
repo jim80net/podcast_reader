@@ -132,6 +132,7 @@ class TestUserSettings:
         assert settings["chapter_model"] == ""
         assert settings["chapter_provider"] == "anthropic"
         assert settings["custom_provider_url"] == ""
+        assert settings["custom_providers"] == []
         assert settings["library_dir"] == str(tmp_path / "library")
         # diarization-worker spec: disabled by default.
         assert settings["diarize"] is False
@@ -244,6 +245,25 @@ class TestUserSettings:
 
         assert load_settings(tmp_path)["chapter_model"] == "claude-opus-x"
 
+    def test_named_provider_roundtrip_is_canonical_and_nonsecret(self, tmp_path: Path) -> None:
+        settings = load_settings(tmp_path)
+        settings["custom_providers"] = [
+            {
+                "name": "office-gateway",
+                "base_url": "https://llm.corp.example/v1",
+                "default_model": "corp-small",
+                "max_tokens": 32768,
+            }
+        ]
+
+        save_settings(tmp_path, settings)
+
+        loaded = load_settings(tmp_path)
+        assert loaded["custom_providers"] == settings["custom_providers"]
+        persisted = (tmp_path / "settings.json").read_text()
+        assert "api_key" not in persisted
+        assert "PODCAST_READER_PROVIDER_OFFICE_GATEWAY_KEY" not in persisted
+
 
 class TestCorruptSettings:
     def test_garbage_settings_quarantined_and_defaults_returned(
@@ -269,6 +289,41 @@ class TestCorruptSettings:
         (tmp_path / "settings.json").write_text('["not", "an", "object"]')
         settings = load_settings(tmp_path)
         assert settings["whisper_model"] == "large-v3"
+        assert (tmp_path / "settings.json.corrupt").exists()
+
+    @pytest.mark.parametrize(
+        "providers",
+        [
+            "not-a-list",
+            [{"name": "broken"}],
+            [
+                {
+                    "name": "office-gateway",
+                    "base_url": "https://user:secret@llm.example/v1",
+                    "default_model": "corp-small",
+                    "max_tokens": 100,
+                }
+            ],
+            [
+                {
+                    "name": "office-gateway",
+                    "base_url": "https://llm.example/v1",
+                    "default_model": "corp-small",
+                    "max_tokens": 100,
+                    "api_key": "must-not-survive",
+                }
+            ],
+        ],
+    )
+    def test_malformed_named_providers_quarantined(self, tmp_path: Path, providers: object) -> None:
+        payload = dict(load_settings(tmp_path))
+        payload["custom_providers"] = providers
+        (tmp_path / "settings.json").write_text(json.dumps(payload))
+
+        settings = load_settings(tmp_path)
+
+        assert settings["custom_providers"] == []
+        assert not (tmp_path / "settings.json").exists()
         assert (tmp_path / "settings.json.corrupt").exists()
 
     def test_quarantine_rename_failure_logged_and_defaults_returned(

@@ -12,6 +12,7 @@ const settings: EngineSettings = {
   chapter_model: '',
   chapter_provider: 'anthropic',
   custom_provider_url: '',
+  custom_providers: [],
   diarize: false,
   caption_cleanup: false,
   media_cache_max_bytes: 5 * 1024 ** 3
