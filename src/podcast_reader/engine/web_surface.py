@@ -41,8 +41,7 @@ def transcript_csp(document: bytes) -> str:
     script_src = " ".join(dict.fromkeys(hashes)) or "'none'"
     return (
         f"default-src 'none'; script-src {script_src}; "
-        "style-src 'unsafe-inline' https://fonts.googleapis.com; "
-        "font-src https://fonts.gstatic.com; img-src data:; "
+        "style-src 'unsafe-inline'; font-src 'none'; img-src data:; "
         "connect-src 'none'; media-src 'none'; frame-src 'none'; "
         "object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'"
     )

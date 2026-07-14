@@ -46,9 +46,10 @@ parity.
   a URL.
 - `html.py` emits the canonical reader artifact. The Android app must display
   those bytes, not reproduce transcript/chapter layout in Compose.
-- The current artifact is self-contained except for its declared Google Fonts
-  fetch. Issue #81 tracks self-hosting/system fallback for that privacy trade;
-  this client does not fork the renderer to solve it.
+- The artifact uses only local/system font fallbacks and has no third-party
+  font request. The engine removes the exact obsolete import when serving a
+  pre-#81 artifact. Already-cached Android copies remain valid documents; the
+  Android interceptor still blocks their obsolete remote import.
 
 ## Platform and toolchain baseline
 
@@ -308,10 +309,10 @@ The WebView containment policy is mechanical:
   ([WebView file security](https://developer.android.com/privacy-and-security/risks/webview-unsafe-file-inclusion)).
 - the request interceptor serves only the exact local transcript path and
   returns a fail-closed 404 for every other appassets resource. HTTP(S), file,
-  content, intent, and custom-scheme subresource requests are blocked. This
-  also prevents the current Google Fonts request on Android, selecting the
-  artifact's CSS fallback fonts without changing its bytes; issue #81 remains
-  the cross-surface renderer fix.
+  content, intent, and custom-scheme subresource requests are blocked. Current
+  artifacts already use local/system fallbacks; older cached artifacts that
+  still contain the obsolete Google Fonts import select the same fallbacks
+  because this interceptor blocks that request without rewriting their bytes.
 - top-level navigations away from the one source-ID URL are cancelled. User
   links are offered to the platform browser only after explicit `http`/`https`
   parsing; all other schemes are rejected. No referrer or bearer is supplied.

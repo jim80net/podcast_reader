@@ -9,7 +9,9 @@ import { join, resolve } from 'node:path'
 import { chromium, expect, test } from '@playwright/test'
 
 const REPO_ROOT = resolve(__dirname, '../../..')
-const SOURCE_IDS = ['a'.repeat(64), 'b'.repeat(64)] as const
+const SOURCE_IDS = ['a'.repeat(64), 'b'.repeat(64), 'c'.repeat(64)] as const
+const LEGACY_FONT_IMPORT =
+  "@import url('https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;0,8..60,700;1,8..60,400&family=JetBrains+Mono:wght@400;600&family=Oswald:wght@400;500;600&display=swap');"
 
 interface CapturedResponse {
   url: string
@@ -97,7 +99,14 @@ test('real HTTPS reader pairs, renders, reloads, contains secrets, and rejects f
           "    path = library / source_id / f'{source_id}.html'",
           '    path.parent.mkdir(parents=True, exist_ok=True)',
           '    path.write_text(build_html(segments, title, chapters=chapter_data), encoding="utf8")',
-          "    add_entry(library, LibraryEntry(source_id=source_id, source='https://example.com/private?secret=source', title=title, html_path=str(path), created_at=time.time()))"
+          "    add_entry(library, LibraryEntry(source_id=source_id, source='https://example.com/private?secret=source', title=title, html_path=str(path), created_at=time.time()))",
+          "source_id, title = ids[2], 'Legacy cached episode'",
+          "path = library / source_id / f'{source_id}.html'",
+          'path.parent.mkdir(parents=True, exist_ok=True)',
+          `legacy_import = ${JSON.stringify(LEGACY_FONT_IMPORT)}`,
+          "document = build_html(segments, title).replace('<style>\\n', f'<style>\\n{legacy_import}\\n\\n', 1)",
+          'path.write_text(document, encoding="utf8")',
+          "add_entry(library, LibraryEntry(source_id=source_id, source='https://example.com/legacy', title=title, html_path=str(path), created_at=time.time()))"
         ].join('\n'),
         join(dataDir, 'library')
       ],
@@ -202,8 +211,20 @@ test('real HTTPS reader pairs, renders, reloads, contains secrets, and rejects f
       viewport: { width: 390, height: 844 }
     })
     const requestUrls: string[] = []
+    const artifactFontRequests: string[] = []
+    const artifactThirdPartyRequests: string[] = []
     context.on('request', (request) => {
       if (request.url().startsWith(webOrigin)) requestUrls.push(request.url())
+      const frameUrl = request.frame().url()
+      const fromArtifact = frameUrl.includes('/web/api/transcripts/')
+      if (fromArtifact && request.resourceType() === 'font') artifactFontRequests.push(request.url())
+      if (
+        fromArtifact &&
+        /^https?:/.test(request.url()) &&
+        !request.url().startsWith(webOrigin)
+      ) {
+        artifactThirdPartyRequests.push(request.url())
+      }
     })
 
     const foreign = await context.newPage()
@@ -241,7 +262,7 @@ test('real HTTPS reader pairs, renders, reloads, contains secrets, and rejects f
     page.on('console', (message) => consoleText.push(message.text()))
     await page.addInitScript(() => {
       window.addEventListener('securitypolicyviolation', (event) => {
-        console.error(`CSP-VIOLATION:${event.violatedDirective}`)
+        console.error(`CSP-VIOLATION:${event.violatedDirective}:${event.blockedURI}`)
       })
     })
 
@@ -252,6 +273,7 @@ test('real HTTPS reader pairs, renders, reloads, contains secrets, and rejects f
     await expect(page.getByRole('heading', { name: 'Your library' })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Keyless episode' })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Chaptered episode' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Legacy cached episode' })).toBeVisible()
 
     for (const title of ['Keyless episode', 'Chaptered episode']) {
       await page.getByRole('button', { name: title }).click()
@@ -259,6 +281,16 @@ test('real HTTPS reader pairs, renders, reloads, contains secrets, and rejects f
       await expect(frame.getByText('Browser-only marker sentence.')).toBeVisible()
       await page.getByRole('button', { name: '← Library' }).click()
     }
+    expect(consoleText.filter((message) => message.startsWith('CSP-VIOLATION:'))).toEqual([])
+
+    await page.getByRole('button', { name: 'Legacy cached episode' }).click()
+    const legacyFrame = page.frameLocator('iframe')
+    await expect(legacyFrame.getByText('Browser-only marker sentence.')).toBeVisible()
+    await page.getByRole('button', { name: '← Library' }).click()
+    const legacyViolations = consoleText.filter((message) => message.startsWith('CSP-VIOLATION:'))
+    expect(legacyViolations).toEqual([])
+    expect(artifactFontRequests).toEqual([])
+    expect(artifactThirdPartyRequests).toEqual([])
     await page.setViewportSize({ width: 1280, height: 900 })
     await page.reload()
     await expect(page.getByRole('heading', { name: 'Your library' })).toBeVisible()
@@ -287,7 +319,7 @@ test('real HTTPS reader pairs, renders, reloads, contains secrets, and rejects f
       expect(JSON.stringify(browserStorage)).not.toContain(secret)
       expect(consoleText.join('\n')).not.toContain(secret)
     }
-    expect(consoleText.join('\n')).not.toContain('CSP-VIOLATION:')
+    expect(consoleText.filter((message) => message.startsWith('CSP-VIOLATION:'))).toEqual([])
 
     const attack = await context.newPage()
     await attack.goto(`https://evil.web.test:${proxyPort}/attack`)

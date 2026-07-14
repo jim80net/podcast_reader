@@ -718,6 +718,41 @@ class TestLibrary:
         response = engine.client.get("/v1/transcripts/deadbeef.html", headers=engine.headers)
         assert response.status_code == 404
 
+    def test_legacy_transcript_remote_font_import_is_removed(
+        self, engine: _Engine, tmp_path: Path
+    ) -> None:
+        source_id = source_identity("https://example.com/legacy")
+        edir = entry_dir(tmp_path / "library", source_id)
+        edir.mkdir(parents=True)
+        html_path = edir / "episode.html"
+        remote_import = (
+            "@import url('https://fonts.googleapis.com/css2?"
+            "family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;"
+            "0,8..60,700;1,8..60,400&family=JetBrains+Mono:wght@400;600&"
+            "family=Oswald:wght@400;500;600&display=swap');"
+        )
+        clean_document = b"<html><style>\nbody { color: red; }</style></html>"
+        legacy_document = clean_document.replace(
+            b"<style>\n", f"<style>\n{remote_import}\n\n".encode(), 1
+        )
+        html_path.write_bytes(legacy_document)
+        add_entry(
+            tmp_path / "library",
+            LibraryEntry(
+                source_id=source_id,
+                source="https://example.com/legacy",
+                title="Legacy",
+                html_path=str(html_path),
+                created_at=time.time(),
+            ),
+        )
+
+        response = engine.client.get(f"/v1/transcripts/{source_id}.html", headers=engine.headers)
+
+        assert response.status_code == 200
+        assert response.content == clean_document
+        assert html_path.read_bytes() == legacy_document
+
 
 class TestSettings:
     def test_settings_get_put_roundtrip(self, engine: _Engine, tmp_path: Path) -> None:
@@ -2436,6 +2471,30 @@ class TestWebReadRoutes:
         assert entry is not None
         Path(entry["html_path"]).unlink()
         assert engine.web_client.get(f"/web/api/transcripts/{source_id}.html").status_code == 404
+
+    def test_legacy_transcript_import_is_removed_before_csp_is_built(self, engine: _Engine) -> None:
+        source_id, html = self._seed(engine)
+        remote_import = (
+            "@import url('https://fonts.googleapis.com/css2?"
+            "family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;"
+            "0,8..60,700;1,8..60,400&family=JetBrains+Mono:wght@400;600&"
+            "family=Oswald:wght@400;500;600&display=swap');"
+        )
+        entry = get_entry(engine.data_dir / "library", source_id)
+        assert entry is not None
+        html_path = Path(entry["html_path"])
+        legacy_document = html.encode().replace(
+            b"<style>\n", f"<style>\n{remote_import}\n\n".encode(), 1
+        )
+        html_path.write_bytes(legacy_document)
+        self._session(engine)
+
+        response = engine.web_client.get(f"/web/api/transcripts/{source_id}.html")
+
+        assert response.status_code == 200
+        assert response.content == html.encode()
+        assert html_path.read_bytes() == legacy_document
+        assert "font-src 'none'" in response.headers["content-security-policy"]
 
 
 def _cookie_line(domain: str, value: str = "secret-cookie-value") -> str:

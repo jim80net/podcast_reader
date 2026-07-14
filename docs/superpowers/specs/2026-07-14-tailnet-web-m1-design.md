@@ -293,8 +293,8 @@ generated values, not literals in the design):
 ```text
 default-src 'none';
 script-src <SHA-256 hashes of the exact emitted script text nodes>;
-style-src 'unsafe-inline' https://fonts.googleapis.com;
-font-src https://fonts.gstatic.com;
+style-src 'unsafe-inline';
+font-src 'none';
 img-src data:;
 connect-src 'none'; media-src 'none'; frame-src 'none';
 object-src 'none'; base-uri 'none'; form-action 'none';
@@ -307,8 +307,17 @@ does not hash the bare constants and assume serialization. Chaptered artifacts
 carry scroll+sync hashes, keyless artifacts carry rail+sync hashes, and empty
 artifacts carry the applicable sync hash. Unit tests extract the actual emitted
 text nodes for every conditional combination, and real-browser tests fail on
-any CSP violation. `style-src 'unsafe-inline'` is limited to the opaque
-sandbox's engine-generated renderer CSS; no secret is ever present there.
+any CSP violation from a newly generated artifact. Before either desktop or web
+transcript route responds, one shared compatibility filter removes only the
+exact historical Google Fonts import emitted by pre-#81 artifacts. The stored
+artifact remains unchanged, all other bytes remain identical, and old library
+entries therefore use the same local/system fallback without even attempting a
+third-party request. Every directive/URI violation still fails. `style-src
+'unsafe-inline'` is limited to the opaque
+sandbox's engine-generated renderer CSS; no secret is ever present there. The
+artifact has no remote font import: its existing local/system fallbacks render
+without a third-party request, and `font-src 'none'` mechanically keeps that
+boundary closed.
 
 No token, cookie value, source URL, or local path is interpolated into shell or
 artifact markup. Every web response sets `Referrer-Policy: no-referrer` and
