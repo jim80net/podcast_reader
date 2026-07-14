@@ -43,6 +43,7 @@ _MODEL_HINT = (
 #: Worker progress line protocol: `progress duration=<sec>` once after model
 #: load, `progress segment_end=<sec>` per transcribed segment.
 _PROGRESS_RE = re.compile(r"^progress (duration|segment_end)=(\d+(?:\.\d+)?)$")
+_WORKER_CUDA_WARNING_PREFIX = "warning cuda_unavailable "
 
 
 def transcription_engine() -> str:
@@ -170,8 +171,21 @@ def _transcribe_via_worker(
 
     def handle_stderr_line(line: str) -> None:
         nonlocal duration
-        match = _PROGRESS_RE.match(line.strip())
-        if match is None or on_event is None:
+        stripped = line.strip()
+        if on_event is None:
+            return
+        if stripped.startswith(_WORKER_CUDA_WARNING_PREFIX):
+            on_event(
+                PipelineEvent(
+                    kind="warning",
+                    step="transcribe",
+                    message=stripped.removeprefix(_WORKER_CUDA_WARNING_PREFIX),
+                    data={"code": "cuda_unavailable", "reason": "cuda_runtime_load_failed"},
+                )
+            )
+            return
+        match = _PROGRESS_RE.match(stripped)
+        if match is None:
             return
         value = float(match.group(2))
         if match.group(1) == "duration":
@@ -280,8 +294,10 @@ def _worker_env(base: Path) -> dict[str, str] | None:
 
     POSIX: ``LD_LIBRARY_PATH`` gains ``<data_dir>/runtime`` (the spec's
     spawn-time contract — an in-process mutation cannot affect an
-    already-running loader). Windows: ``None`` (inherit) — the worker calls
-    ``os.add_dll_directory`` itself before importing faster-whisper.
+    already-running loader). Windows: ``None`` (inherit) — before importing
+    faster-whisper, the worker prepends the runtime directory to its own
+    ``PATH`` for ctranslate2's plain ``LoadLibraryA`` calls and also registers
+    it with ``os.add_dll_directory`` for flagged loads.
     """
     if sys.platform == "win32":
         return None

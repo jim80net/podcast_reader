@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import os
 import sys
 import types
 from dataclasses import dataclass, field
@@ -263,9 +264,9 @@ class TestMain:
         )
         original_prepare = whisper_worker._prepare_windows_dll_path
 
-        def spy_prepare() -> None:
+        def spy_prepare() -> whisper_worker.DllDirectoryHandle | None:
             calls.append("dll-path")
-            original_prepare()
+            return original_prepare()
 
         monkeypatch.setattr(whisper_worker, "_prepare_windows_dll_path", spy_prepare)
 
@@ -292,10 +293,29 @@ class TestMain:
         assert (tmp_path / "episode.json").exists() is False  # stem is a.json
         assert (tmp_path / "a.json").exists()
 
+    def test_cuda_preflight_fallback_reaches_model_as_cpu_int8(
+        self,
+        fake_faster_whisper: type[FakeWhisperModel],
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        audio = tmp_path / "a.wav"
+        audio.write_bytes(b"RIFF")
+        argv = self._argv(audio, tmp_path)
+        argv[argv.index("cpu")] = "cuda"
+        monkeypatch.setattr(sys, "argv", argv)
+        monkeypatch.setattr(whisper_worker, "_preflight_cuda", lambda *_args: ("cpu", "int8"))
+
+        whisper_worker.main()
+
+        (instance,) = fake_faster_whisper.instances
+        assert instance.device == "cpu"
+        assert instance.compute_type == "int8"
+
 
 class TestWindowsDllPath:
     def test_noop_on_posix(self) -> None:
-        whisper_worker._prepare_windows_dll_path()  # must not raise on POSIX
+        assert whisper_worker._prepare_windows_dll_path(platform="linux") is None
 
     def test_adds_runtime_dir_when_present_on_windows(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -305,25 +325,81 @@ class TestWindowsDllPath:
         runtime = tmp_path / "runtime"
         runtime.mkdir()
         monkeypatch.setenv("PODCAST_READER_DATA_DIR", str(tmp_path))
-        monkeypatch.setattr(whisper_worker.sys, "platform", "win32")
+        monkeypatch.setenv("PATH", "existing-tools")
         added: list[str] = []
-        monkeypatch.setattr(whisper_worker.os, "add_dll_directory", added.append, raising=False)
+        handle = object()
 
-        whisper_worker._prepare_windows_dll_path()
+        def add(path: str) -> object:
+            added.append(path)
+            return handle
+
+        monkeypatch.setattr(whisper_worker.os, "add_dll_directory", add, raising=False)
+
+        result = whisper_worker._prepare_windows_dll_path(platform="win32")
 
         assert added == [str(runtime)]
+        assert result is handle
+        assert os.environ["PATH"] == f"{runtime}{os.pathsep}existing-tools"
 
     def test_skips_absent_runtime_dir_on_windows(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setenv("PODCAST_READER_DATA_DIR", str(tmp_path))
-        monkeypatch.setattr(whisper_worker.sys, "platform", "win32")
         added: list[str] = []
         monkeypatch.setattr(whisper_worker.os, "add_dll_directory", added.append, raising=False)
 
-        whisper_worker._prepare_windows_dll_path()
+        result = whisper_worker._prepare_windows_dll_path(platform="win32")
 
         assert added == []
+        assert result is None
+
+
+class TestCudaPreflight:
+    @pytest.mark.parametrize(
+        ("device", "platform"),
+        [("cpu", "win32"), ("cuda", "linux")],
+    )
+    def test_non_windows_or_non_cuda_does_not_load_libraries(
+        self,
+        device: str,
+        platform: str,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        loaded: list[str] = []
+        monkeypatch.setattr(whisper_worker.ctypes, "CDLL", loaded.append)
+
+        result = whisper_worker._preflight_cuda(device, "float16", platform=platform)
+
+        assert result == (device, "float16")
+        assert loaded == []
+
+    def test_windows_cuda_loads_roots_before_preserving_gpu_settings(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        loaded: list[str] = []
+        monkeypatch.setattr(whisper_worker.ctypes, "CDLL", loaded.append)
+
+        result = whisper_worker._preflight_cuda("cuda", "float16", platform="win32")
+
+        assert result == ("cuda", "float16")
+        assert loaded == ["cublas64_12.dll", "cudnn64_9.dll"]
+
+    def test_windows_cuda_load_failure_warns_without_raw_dll_and_uses_cpu(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        def fail(_name: str) -> None:
+            raise OSError("Library cublas64_12.dll is not found or cannot be loaded")
+
+        monkeypatch.setattr(whisper_worker.ctypes, "CDLL", fail)
+
+        result = whisper_worker._preflight_cuda("cuda", "float16", platform="win32")
+
+        assert result == ("cpu", "int8")
+        warning = capsys.readouterr().err.strip()
+        assert warning.startswith("warning cuda_unavailable ")
+        assert "Settings → Packs" in warning
+        assert "cublas" not in warning.casefold()
+        assert ".dll" not in warning.casefold()
 
 
 class TestDataDirPath:

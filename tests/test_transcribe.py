@@ -450,6 +450,51 @@ class TestEffectiveDevice:
 
 
 class TestProgressStreaming:
+    def test_cuda_preflight_warning_maps_to_actionable_pipeline_event(
+        self, base: Path, audio: Path
+    ) -> None:
+        _install_model_pack(base, "tiny")
+        events: list[PipelineEvent] = []
+
+        def scripted(
+            args: list[str],
+            *,
+            on_stderr_line: Callable[[str], None],
+            env: dict[str, str] | None = None,
+        ) -> subprocess.CompletedProcess[str]:
+            on_stderr_line(
+                "warning cuda_unavailable CUDA acceleration could not start; "
+                "transcribing on CPU. Reinstall the NVIDIA CUDA runtime in "
+                "Settings → Packs before retrying GPU.\n"
+            )
+            return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+        with (
+            patch(
+                "podcast_reader.transcribe.resolve_bundled_worker",
+                return_value="/bundle/whisper-worker",
+            ),
+            patch("podcast_reader.transcribe._effective_device", return_value="cuda"),
+            patch("podcast_reader.transcribe.run_child_streaming", side_effect=scripted),
+        ):
+            transcribe(
+                audio_path=audio,
+                output_dir=audio.parent,
+                model="tiny",
+                lang="en",
+                device="cuda",
+                on_event=events.append,
+            )
+
+        (warning,) = events
+        assert warning["kind"] == "warning"
+        assert warning["data"] == {
+            "code": "cuda_unavailable",
+            "reason": "cuda_runtime_load_failed",
+        }
+        assert "Settings → Packs" in warning["message"]
+        assert ".dll" not in warning["message"].casefold()
+
     def test_progress_lines_map_to_step_progress_events(self, base: Path, audio: Path) -> None:
         """Spec: stderr `progress` lines map onto transcribe step_progress
         events carrying seconds and the total duration."""
