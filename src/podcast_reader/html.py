@@ -321,11 +321,30 @@ _STYLESHEET = """\
   --green: #5a9a6a;
   --purple: #8a6abf;
   --sidebar-w: 280px;
+  --reading-column: 68ch;
 }
 
-/* Warm-paper light palette, matching the desktop app's light theme. The
-   Reader still injects data-theme="light" explicitly, and standalone files now
-   also follow the browser's prefers-color-scheme: light preference. */
+/* Explicit app themes always win over the standalone OS-preference fallback. */
+:root[data-theme='dark'] {
+  --bg: #111318;
+  --bg-warm: #14161c;
+  --surface: #1c1f28;
+  --surface-hover: #252935;
+  --border: #2a2e3a;
+  --text: #c8cad0;
+  --text-bright: #e8eaef;
+  --muted: #6b7084;
+  --accent: #d4a04a;
+  --accent-dim: #9a7535;
+  --accent-glow: rgba(212, 160, 74, 0.12);
+  --link: #5ba4cf;
+  --link-hover: #7ec4f0;
+  --red: #c0503a;
+  --green: #5a9a6a;
+  --purple: #8a6abf;
+}
+
+/* Warm-paper light palette, matching the desktop app's light theme. */
 :root[data-theme='light'] {
   --bg: #f7f4ee;
   --bg-warm: #f1ede5;
@@ -343,11 +362,10 @@ _STYLESHEET = """\
   --red: #b23a26;
   --green: #2f7d45;
   --purple: #6b4fa0;
-  --sidebar-w: 280px;
 }
 
 @media (prefers-color-scheme: light) {
-  :root {
+  :root:not([data-theme='dark']) {
     --bg: #f7f4ee;
     --bg-warm: #f1ede5;
     --surface: #ffffff;
@@ -364,7 +382,6 @@ _STYLESHEET = """\
     --red: #b23a26;
     --green: #2f7d45;
     --purple: #6b4fa0;
-    --sidebar-w: 280px;
   }
 }
 
@@ -458,9 +475,10 @@ body {
 
 header {
   margin-bottom: 2.5rem;
+  margin-inline: auto;
   padding-bottom: 1.5rem;
   border-bottom: 2px solid var(--accent);
-  max-width: 56rem;
+  max-width: var(--reading-column);
 }
 h1 {
   font-family: 'Oswald', sans-serif;
@@ -479,23 +497,23 @@ h1 {
 }
 
 /* ---- CHAPTER SECTIONS ---- */
+main {
+  margin-inline: auto;
+  max-width: var(--reading-column);
+}
 .chapter-section {
-  display: grid;
-  grid-template-columns: minmax(0, 56rem) 24rem;
-  gap: 2.5rem;
+  position: relative;
   margin-bottom: 3rem;
   scroll-margin-top: 1.5rem;
-}
-.chapter-section.no-gutter {
-  grid-template-columns: minmax(0, 56rem);
 }
 .chapter-main {
   min-width: 0;
 }
 .chapter-gutter {
-  align-self: start;
-  position: sticky;
+  position: absolute;
+  left: calc(100% + 2.5rem);
   top: 2rem;
+  width: 24rem;
 }
 .chapter-section h2 {
   font-family: 'Oswald', sans-serif;
@@ -536,8 +554,6 @@ h1 {
 /* ---- BODY TEXT ---- */
 p {
   margin-bottom: 1.3rem;
-  margin-inline: auto;
-  max-width: 68ch;
   text-align: left;
   hyphens: auto;
 }
@@ -577,13 +593,14 @@ a:hover { color: var(--link-hover); }
 /* ---- FOOTER ---- */
 footer {
   margin-top: 4rem;
+  margin-inline: auto;
   padding-top: 1.2rem;
   border-top: 1px solid var(--border);
   color: var(--muted);
   font-size: 0.75rem;
   text-align: center;
   font-family: 'JetBrains Mono', monospace;
-  max-width: 56rem;
+  max-width: var(--reading-column);
 }
 
 /* ---- KEY POINTS (gutter) ---- */
@@ -631,8 +648,7 @@ footer {
 }
 
 /* ---- RESPONSIVE ---- */
-@media (max-width: 1200px) {
-  .chapter-section { grid-template-columns: minmax(0, 56rem); }
+@media (max-width: 1700px) {
   .chapter-gutter { display: none; }
 }
 @media (max-width: 900px) {
