@@ -65,3 +65,61 @@ jobs:
           path: app/dist/*.exe
           retention-days: 14
           if-no-files-found: error
+
+      # ---- install-and-run proof (venture increment W2) --------------------
+      # The artifact above is a FILE; the steps below prove it is a PRODUCT:
+      # silent install, launch the INSTALLED app (real frozen engine, nothing
+      # mocked), assert the engine handshake, walk first-run -> submit a
+      # YouTube URL -> Reader with screenshots, then uninstall cleanly.
+      # /S (silent) also means the unsigned build never hits the INTERACTIVE
+      # SmartScreen dialog — that prompt only guards interactive launches.
+      - name: Install silently (NSIS /S)
+        run: |
+          INSTALLER=$(ls app/dist/*.exe)
+          echo "installer: $INSTALLER"
+          powershell -Command "Start-Process -FilePath '$(cygpath -w "$INSTALLER")' -ArgumentList '/S' -Wait"
+          # electron-builder NSIS per-user default:
+          # %LOCALAPPDATA%\Programs\<productName>. Poll rather than trust
+          # process exit — NSIS finishes asynchronously in some shells.
+          INSTALLED="$LOCALAPPDATA/Programs/Podcast Reader/Podcast Reader.exe"
+          for i in $(seq 1 60); do
+            [ -f "$INSTALLED" ] && break
+            # fallback: the package-name directory variant
+            ALT="$LOCALAPPDATA/Programs/podcast-reader/Podcast Reader.exe"
+            [ -f "$ALT" ] && INSTALLED="$ALT" && break
+            sleep 2
+          done
+          [ -f "$INSTALLED" ] || { echo "installed exe not found"; ls -R "$LOCALAPPDATA/Programs" || true; exit 1; }
+          echo "INSTALLED_EXE=$INSTALLED" >> "$GITHUB_ENV"
+          echo "INSTALL_DIR=$(dirname "$INSTALLED")" >> "$GITHUB_ENV"
+      - name: Walk the installed app (engine handshake + screenshots)
+        run: node tests/install/walkthrough.mjs --exe "$INSTALLED_EXE" --out "$RUNNER_TEMP/walkthrough"
+        working-directory: app
+      - name: Upload walkthrough screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: walkthrough-${{ github.sha }}
+          path: ${{ runner.temp }}/walkthrough/
+          retention-days: 14
+          if-no-files-found: error
+      - name: Uninstall silently and verify no residue
+        if: always()
+        run: |
+          [ -n "$INSTALL_DIR" ] || { echo "no install dir recorded (install failed earlier)"; exit 0; }
+          UNINSTALLER="$INSTALL_DIR/Uninstall Podcast Reader.exe"
+          [ -f "$UNINSTALLER" ] || { echo "uninstaller not found at $UNINSTALLER"; ls "$INSTALL_DIR"; exit 1; }
+          powershell -Command "Start-Process -FilePath '$(cygpath -w "$UNINSTALLER")' -ArgumentList '/S' -Wait"
+          # The NSIS uninstaller re-execs itself from %TEMP%, so -Wait returns
+          # early; poll for the install dir to disappear.
+          for i in $(seq 1 45); do
+            [ ! -d "$INSTALL_DIR" ] && break
+            sleep 2
+          done
+          if [ -d "$INSTALL_DIR" ]; then
+            echo "install dir still present after uninstall:"; ls "$INSTALL_DIR"; exit 1
+          fi
+          echo "uninstall clean: $INSTALL_DIR removed"
+          # Note: per-user app data (%APPDATA%) intentionally survives —
+          # deleteAppDataOnUninstall is false by design (update-friendly);
+          # the runner is ephemeral.
