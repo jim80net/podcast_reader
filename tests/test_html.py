@@ -346,6 +346,19 @@ class TestKeylessTimeline:
 
 
 class TestBuildHtmlIntegration:
+    def test_cleanup_label_is_separate_from_source_provenance(self) -> None:
+        from podcast_reader.html import build_html
+
+        html = build_html(
+            [{"start": 0.0, "end": 1.0, "text": "Corrected text."}],
+            title="T",
+            source="youtube-captions",
+            caption_cleanup=True,
+        )
+
+        assert "Auto-transcribed with youtube-captions" in html
+        assert "AI-assisted spelling/casing cleanup enabled; wording is preserved." in html
+
     def test_os_light_theme_does_not_override_explicit_dark_theme(self) -> None:
         from podcast_reader.html import build_html
 

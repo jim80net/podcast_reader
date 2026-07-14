@@ -104,6 +104,15 @@ class TestCliProviderSelection:
         request: PipelineRequest = mock_run.call_args.args[0]
         return request
 
+    def test_caption_cleanup_requires_explicit_flag(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        default = self._captured_request(["https://example.com/x.mp3"], monkeypatch)
+        enabled = self._captured_request(
+            ["https://example.com/x.mp3", "--cleanup-captions"], monkeypatch
+        )
+
+        assert default["caption_cleanup"] is False
+        assert enabled["caption_cleanup"] is True
+
     def test_anthropic_env_var_compatibility(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Spec scenario: ANTHROPIC_API_KEY set, no provider flag — as before."""
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-legacy")

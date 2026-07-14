@@ -77,6 +77,7 @@ interface EngineSettings {
   chapter_provider: string
   custom_provider_url: string
   diarize: boolean
+  caption_cleanup: boolean
   media_cache_max_bytes: number
 }
 
@@ -153,6 +154,7 @@ let settings: EngineSettings = {
   chapter_provider: 'anthropic',
   custom_provider_url: '',
   diarize: false,
+  caption_cleanup: false,
   media_cache_max_bytes: 5 * 1024 ** 3
 }
 let keyTestResult: { ok: boolean; detail: string | null } = { ok: true, detail: null }

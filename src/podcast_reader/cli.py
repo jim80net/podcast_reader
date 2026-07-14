@@ -86,6 +86,11 @@ def _run_one_shot(argv: list[str]) -> None:
         default=None,
         help="Chapter model (default: the selected provider's default model)",
     )
+    parser.add_argument(
+        "--cleanup-captions",
+        action="store_true",
+        help="Use the chapter model for labeled spelling/casing cleanup (never rewording)",
+    )
     args = parser.parse_args(argv)
 
     request = PipelineRequest(
@@ -105,6 +110,7 @@ def _run_one_shot(argv: list[str]) -> None:
         # CLI diarization stays the whisper-ctranslate2 --hf_token path; the
         # pack-based diarize step is an engine setting (desktop app).
         diarize=False,
+        caption_cleanup=args.cleanup_captions,
     )
 
     try:

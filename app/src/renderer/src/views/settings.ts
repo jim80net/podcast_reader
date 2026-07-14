@@ -119,6 +119,26 @@ export function mountSettings(container: HTMLElement): ViewCleanup {
 
     const modelInput = el('input', { attrs: { type: 'text' } })
     modelInput.value = settings.chapter_model
+    const cleanupInput = el('input', {
+      attrs: { type: 'checkbox', id: 'settings-caption-cleanup' }
+    })
+    cleanupInput.checked = settings.caption_cleanup
+    const cleanupField = el(
+      'div',
+      { class: 'field' },
+      el(
+        'label',
+        { class: 'checkbox-label', attrs: { for: cleanupInput.id } },
+        cleanupInput,
+        el('span', { text: 'Clean up caption spelling and casing' })
+      ),
+      el('p', {
+        class: 'field-note',
+        text:
+          'Optional. Uses the chapter model and labels the transcript. Only validated ' +
+          'single-word spelling/casing fixes are applied; wording and source captions stay intact.'
+      })
+    )
 
     // -- API key (write-only; never read back) ---------------------------
     const keyInput = el('input', {
@@ -278,6 +298,7 @@ export function mountSettings(container: HTMLElement): ViewCleanup {
       field('chapter_provider', 'Provider', providerSelect),
       customUrlField,
       field('chapter_model', 'Chapter model', modelInput),
+      cleanupField,
       el(
         'div',
         { class: 'field' },
@@ -339,7 +360,8 @@ export function mountSettings(container: HTMLElement): ViewCleanup {
         library_dir: libraryDirInput.value,
         chapter_model: modelInput.value,
         chapter_provider: providerSelect.value,
-        custom_provider_url: customUrlInput.value
+        custom_provider_url: customUrlInput.value,
+        caption_cleanup: cleanupInput.checked
       }
       const result = toSettingsUpdate(values)
       if (!result.ok) {

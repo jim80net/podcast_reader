@@ -130,6 +130,7 @@ export interface EngineSettings {
   chapter_provider: string // a podcast_reader.providers.PROVIDERS key
   custom_provider_url: string // base URL for the "custom" provider ("" otherwise)
   diarize: boolean // default false; engine warns-and-skips when the pack is absent
+  caption_cleanup: boolean // opt-in provider-assisted spelling/casing cleanup
   media_cache_max_bytes: number // LRU cap for the lazy media cache (media-playback)
 }
 
@@ -145,6 +146,7 @@ export interface SettingsUpdate {
   chapter_provider?: string
   custom_provider_url?: string
   diarize?: boolean
+  caption_cleanup?: boolean
   media_cache_max_bytes?: number
 }
 

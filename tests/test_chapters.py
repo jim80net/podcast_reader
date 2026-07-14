@@ -14,6 +14,7 @@ from podcast_reader.chapters import (
     SYSTEM_PROMPT,
     ChapterError,
     generate_chapters,
+    generate_chapters_with_cleanup,
     snap_chapters_to_segments,
     verify_key,
 )
@@ -174,6 +175,27 @@ class TestGenerateChapters:
             transport=recorder.transport,
         )
         assert chapters == _CHAPTERS_JSON
+
+    def test_opt_in_cleanup_uses_object_contract(self) -> None:
+        result = {
+            "chapters": _CHAPTERS_JSON,
+            "caption_corrections": [
+                {"segment_start": 0.0, "original": "Helo", "replacement": "Hello"}
+            ],
+        }
+        recorder = _Recorder(httpx.Response(200, json=_completion(json.dumps(result))))
+
+        chapters, corrections = generate_chapters_with_cleanup(
+            "[0.0] Helo.",
+            spec=self.SPEC,
+            api_key="sk-test",
+            transport=recorder.transport,
+        )
+
+        assert chapters == _CHAPTERS_JSON
+        assert corrections == result["caption_corrections"]
+        payload = json.loads(recorder.requests[0].content)
+        assert "spelling or casing corrections" in payload["messages"][0]["content"]
 
     def test_request_shape_matches_chat_completions_contract(self) -> None:
         recorder = _Recorder(httpx.Response(200, json=_completion(json.dumps(_CHAPTERS_JSON))))

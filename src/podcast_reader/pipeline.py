@@ -15,10 +15,12 @@ from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from podcast_reader.caption_cleanup import apply_caption_corrections
 from podcast_reader.chapters import (
     ChapterError,
     format_transcript,
     generate_chapters,
+    generate_chapters_with_cleanup,
     snap_chapters_to_segments,
 )
 from podcast_reader.diarize import diarize_step
@@ -224,10 +226,23 @@ def run_pipeline(
 
     # --- Generate chapters (optional; never fatal — spec: chapters fault isolation) ---
     chapters_path = output_dir / f"{stem}_chapters.json"
+    cleanup_path = output_dir / f"{stem}_caption_cleanup.json"
     chapters: list[dict[str, Any]] | None = None
+    caption_corrections: list[object] = []
+    cleanup_completed = False
+    cleanup_requested = request["caption_cleanup"] and transcript_source == "youtube-captions"
+    if request["caption_cleanup"] and not cleanup_requested:
+        _emit(
+            on_event,
+            "warning",
+            "chapters",
+            "Caption cleanup applies only to YouTube caption sources; leaving wording unchanged",
+            {"code": "caption_cleanup_skipped"},
+        )
 
     provider = request["chapter_provider"]
-    if _valid_artifact(chapters_path):
+    cleanup_cache_ready = not cleanup_requested or _valid_artifact(cleanup_path)
+    if _valid_artifact(chapters_path) and cleanup_cache_ready:
         _emit(
             on_event,
             "step_started",
@@ -236,6 +251,9 @@ def run_pipeline(
             {"cached": True},
         )
         chapters = json.loads(chapters_path.read_text())
+        if cleanup_requested:
+            caption_corrections = json.loads(cleanup_path.read_text())
+            cleanup_completed = True
         _emit(on_event, "step_finished", "chapters", "", {"cached": True})
     elif request["chapter_api_key"]:
         _emit(
@@ -255,12 +273,23 @@ def run_pipeline(
             data = json.loads(json_path.read_text())
             segments = [s for s in data["segments"] if s.get("text", "").strip()]
             transcript_text = format_transcript(segments)
-            chapters = generate_chapters(
-                transcript_text,
-                spec=spec,
-                model=request["model"],
-                api_key=request["chapter_api_key"],
-            )
+            if cleanup_requested:
+                chapters, caption_corrections = generate_chapters_with_cleanup(
+                    transcript_text,
+                    spec=spec,
+                    model=request["model"],
+                    api_key=request["chapter_api_key"],
+                )
+                cleanup_path.write_text(json.dumps(caption_corrections, indent=2))
+                cleanup_completed = True
+            else:
+                cleanup_path.unlink(missing_ok=True)
+                chapters = generate_chapters(
+                    transcript_text,
+                    spec=spec,
+                    model=request["model"],
+                    api_key=request["chapter_api_key"],
+                )
             chapters = snap_chapters_to_segments(chapters, segments)
             chapters_path.write_text(json.dumps(chapters, indent=2))
         except Exception as exc:  # provider/parse/network — never fatal
@@ -303,6 +332,9 @@ def run_pipeline(
     html_path = output_dir / f"{stem}.html"
     data = json.loads(json_path.read_text())
     segments = [s for s in data["segments"] if s.get("text", "").strip()]
+    cleanup_count = 0
+    if cleanup_completed:
+        segments, cleanup_count = apply_caption_corrections(segments, caption_corrections)
 
     _emit(on_event, "step_started", "render", "Generating HTML transcript...", {})
     html_content = build_html(
@@ -311,9 +343,10 @@ def run_pipeline(
         chapters=chapters,
         sentences_per_para=request["sentences"],
         source=transcript_source,
+        caption_cleanup=cleanup_completed,
     )
     html_path.write_text(html_content)
-    _emit(on_event, "step_finished", "render", "", {})
+    _emit(on_event, "step_finished", "render", "", {"caption_corrections": cleanup_count})
 
     _emit(on_event, "job_done", None, "Done", {})
     return PipelineResult(

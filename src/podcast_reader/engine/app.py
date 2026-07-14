@@ -163,6 +163,7 @@ class SettingsBody(BaseModel):
     chapter_provider: str | None = None
     custom_provider_url: str | None = None
     diarize: bool | None = None
+    caption_cleanup: bool | None = None
     media_cache_max_bytes: int | None = None
 
     def to_settings(self, current: EngineSettings) -> EngineSettings:
@@ -184,6 +185,11 @@ class SettingsBody(BaseModel):
                 else current["custom_provider_url"]
             ),
             diarize=self.diarize if self.diarize is not None else current["diarize"],
+            caption_cleanup=(
+                self.caption_cleanup
+                if self.caption_cleanup is not None
+                else current["caption_cleanup"]
+            ),
             media_cache_max_bytes=(
                 self.media_cache_max_bytes
                 if self.media_cache_max_bytes is not None

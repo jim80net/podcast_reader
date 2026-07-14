@@ -133,6 +133,24 @@ others may be 8, depending on the content
 
 Return ONLY the JSON array, no other text."""
 
+CAPTION_CLEANUP_PROMPT = (
+    SYSTEM_PROMPT.removesuffix("Return ONLY the JSON array, no other text.")
+    + """\
+Return ONLY one JSON object with these keys:
+- "chapters": the chapter array described above
+- "caption_corrections": an array of obvious spelling or casing corrections. Each item must be
+  {"segment_start": <exact seconds value>, "original": <one exact token>,
+  "replacement": <one corrected token>}.
+
+Caption cleanup rules:
+- Correct spelling and letter casing only. Never reword, insert, delete, join, or split words.
+- Do not alter punctuation, grammar, filler words, names, brands, jargon, or uncertain terms.
+- Copy segment_start and original exactly from the transcript.
+- Omit uncertain corrections. Use an empty array when nothing is clearly wrong.
+
+Return ONLY the JSON object, no other text."""
+)
+
 
 def format_transcript(segments: list[dict[str, Any]]) -> str:
     """Format segments with timestamps in seconds for the LLM prompt."""
@@ -174,15 +192,16 @@ def verify_key(
         raise RuntimeError(f"Chapter provider request failed: HTTP {response.status_code}")
 
 
-def generate_chapters(
+def _generate(
     transcript_text: str,
     *,
     spec: ProviderSpec,
     api_key: str,
     model: str | None = None,
     transport: httpx.BaseTransport | None = None,
-) -> list[dict[str, Any]]:
-    """Send the transcript to *spec*'s ``/chat/completions`` and parse chapters.
+    system_prompt: str = SYSTEM_PROMPT,
+) -> Any:
+    """Send one transcript request and return its parsed JSON content.
 
     *model* ``None`` (or empty) selects the provider's default model. *transport*
     lets tests inject an ``httpx.MockTransport`` — production uses the default.
@@ -194,7 +213,7 @@ def generate_chapters(
         "model": model or spec["default_model"],
         "max_tokens": spec["max_tokens"],
         "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": f"Here is the transcript:\n\n{transcript_text}"},
         ],
     }
@@ -241,4 +260,50 @@ def generate_chapters(
     if not raw:
         raise ChapterError("Chapter provider returned an empty response (no message content).")
 
-    return json.loads(raw)  # type: ignore[no-any-return]
+    return json.loads(raw)
+
+
+def generate_chapters(
+    transcript_text: str,
+    *,
+    spec: ProviderSpec,
+    api_key: str,
+    model: str | None = None,
+    transport: httpx.BaseTransport | None = None,
+) -> list[dict[str, Any]]:
+    """Generate chapters without requesting caption cleanup."""
+    result = _generate(
+        transcript_text,
+        spec=spec,
+        api_key=api_key,
+        model=model,
+        transport=transport,
+    )
+    if not isinstance(result, list):
+        raise ChapterError("Chapter provider returned invalid chapter JSON (expected an array).")
+    return result
+
+
+def generate_chapters_with_cleanup(
+    transcript_text: str,
+    *,
+    spec: ProviderSpec,
+    api_key: str,
+    model: str | None = None,
+    transport: httpx.BaseTransport | None = None,
+) -> tuple[list[dict[str, Any]], list[object]]:
+    """Generate chapters plus opt-in token-level caption suggestions."""
+    result = _generate(
+        transcript_text,
+        spec=spec,
+        api_key=api_key,
+        model=model,
+        transport=transport,
+        system_prompt=CAPTION_CLEANUP_PROMPT,
+    )
+    if not isinstance(result, dict) or not isinstance(result.get("chapters"), list):
+        raise ChapterError("Chapter provider returned invalid cleanup JSON (expected an object).")
+    corrections = result.get("caption_corrections", [])
+    if not isinstance(corrections, list):
+        corrections = []
+    return result["chapters"], corrections

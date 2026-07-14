@@ -86,6 +86,7 @@ class PipelineRequest(TypedDict):
     chapter_api_key: str | None  # None: skip chapter generation
     custom_provider_url: str  # base URL for the "custom" provider ("" otherwise)
     diarize: bool  # run the diarization pack's worker after transcription
+    caption_cleanup: bool  # opt-in spelling/casing cleanup via the chapter provider
 
 
 class PipelineResult(TypedDict):
@@ -153,6 +154,7 @@ class EngineSettings(TypedDict):
     chapter_provider: str  # a podcast_reader.providers.PROVIDERS key
     custom_provider_url: str  # base URL for the "custom" provider ("" otherwise)
     diarize: bool  # default false; warn-and-skip when the pack is absent
+    caption_cleanup: bool  # opt-in, provider-assisted spelling/casing cleanup
     media_cache_max_bytes: int  # LRU cap for the lazy media cache (media-playback)
 
 

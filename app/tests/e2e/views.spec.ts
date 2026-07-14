@@ -259,12 +259,17 @@ test('Settings: round-trip save, engine-side key test, inline validation error',
 
   // Save: settings PUT first, then the key goes through vault-and-push.
   await harness.window.locator('#settings-sentences').fill('7')
+  const cleanup = harness.window.locator('#settings-caption-cleanup')
+  await expect(cleanup).not.toBeChecked()
+  await cleanup.check()
   await harness.window.getByRole('button', { name: 'Save', exact: true }).click()
   await expect(harness.window.locator('.form-actions .key-result')).toHaveText('Saved.')
   const settings = (await (await harness.mock.engine('/v1/settings')).json()) as {
     sentences: number
+    caption_cleanup: boolean
   }
   expect(settings.sentences).toBe(7)
+  expect(settings.caption_cleanup).toBe(true)
   const logAfterSave = await harness.mock.log()
   expect(
     logAfterSave.some((entry) => entry.kind === 'keys-put' && entry.detail === 'anthropic')
