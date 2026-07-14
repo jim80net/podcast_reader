@@ -313,10 +313,15 @@ class TestKeylessTimeline:
         html = build_html(segments, title="T", sentences_per_para=1, source="test")
 
         assert 'aria-label="Transcript timeline"' in html
-        assert 'href="#t-0">00:00:00</a>' in html
-        assert 'href="#t-305000">00:05:05</a>' in html
-        assert 'href="#t-605000">00:10:05</a>' in html
-        assert 'href="#t-905000">00:15:05</a>' in html
+        for anchor, ts in [
+            ("t-0", "00:00:00"),
+            ("t-305000", "00:05:05"),
+            ("t-605000", "00:10:05"),
+            ("t-905000", "00:15:05"),
+        ]:
+            assert f'<a href="#{anchor}"><span class="timeline-ts">{ts}</span>' in html
+        # Content-aware labels: the marker's opening words, not bare clock time.
+        assert '<span class="timeline-snippet">Five minutes one. Five minutes two.</span>' in html
         assert 'id="t-305000" data-start="305.000"' in html
         assert "Chapters, key points, and pull quotes are available" in html
         assert "Settings &rarr; AI model in the app" in html
@@ -343,6 +348,74 @@ class TestKeylessTimeline:
 
         assert 'aria-label="Transcript timeline"' not in html
         assert "Chapters, key points, and pull quotes are available" not in html
+
+
+class TestTimelineLabel:
+    def test_short_text_is_kept_whole_without_ellipsis(self) -> None:
+        from podcast_reader.html import _timeline_label
+
+        assert _timeline_label("I dropped out of Reed.") == "I dropped out of Reed."
+
+    def test_long_text_truncates_at_word_boundary_with_ellipsis(self) -> None:
+        from podcast_reader.html import _timeline_label
+
+        label = _timeline_label(
+            "I dropped out of Reed College after the first six months but then stayed around"
+        )
+        assert label == "I dropped out of Reed College after the…"
+        assert len(label) <= 43  # budget + ellipsis
+
+    def test_single_overlong_word_hard_truncates(self) -> None:
+        from podcast_reader.html import _timeline_label
+
+        label = _timeline_label("a" * 60)
+        assert label == "a" * 42 + "…"
+
+    def test_surrounding_whitespace_does_not_force_ellipsis(self) -> None:
+        from podcast_reader.html import _timeline_label
+
+        assert _timeline_label("  Short text.  ") == "Short text."
+
+
+class TestSidebarMarginGating:
+    """Issue #52: the 280px sidebar margin is reserved only when the sidebar
+    is actually emitted (chapters exist)."""
+
+    _SEGS = [{"start": 0.0, "end": 2.0, "text": "Hello there."}]
+    _CHAPTERS = [
+        {
+            "title": "Only Chapter",
+            "start": 0.0,
+            "end": 2.0,
+            "abstract": "All of it.",
+            "type": "content",
+            "key_points": [],
+        }
+    ]
+
+    def test_keyless_body_has_no_sidebar_class(self) -> None:
+        from podcast_reader.html import build_html
+
+        html = build_html(list(self._SEGS), title="T", source="test")
+        assert "<body>" in html
+        assert '<body class="has-sidebar">' not in html
+        assert "<aside" not in html
+
+    def test_chaptered_body_carries_sidebar_class(self) -> None:
+        from podcast_reader.html import build_html
+
+        html = build_html(list(self._SEGS), title="T", chapters=self._CHAPTERS, source="test")
+        assert '<body class="has-sidebar">' in html
+        assert '<aside id="sidebar">' in html
+
+    def test_margin_rule_is_scoped_to_has_sidebar(self) -> None:
+        from podcast_reader.html import build_html
+
+        html = build_html(list(self._SEGS), title="T", source="test")
+        assert ".has-sidebar #content {" in html
+        # The unscoped #content rule must not reserve the sidebar width.
+        unscoped = html.split("#content {", 1)[1].split("}", 1)[0]
+        assert "margin-left" not in unscoped
 
 
 class TestBuildHtmlIntegration:
