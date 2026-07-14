@@ -27,10 +27,9 @@
   --sidebar-w: 280px;
 }
 
-/* Warm-paper light palette, matching the desktop app's light theme. Applied
-   when the host (the Reader) sets data-theme="light" on <html> so the transcript
-   follows the app's theme; the dark palette above is the default (and what a
-   standalone file shows). */
+/* Warm-paper light palette, matching the desktop app's light theme. The
+   Reader still injects data-theme="light" explicitly, and standalone files now
+   also follow the browser's prefers-color-scheme: light preference. */
 :root[data-theme='light'] {
   --bg: #f7f4ee;
   --bg-warm: #f1ede5;
@@ -49,6 +48,28 @@
   --green: #2f7d45;
   --purple: #6b4fa0;
   --sidebar-w: 280px;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #f7f4ee;
+    --bg-warm: #f1ede5;
+    --surface: #ffffff;
+    --surface-hover: #f1ede5;
+    --border: #e3ddd2;
+    --text: #3a342c;
+    --text-bright: #20201d;
+    --muted: #6b6157;
+    --accent: #9a3b2e;
+    --accent-dim: #b8705f;
+    --accent-glow: rgba(154, 59, 46, 0.1);
+    --link: #2a6f97;
+    --link-hover: #1f5675;
+    --red: #b23a26;
+    --green: #2f7d45;
+    --purple: #6b4fa0;
+    --sidebar-w: 280px;
+  }
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -219,7 +240,9 @@ h1 {
 /* ---- BODY TEXT ---- */
 p {
   margin-bottom: 1.3rem;
-  text-align: justify;
+  margin-inline: auto;
+  max-width: 68ch;
+  text-align: left;
   hyphens: auto;
 }
 .ts {
