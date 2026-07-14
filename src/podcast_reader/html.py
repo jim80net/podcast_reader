@@ -259,12 +259,15 @@ def build_timeline_nav(segments: list[dict[str, Any]], sentences_per_para: int =
             markers.append(marker)
         threshold += interval
 
+    # Stop #1 is always t=0, whose opening words are frequently boilerplate
+    # (sponsor reads, intro jingles) — the least useful label on the page.
+    # "Start" is deterministic and honest; content labels begin at stop #2.
     links = "\n".join(
         f'<a href="#{_time_anchor(float(p["start"]))}">'
         f'<span class="timeline-ts">{fmt_time(float(p["start"]))}</span>'
-        f'<span class="timeline-snippet">{_timeline_label(p["text"])}</span>'
+        f'<span class="timeline-snippet">{"Start" if i == 0 else _timeline_label(p["text"])}</span>'
         f"</a>"
-        for p in markers
+        for i, p in enumerate(markers)
     )
     return (
         '<nav class="timeline-nav" aria-label="Transcript timeline">\n'
@@ -603,17 +606,19 @@ h1 {
 .timeline-links {
   display: flex;
   flex: 1 1 auto;
-  gap: 0.35rem;
+  /* Wrap, never scroll: with 3-5 stops, two quiet rows beat stops hidden
+     behind an invisible scrollbar or glyphs clipped at the container edge. */
+  flex-wrap: wrap;
+  gap: 0.1rem 0.35rem;
   min-width: 0;
-  overflow-x: auto;
-  scrollbar-width: thin;
 }
 .timeline-links a {
   flex: none;
   display: inline-flex;
   align-items: baseline;
   gap: 0.4rem;
-  max-width: 15rem;
+  /* Two capped links fit per wrapped row inside the reading column. */
+  max-width: 13rem;
   padding: 0.12rem 0.45rem;
   border-radius: 2px;
 }

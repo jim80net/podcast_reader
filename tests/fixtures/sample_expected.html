@@ -234,17 +234,19 @@ h1 {
 .timeline-links {
   display: flex;
   flex: 1 1 auto;
-  gap: 0.35rem;
+  /* Wrap, never scroll: with 3-5 stops, two quiet rows beat stops hidden
+     behind an invisible scrollbar or glyphs clipped at the container edge. */
+  flex-wrap: wrap;
+  gap: 0.1rem 0.35rem;
   min-width: 0;
-  overflow-x: auto;
-  scrollbar-width: thin;
 }
 .timeline-links a {
   flex: none;
   display: inline-flex;
   align-items: baseline;
   gap: 0.4rem;
-  max-width: 15rem;
+  /* Two capped links fit per wrapped row inside the reading column. */
+  max-width: 13rem;
   padding: 0.12rem 0.45rem;
   border-radius: 2px;
 }

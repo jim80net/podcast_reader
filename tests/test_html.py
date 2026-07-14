@@ -322,6 +322,16 @@ class TestKeylessTimeline:
             assert f'<a href="#{anchor}"><span class="timeline-ts">{ts}</span>' in html
         # Content-aware labels: the marker's opening words, not bare clock time.
         assert '<span class="timeline-snippet">Five minutes one. Five minutes two.</span>' in html
+        # Stop #1 is labeled "Start", never its (often boilerplate) opening words.
+        assert (
+            '<span class="timeline-ts">00:00:00</span>'
+            '<span class="timeline-snippet">Start</span>' in html
+        )
+        assert '<span class="timeline-snippet">Opening one.' not in html
+        # Stops wrap instead of scrolling out of view behind a clipped edge (#57).
+        links_rule = html.split(".timeline-links {", 1)[1].split("}", 1)[0]
+        assert "flex-wrap: wrap" in links_rule
+        assert "overflow-x" not in links_rule
         assert 'id="t-305000" data-start="305.000"' in html
         assert "Chapters, key points, and pull quotes are available" in html
         assert "Settings &rarr; AI model in the app" in html
