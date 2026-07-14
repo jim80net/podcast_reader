@@ -316,6 +316,28 @@ def run_pipeline(
                 f"Written {len(chapters)} chapters to {chapters_path}",
                 {},
             )
+    elif _valid_artifact(chapters_path):
+        # Only reachable with cleanup requested but its cache missing (a ready
+        # cleanup cache takes the first branch): no key means the cleanup pass
+        # cannot be regenerated, but the cached chapters are still good —
+        # degrade to them with original wording instead of dropping them.
+        _emit(
+            on_event,
+            "step_started",
+            "chapters",
+            f"Chapters JSON already exists: {chapters_path} (delete to regenerate)",
+            {"cached": True},
+        )
+        chapters = json.loads(chapters_path.read_text())
+        _emit(
+            on_event,
+            "warning",
+            "chapters",
+            f"Caption cleanup needs a chapter key ({_chapter_key_hint(provider)}); "
+            "keeping original wording",
+            {"code": "caption_cleanup_skipped"},
+        )
+        _emit(on_event, "step_finished", "chapters", "", {"cached": True})
     else:
         _emit(
             on_event,

@@ -773,6 +773,70 @@ class TestRunPipelineChapters:
         mock_generate.assert_not_called()
         assert mock_build_html.call_args.kwargs["chapters"] == _SAMPLE_CHAPTERS
 
+    @patch("podcast_reader.pipeline._wsl_path", return_value=None)
+    @patch("podcast_reader.pipeline.build_html", return_value="<html></html>")
+    @patch("podcast_reader.pipeline.generate_chapters_with_cleanup")
+    @patch("podcast_reader.pipeline.fetch_transcript")
+    @patch("podcast_reader.pipeline.snippets_to_whisper_segments", return_value=_SAMPLE_SEGMENTS)
+    def test_cleanup_without_key_degrades_to_cached_chapters(
+        self,
+        _mock_snippets: MagicMock,
+        _mock_fetch: MagicMock,
+        mock_generate: MagicMock,
+        mock_build_html: MagicMock,
+        _mock_wsl: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        """Cleanup enabled + cached chapters + no key + no cleanup cache:
+        the cached chapters must survive (original wording), not be dropped."""
+        chapters_path = tmp_path / "abc123XYZqq_chapters.json"
+        chapters_path.write_text(json.dumps(_SAMPLE_CHAPTERS))
+
+        events: list[PipelineEvent] = []
+        run_pipeline(
+            _request(input_arg=_YT_URL, output_dir=tmp_path, caption_cleanup=True),
+            on_event=events.append,
+        )
+
+        mock_generate.assert_not_called()
+        assert mock_build_html.call_args.kwargs["chapters"] == _SAMPLE_CHAPTERS
+        assert mock_build_html.call_args.kwargs["caption_cleanup"] is False
+        codes = [e["data"].get("code") for e in events if e["kind"] == "warning"]
+        assert "caption_cleanup_skipped" in codes
+        assert "chapters_skipped" not in codes
+
+    @patch("podcast_reader.pipeline._wsl_path", return_value=None)
+    @patch("podcast_reader.pipeline.build_html", return_value="<html></html>")
+    @patch("podcast_reader.pipeline.generate_chapters_with_cleanup")
+    @patch("podcast_reader.pipeline.fetch_transcript")
+    @patch("podcast_reader.pipeline.snippets_to_whisper_segments", return_value=_SAMPLE_SEGMENTS)
+    def test_cleanup_without_key_still_applies_cached_corrections(
+        self,
+        _mock_snippets: MagicMock,
+        _mock_fetch: MagicMock,
+        mock_generate: MagicMock,
+        mock_build_html: MagicMock,
+        _mock_wsl: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        """When BOTH caches exist, a removed key changes nothing: cached
+        chapters and cached corrections are used as before."""
+        (tmp_path / "abc123XYZqq_chapters.json").write_text(json.dumps(_SAMPLE_CHAPTERS))
+        (tmp_path / "abc123XYZqq_caption_cleanup.json").write_text(
+            json.dumps([{"segment_start": 5.0, "original": "Goodbye", "replacement": "GoodBye"}])
+        )
+
+        run_pipeline(
+            _request(input_arg=_YT_URL, output_dir=tmp_path, caption_cleanup=True),
+            on_event=lambda e: None,
+        )
+
+        mock_generate.assert_not_called()
+        assert mock_build_html.call_args.kwargs["chapters"] == _SAMPLE_CHAPTERS
+        assert mock_build_html.call_args.kwargs["caption_cleanup"] is True
+        rendered_segments = mock_build_html.call_args.args[0]
+        assert rendered_segments[1]["text"] == "GoodBye world."
+
 
 class TestChaptersFaultIsolation:
     @patch("podcast_reader.pipeline._wsl_path", return_value=None)

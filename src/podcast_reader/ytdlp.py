@@ -3,8 +3,11 @@
 A failed download raises a structured ``PipelineError`` (per S7) —
 extractor breakage is an expected, user-explainable failure, not an
 internal error. Authentication-required failures carry the distinct code
-``download_auth_required`` with a short, reader-modeled hint; the full
-stderr stays in the error detail. Everything else is ``download_failed``.
+``download_auth_required`` with a deliberately neutral (empty) hint — the
+raise site cannot know which face is running, so the CLI and the desktop
+app each author their own cookie affordance; the full stderr stays in the
+error detail. Everything else is ``download_failed``, whose recognized
+classes get face-neutral hints.
 
 When the resolved yt-dlp is the *managed* copy (it resides in the
 user-data tools dir), a ``download_failed`` failure triggers one
