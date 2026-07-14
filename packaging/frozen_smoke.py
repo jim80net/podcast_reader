@@ -250,8 +250,9 @@ def alive(pid):
 if args == ['serve', 'status', '--json']:
     try:
         pid = int(open(pid_file, encoding='utf-8').read())
-        if not alive(pid): raise ProcessLookupError
-    except (FileNotFoundError, OSError, ValueError):
+    except (FileNotFoundError, ValueError):
+        pid = None
+    if pid is not None and not alive(pid):
         try: os.unlink(state)
         except FileNotFoundError: pass
     try: print(open(state, encoding='utf-8').read())
@@ -267,8 +268,8 @@ payload = {'Foreground': {'smoke-session': {
     'Web': {'smoke.example.ts.net:443': {'Handlers': {'/': {'Proxy': target}}}},
     'AllowFunnel': {},
 }}}
-with open(state, 'w', encoding='utf-8') as handle: json.dump(payload, handle)
 with open(pid_file, 'w', encoding='utf-8') as handle: handle.write(str(os.getpid()))
+with open(state, 'w', encoding='utf-8') as handle: json.dump(payload, handle)
 def stop(*_args):
     try: os.unlink(state)
     except FileNotFoundError: pass
