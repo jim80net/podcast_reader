@@ -86,10 +86,21 @@ class TestEngineState:
 
 class TestSecureWrites:
     def test_windows_private_sddl_sets_explicit_user_owner_and_only_two_aces(self) -> None:
-        from podcast_reader.engine.settings import _windows_private_sddl
+        from podcast_reader.engine.settings import (
+            _windows_dacl_principals_are_exact,
+            _windows_private_sddl,
+        )
 
         sid = "S-1-5-21-100-200-300-400"
         assert _windows_private_sddl(sid) == (f"O:{sid}D:P(A;;FA;;;SY)(A;;FA;;;{sid})")
+
+        resolved = {"SY": "S-1-5-18", "LA": "S-1-5-21-local-500"}
+
+        def equals(principal: str, expected: str) -> bool:
+            return resolved.get(principal, principal) == expected
+
+        assert _windows_dacl_principals_are_exact({"SY", "LA"}, "S-1-5-21-local-500", equals)
+        assert not _windows_dacl_principals_are_exact({"SY", "LA"}, "S-1-5-21-domain-500", equals)
 
     def test_engine_state_tmp_created_0600_at_open(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

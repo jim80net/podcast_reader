@@ -29,10 +29,13 @@ import sys
 import threading
 from importlib import metadata
 from pathlib import Path
-from typing import TypedDict, cast
+from typing import TYPE_CHECKING, TypedDict, cast
 
 from podcast_reader.providers import canonicalize_custom_providers
 from podcast_reader.types import EngineSettings
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 if sys.platform == "win32":  # pragma: no cover - imported only on Windows
     import msvcrt
@@ -347,6 +350,38 @@ def _windows_private_sddl(current_user_sid: str) -> str:
     return f"O:{current_user_sid}D:P(A;;FA;;;SY)(A;;FA;;;{current_user_sid})"
 
 
+def _windows_sddl_principal_equals_sid(principal: str, expected_sid: str) -> bool:
+    """Resolve an SDDL alias/numeric principal and compare its SID exactly."""
+    advapi32, kernel32 = _windows_security_libraries()
+    actual = ctypes.c_void_p()
+    expected = ctypes.c_void_p()
+    convert = advapi32.ConvertStringSidToSidW
+    convert.argtypes = [ctypes.c_wchar_p, ctypes.POINTER(ctypes.c_void_p)]
+    convert.restype = ctypes.c_int
+    if not convert(principal, ctypes.byref(actual)):
+        raise _windows_error("could not resolve a rendered DACL principal")
+    try:
+        if not convert(expected_sid, ctypes.byref(expected)):
+            raise _windows_error("could not resolve the expected DACL principal")
+        equal_sid = advapi32.EqualSid
+        equal_sid.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+        equal_sid.restype = ctypes.c_int
+        return bool(equal_sid(actual, expected))
+    finally:
+        if expected.value:
+            kernel32.LocalFree(expected)
+        kernel32.LocalFree(actual)
+
+
+def _windows_dacl_principals_are_exact(
+    principals: set[str], current_user_sid: str, equals_sid: Callable[[str, str], bool]
+) -> bool:
+    """Require one TokenUser ACE and one SYSTEM ACE after resolving aliases."""
+    user_matches = sum(equals_sid(principal, current_user_sid) for principal in principals)
+    system_matches = sum(equals_sid(principal, "S-1-5-18") for principal in principals)
+    return len(principals) == 2 and user_matches == 1 and system_matches == 1
+
+
 def _windows_private_descriptor() -> tuple[ctypes.CDLL, ctypes.CDLL, ctypes.c_void_p]:
     """Allocate the protected current-user+SYSTEM security descriptor."""
     advapi32, kernel32 = _windows_security_libraries()
@@ -513,13 +548,12 @@ def _validate_windows_private_descriptor(
             kernel32.LocalFree(rendered)
     principals = set(re.findall(r"\(A;;FA;;;([^)]+)\)", sddl))
     current_user_sid = _windows_current_user_sid()
-    system_principals = {"SY", "S-1-5-18"}
     if (
         owner_sddl != current_user_sid
         or not sddl.startswith("D:P")
-        or len(principals) != 2
-        or not (principals & system_principals)
-        or principals - system_principals != {current_user_sid}
+        or not _windows_dacl_principals_are_exact(
+            principals, current_user_sid, _windows_sddl_principal_equals_sid
+        )
         or sddl.count("(") != 2
     ):
         raise PermissionError(f"engine-state DACL is not restricted to owner and SYSTEM: {sddl}")
