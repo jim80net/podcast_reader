@@ -379,9 +379,7 @@ class TestPipelineRunner:
         monkeypatch.setenv("PODCAST_READER_DATA_DIR", str(tmp_path))
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
 
-        with patch(
-            "podcast_reader.engine.process.run_pipeline", side_effect=_fake_run_pipeline
-        ):
+        with patch("podcast_reader.engine.process.run_pipeline", side_effect=_fake_run_pipeline):
             runner = make_pipeline_runner(tmp_path)
             record = new_job_record(job_id="j1", source="https://example.com/e", title=None)
             runner(record, _noop)
