@@ -110,10 +110,7 @@ def _classify_config(root: dict[str, object]) -> ServeStatus:
         return _conflict("Tailscale Funnel is configured; private access will not modify it")
 
     for port_text, raw_listener in tcp.items():
-        if (
-            not re.fullmatch(r"[1-9]\d{0,4}", port_text)
-            or int(port_text) > 65535
-        ):
+        if not re.fullmatch(r"[1-9]\d{0,4}", port_text) or int(port_text) > 65535:
             return _conflict("Tailscale Serve returned an unexpected TCP listener name")
         listener = _object(raw_listener)
         if (
@@ -142,8 +139,10 @@ def _classify_config(root: dict[str, object]) -> ServeStatus:
             return _conflict("Tailscale Serve returned an unexpected handler shape")
         for raw_handler in handlers.values():
             handler = _object(raw_handler)
-            if handler is None or set(handler) != {"Proxy"} or not isinstance(
-                handler.get("Proxy"), str
+            if (
+                handler is None
+                or set(handler) != {"Proxy"}
+                or not isinstance(handler.get("Proxy"), str)
             ):
                 return _conflict("Tailscale Serve returned an unexpected handler shape")
         if port_text == "443":
@@ -272,7 +271,8 @@ def _windows_bindings() -> tuple[_Kernel32, Callable[[], int]]:
 
     kernel32 = cast("_Kernel32", engine_process._kernel32)  # type: ignore[attr-defined]
     windows_job = cast(
-        "Callable[[], int]", engine_process._windows_job  # type: ignore[attr-defined]
+        "Callable[[], int]",
+        engine_process._windows_job,  # type: ignore[attr-defined]
     )
     return kernel32, windows_job
 
@@ -463,7 +463,7 @@ def run_guardian(
         return 2 if cleanup == "absent" else 3
 
     gate.start()
-    _emit(events, "ready", target=target, url=f'{ready["url"]}/web/')
+    _emit(events, "ready", target=target, url=f"{ready['url']}/web/")
     lease_closed = threading.Event()
 
     def watch_lease() -> None:

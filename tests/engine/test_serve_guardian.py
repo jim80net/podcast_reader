@@ -15,15 +15,21 @@ from podcast_reader.engine.serve_guardian import classify_serve_status, run_guar
 
 
 def _status(*, target: str = "http://127.0.0.1:43127", path: str = "/") -> str:
-    return json.dumps({"Foreground": {"test-session": {
-            "TCP": {"443": {"HTTPS": True}},
-            "Web": {
-                "desktop.example.ts.net:443": {
-                    "Handlers": {path: {"Proxy": target}},
+    return json.dumps(
+        {
+            "Foreground": {
+                "test-session": {
+                    "TCP": {"443": {"HTTPS": True}},
+                    "Web": {
+                        "desktop.example.ts.net:443": {
+                            "Handlers": {path: {"Proxy": target}},
+                        }
+                    },
+                    "AllowFunnel": {},
                 }
-            },
-            "AllowFunnel": {},
-        }}})
+            }
+        }
+    )
 
 
 def test_classify_serve_status_extracts_exact_mapping() -> None:
