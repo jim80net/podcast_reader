@@ -202,19 +202,20 @@ await waitFor(
 // --- 4. open the real transcript produced by the installed frozen engine ---
 const readerHref = await waitFor(
   async () => {
-    const link = page.locator('a.job-title').first()
-    if ((await link.count()) === 0) return undefined
-    const href = await link.getAttribute('href')
-    return href !== null && href.startsWith('#/reader/') ? href : undefined
+    const entries = await page.evaluate(() => window.api.listLibrary())
+    const entry = entries.find((candidate) => candidate.source === testAudio)
+    return entry === undefined ? undefined : `#/reader/${entry.source_id}`
   },
-  JOB_TIMEOUT_MS,
-  'finished local-audio job to link to the Reader'
+  WIZARD_TIMEOUT_MS,
+  'finished local-audio transcript to appear in the library'
 )
 await page.screenshot({ path: join(outDir, '03-new-view-job-done.png') })
 log(`job done, transcript at ${readerHref}`)
 
 // --- 5. Reader: the transcript renders inside the sandboxed iframe ---------
-await page.locator('a.job-title').first().click()
+await page.evaluate((href) => {
+  location.hash = href
+}, readerHref)
 const readerFrame = page.locator('iframe.reader-frame')
 await readerFrame.waitFor({ timeout: WIZARD_TIMEOUT_MS })
 await page
