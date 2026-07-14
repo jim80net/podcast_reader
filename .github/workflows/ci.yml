@@ -216,7 +216,9 @@ jobs:
       - name: Mock-engine e2e + real-engine smoke (xvfb)
         run: xvfb-run -a npx playwright test
       - uses: actions/upload-artifact@v4
-        if: failure()
+        if: always()
         with:
           name: playwright-results
           path: app/test-results/
+          retention-days: 14
+          if-no-files-found: error

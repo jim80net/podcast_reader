@@ -18,6 +18,7 @@ export default defineConfig({
   timeout: 90_000,
   workers: 1,
   retries: process.env.CI !== undefined ? 1 : 0,
+  preserveOutput: 'always',
   reporter: [['list']],
   projects: [
     { name: 'e2e', testIgnore: /integration\.spec\.ts/ },

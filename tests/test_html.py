@@ -1,6 +1,7 @@
 """Tests for podcast_reader.html paragraph grouping."""
 
 import json
+import re
 from pathlib import Path
 
 from podcast_reader.html import _count_sentences, segments_to_paragraphs
@@ -491,7 +492,89 @@ class TestTimelineInterval:
         assert _timeline_interval(15 * 60) == 3 * 60
         assert _timeline_interval(30 * 60) == 3 * 60
         assert _timeline_interval(45 * 60) == 5 * 60
+        assert _timeline_interval(45 * 60 + 0.001) == 10 * 60
+        assert _timeline_interval(59 * 60 + 56) == 10 * 60
         assert _timeline_interval(2 * 60 * 60) == 10 * 60
+
+    def test_near_hour_transcript_emits_six_markers(self) -> None:
+        from podcast_reader.html import _timeline_markers
+
+        paragraphs = [
+            {
+                "start": float(minute * 60),
+                "end": float(59 * 60 + 56 if minute == 59 else (minute + 1) * 60),
+                "text": f"Minute {minute} introduces a distinct idea for the reader.",
+            }
+            for minute in range(60)
+        ]
+
+        markers = _timeline_markers(paragraphs)
+
+        assert [marker["start"] for marker in markers] == [
+            0.0,
+            600.0,
+            1200.0,
+            1800.0,
+            2400.0,
+            3000.0,
+        ]
+
+
+class TestSectionBadgeContrast:
+    @staticmethod
+    def _luminance(hex_color: str) -> float:
+        channels = [int(hex_color[index : index + 2], 16) / 255 for index in (1, 3, 5)]
+        linear = [
+            channel / 12.92 if channel <= 0.04045 else ((channel + 0.055) / 1.055) ** 2.4
+            for channel in channels
+        ]
+        return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+
+    @classmethod
+    def _contrast(cls, first: str, second: str) -> float:
+        brighter, darker = sorted((cls._luminance(first), cls._luminance(second)), reverse=True)
+        return (brighter + 0.05) / (darker + 0.05)
+
+    @staticmethod
+    def _theme_tokens(scope: str) -> tuple[str, str]:
+        from podcast_reader.html import _STYLESHEET
+
+        match = re.search(rf"{re.escape(scope)}\s*\{{(?P<body>.*?)\n\}}", _STYLESHEET, re.DOTALL)
+        assert match is not None, f"missing theme scope: {scope}"
+        body = match.group("body")
+        background = re.search(r"--section-badge-bg:\s*(#[0-9a-fA-F]{6})", body)
+        foreground = re.search(r"--section-badge-text:\s*(#[0-9a-fA-F]{6})", body)
+        assert background is not None and foreground is not None
+        return background.group(1).lower(), foreground.group(1).lower()
+
+    def test_all_theme_paths_assign_an_aa_pair(self) -> None:
+        dark = ("#31465a", "#f2f6f8")
+        light = ("#d8e6ed", "#29495a")
+        assignments = {
+            ":root": dark,
+            ":root[data-theme='dark']": dark,
+            ":root[data-theme='light']": light,
+            ":root:not([data-theme='dark'])": light,
+        }
+
+        for scope, expected in assignments.items():
+            actual = self._theme_tokens(scope)
+            assert actual == expected
+            assert self._contrast(*actual) >= 4.5
+
+    def test_sidebar_and_heading_badges_share_the_theme_tokens(self) -> None:
+        from podcast_reader.html import _STYLESHEET
+
+        for selectors in (
+            ".nav-badge-intro, .nav-badge-outro",
+            ".badge-intro, .badge-outro",
+        ):
+            match = re.search(
+                rf"{re.escape(selectors)}\s*\{{(?P<body>.*?)\}}", _STYLESHEET, re.DOTALL
+            )
+            assert match is not None
+            assert "background: var(--section-badge-bg)" in match.group("body")
+            assert "color: var(--section-badge-text)" in match.group("body")
 
 
 class TestTimelineLabel:
@@ -771,6 +854,21 @@ class TestBuildHtmlIntegration:
         result = build_html(segments, title="Longform Test Episode", source="test")
 
         expected = (FIXTURES / "sample_expected_longform.html").read_text()
+        assert result == expected
+
+    def test_near_hour_keyless_golden_stays_current(self) -> None:
+        """The 59:56 golden is the browser geometry proof for issue #72."""
+        from podcast_reader.html import build_html
+        from tests.regen_goldens import _near_hour_segments
+
+        result = build_html(
+            _near_hour_segments(),
+            title="Near-hour Test Episode",
+            sentences_per_para=1,
+            source="test",
+        )
+
+        expected = (FIXTURES / "sample_expected_near_hour.html").read_text()
         assert result == expected
 
     def test_full_pipeline_with_chapters(self) -> None:

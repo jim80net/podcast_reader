@@ -230,7 +230,7 @@ def _timeline_interval(duration: float) -> float:
         return 2 * 60
     if duration <= 30 * 60:
         return 3 * 60
-    if duration <= 60 * 60:
+    if duration <= 45 * 60:
         return 5 * 60
     return 10 * 60
 
@@ -500,6 +500,8 @@ _STYLESHEET = """\
   --red: #c0503a;
   --green: #5a9a6a;
   --purple: #8a6abf;
+  --section-badge-bg: #31465a;
+  --section-badge-text: #f2f6f8;
   --sidebar-w: 280px;
   --reading-column: 68ch;
 }
@@ -522,6 +524,8 @@ _STYLESHEET = """\
   --red: #c0503a;
   --green: #5a9a6a;
   --purple: #8a6abf;
+  --section-badge-bg: #31465a;
+  --section-badge-text: #f2f6f8;
 }
 
 /* Warm-paper light palette, matching the desktop app's light theme. */
@@ -542,6 +546,8 @@ _STYLESHEET = """\
   --red: #b23a26;
   --green: #2f7d45;
   --purple: #6b4fa0;
+  --section-badge-bg: #d8e6ed;
+  --section-badge-text: #29495a;
 }
 
 @media (prefers-color-scheme: light) {
@@ -562,6 +568,8 @@ _STYLESHEET = """\
     --red: #b23a26;
     --green: #2f7d45;
     --purple: #6b4fa0;
+    --section-badge-bg: #d8e6ed;
+    --section-badge-text: #29495a;
   }
 }
 
@@ -643,7 +651,10 @@ body {
   font-family: 'JetBrains Mono', monospace;
 }
 .nav-badge-sponsor { background: rgba(90, 100, 50, 0.5); color: #a0a860; }
-.nav-badge-intro, .nav-badge-outro { background: rgba(50, 80, 110, 0.5); color: #6a9ab8; }
+.nav-badge-intro, .nav-badge-outro {
+  background: var(--section-badge-bg);
+  color: var(--section-badge-text);
+}
 .nav-badge-housekeeping { background: rgba(80, 60, 100, 0.5); color: #9a85b5; }
 
 /* ---- MAIN CONTENT ---- */
@@ -865,7 +876,10 @@ p {
   margin-left: 0.5rem;
 }
 .badge-sponsor { background: rgba(90, 100, 50, 0.4); color: #b8c060; }
-.badge-intro, .badge-outro { background: rgba(50, 80, 110, 0.4); color: #7ab0d0; }
+.badge-intro, .badge-outro {
+  background: var(--section-badge-bg);
+  color: var(--section-badge-text);
+}
 .badge-housekeeping { background: rgba(80, 60, 100, 0.4); color: #a890c0; }
 
 /* ---- LINKS ---- */
