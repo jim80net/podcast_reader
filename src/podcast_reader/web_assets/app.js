@@ -1,4 +1,15 @@
 const app = document.querySelector('#app')
+let searchGeneration = 0
+let searchController
+let searchTimer
+
+function cancelSearch() {
+  searchGeneration += 1
+  searchController?.abort()
+  searchController = undefined
+  if (searchTimer !== undefined) clearTimeout(searchTimer)
+  searchTimer = undefined
+}
 
 function element(tag, text, className) {
   const node = document.createElement(tag)
@@ -27,6 +38,7 @@ async function request(path, options = {}) {
 }
 
 function showPairing(error) {
+  cancelSearch()
   const panel = element('section', undefined, 'panel pairing')
   panel.append(element('p', 'Private tailnet reader', 'eyebrow'))
   panel.append(element('h1', 'Connect this browser'))
@@ -79,6 +91,7 @@ function showPairing(error) {
 }
 
 function showReader(entry) {
+  cancelSearch()
   const header = element('header', undefined, 'reader-header')
   header.append(button('← Library', loadLibrary), element('h1', entry.title))
   const frame = document.createElement('iframe')
@@ -93,23 +106,146 @@ function showReader(entry) {
 }
 
 function showLibrary(entries) {
+  cancelSearch()
   const header = element('header', undefined, 'library-header')
   const title = element('div')
   title.append(element('p', 'Private tailnet reader', 'eyebrow'), element('h1', 'Your library'))
   header.append(title, button('Log out', logout))
+  const search = element('section', undefined, 'library-search')
+  const label = element('label', 'Search transcripts', 'search-label')
+  label.htmlFor = 'library-search-input'
+  const controls = element('div', undefined, 'search-controls')
+  const input = document.createElement('input')
+  input.id = 'library-search-input'
+  input.type = 'search'
+  input.autocomplete = 'off'
+  input.spellcheck = false
+  input.setAttribute('autocorrect', 'off')
+  input.autocapitalize = 'none'
+  input.inputMode = 'search'
+  input.placeholder = 'Words from any episode'
+  const clear = button('Clear', () => {
+    cancelSearch()
+    input.value = ''
+    renderList(entries)
+    status.replaceChildren()
+    input.focus()
+  })
+  clear.className = 'search-clear'
+  controls.append(input, clear)
+  const status = element('p', undefined, 'search-status')
+  status.setAttribute('role', 'status')
+  status.setAttribute('aria-live', 'polite')
+  search.append(label, controls, status)
   const list = element('ul', undefined, 'library')
-  if (!entries.length) list.append(element('li', 'Your completed transcripts will appear here.', 'empty'))
-  for (const entry of entries) {
-    const item = document.createElement('li')
-    const open = button(entry.title, () => showReader(entry))
-    const date = new Date(entry.created_at * 1000)
-    item.append(open, element('time', date.toLocaleDateString()))
-    list.append(item)
+
+  function renderList(items, searching = false) {
+    list.replaceChildren()
+    if (!items.length) {
+      const copy = searching
+        ? 'No transcript matches.'
+        : 'Your completed transcripts will appear here.'
+      list.append(element('li', copy, 'empty'))
+      return
+    }
+    for (const entry of items) {
+      const item = document.createElement('li')
+      const open = button(entry.title, () => showReader(entry))
+      if (entry.excerpt !== undefined) {
+        open.replaceChildren(
+          element('span', entry.title, 'result-title'),
+          element('span', entry.excerpt, 'result-excerpt')
+        )
+      }
+      if (entry.created_at !== undefined) {
+        const date = new Date(entry.created_at * 1000)
+        item.append(open, element('time', date.toLocaleDateString()))
+      } else {
+        item.append(open)
+      }
+      list.append(item)
+    }
   }
-  replaceView(header, list)
+
+  function showSearchFailure(query, generation) {
+    if (generation !== searchGeneration) return
+    status.replaceChildren(
+      document.createTextNode('Search is temporarily unavailable. '),
+      button('Retry', () => startSearch(query, generation))
+    )
+  }
+
+  async function runSearch(query, generation, busyAttempts, busyStarted) {
+    if (generation !== searchGeneration) return
+    searchController = new AbortController()
+    try {
+      const response = await request('/web/api/search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query }),
+        signal: searchController.signal
+      })
+      if (generation !== searchGeneration) return
+      if (response.status === 401) return showPairing()
+      if (response.status === 429 && busyAttempts < 2 && Date.now() - busyStarted < 3000) {
+        status.textContent = 'Searching…'
+        const delay = Math.min(1000, Math.max(0, 3000 - (Date.now() - busyStarted)))
+        searchTimer = setTimeout(
+          () => {
+            if (generation !== searchGeneration) return
+            if (Date.now() - busyStarted >= 3000) {
+              showSearchFailure(query, generation)
+              return
+            }
+            runSearch(query, generation, busyAttempts + 1, busyStarted)
+          },
+          delay
+        )
+        return
+      }
+      if (!response.ok) return showSearchFailure(query, generation)
+      const payload = await response.json()
+      if (generation !== searchGeneration) return
+      renderList(payload.results, true)
+      const messages = []
+      if (payload.results.length) {
+        messages.push(`${payload.results.length} ${payload.results.length === 1 ? 'match' : 'matches'}.`)
+      } else {
+        messages.push('0 matches.')
+      }
+      if (payload.has_more) messages.push('Showing the first 20 matches.')
+      if (payload.partial) messages.push('Some transcripts could not be searched.')
+      status.textContent = messages.join(' ')
+    } catch (error) {
+      if (generation !== searchGeneration || error?.name === 'AbortError') return
+      showSearchFailure(query, generation)
+    }
+  }
+
+  function startSearch(query, generation) {
+    status.textContent = 'Searching…'
+    runSearch(query, generation, 0, Date.now())
+  }
+
+  input.addEventListener('input', () => {
+    cancelSearch()
+    const generation = searchGeneration
+    const query = input.value.trim()
+    if (query.length < 2) {
+      renderList(entries)
+      status.textContent = query.length === 1 ? 'Enter at least 2 characters.' : ''
+      return
+    }
+    status.textContent = 'Searching…'
+    searchTimer = setTimeout(() => startSearch(query, generation), 250)
+  })
+
+  renderList(entries)
+  replaceView(header, search, list)
 }
 
 async function logout() {
+  cancelSearch()
   await request('/web/api/logout', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -119,6 +255,7 @@ async function logout() {
 }
 
 async function loadLibrary() {
+  cancelSearch()
   try {
     const response = await request('/web/api/library')
     if (response.status === 401) return showPairing()

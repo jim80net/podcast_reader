@@ -2328,6 +2328,7 @@ class TestWebPairingSession:
             ("GET", "/web/api/pair/claim"),
             ("GET", "/web/api/session"),
             ("GET", "/web/api/logout"),
+            ("GET", "/web/api/search"),
         ],
     )
     def test_web_auth_exemptions_are_exact(self, engine: _Engine, method: str, path: str) -> None:
@@ -2418,6 +2419,89 @@ class TestWebReadRoutes:
         assert "source-secret" not in response.text
         assert "html_path" not in response.text
         assert response.headers["cache-control"] == "no-store"
+
+    def test_search_requires_trusted_post_and_session_and_minimizes_results(
+        self, engine: _Engine
+    ) -> None:
+        source_id, _html = self._seed(engine)
+        path = "/web/api/search"
+        assert (
+            engine.web_client.post(
+                path, json={"query": "private"}, headers=self._WEB_HEADERS
+            ).status_code
+            == 401
+        )
+        self._session(engine)
+        assert engine.web_client.post(path, json={"query": "private"}).status_code == 403
+
+        response = engine.web_client.post(
+            path, json={"query": "private"}, headers=self._WEB_HEADERS
+        )
+
+        assert response.status_code == 200
+        assert response.json() == {
+            "results": [
+                {
+                    "source_id": source_id,
+                    "title": "Private episode",
+                    "excerpt": "A private transcript.",
+                }
+            ],
+            "has_more": False,
+            "partial": False,
+        }
+        assert "source-secret" not in response.text
+        assert "html_path" not in response.text
+
+    def test_search_validation_never_echoes_query(self, engine: _Engine) -> None:
+        self._session(engine)
+        secret = "search-private-canary-" * 8
+
+        response = engine.web_client.post(
+            "/web/api/search", json={"query": secret}, headers=self._WEB_HEADERS
+        )
+
+        assert response.status_code == 422
+        assert secret not in response.text
+        assert secret[:16] not in response.text
+
+    def test_search_busy_is_detail_free_and_retryable(self, engine: _Engine) -> None:
+        from podcast_reader.engine.app import _WEB_SEARCH_LOCK
+
+        self._session(engine)
+        assert _WEB_SEARCH_LOCK.acquire(blocking=False)
+        try:
+            response = engine.web_client.post(
+                "/web/api/search", json={"query": "private"}, headers=self._WEB_HEADERS
+            )
+        finally:
+            _WEB_SEARCH_LOCK.release()
+
+        assert response.status_code == 429
+        assert response.json() == {"detail": "search busy"}
+        assert response.headers["retry-after"] == "1"
+
+    def test_search_failure_releases_single_flight_lock(
+        self, engine: _Engine, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._seed(engine)
+        self._session(engine)
+
+        def fail_search(*_args: object, **_kwargs: object) -> object:
+            raise RuntimeError("private-search-failure-canary")
+
+        with monkeypatch.context() as context:
+            context.setattr("podcast_reader.engine.app.search_library", fail_search)
+            failed = engine.web_client.post(
+                "/web/api/search", json={"query": "private"}, headers=self._WEB_HEADERS
+            )
+        recovered = engine.web_client.post(
+            "/web/api/search", json={"query": "private"}, headers=self._WEB_HEADERS
+        )
+
+        assert failed.status_code == 500
+        assert "private-search-failure-canary" not in failed.text
+        assert recovered.status_code == 200
 
     @pytest.mark.parametrize(
         "chapters",

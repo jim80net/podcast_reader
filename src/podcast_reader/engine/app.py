@@ -51,6 +51,7 @@ from podcast_reader.engine.pack_manager import (
 # runtime (a TYPE_CHECKING import leaves unresolvable ForwardRefs).
 from podcast_reader.engine.packs import PacksResponse  # noqa: TC001 — runtime response model
 from podcast_reader.engine.pairing import PairingState
+from podcast_reader.engine.search import search_library
 from podcast_reader.engine.settings import (
     engine_version,
     load_engine_state,
@@ -103,12 +104,14 @@ _WEB_MUTATIONS = frozenset(
         ("POST", "/web/api/pair/claim"),
         ("POST", "/web/api/session"),
         ("POST", "/web/api/logout"),
+        ("POST", "/web/api/search"),
     }
 )
 _WEB_BEARER_EXEMPT = frozenset(
     {
         ("POST", "/web/api/pair/claim"),
         ("POST", "/web/api/logout"),
+        ("POST", "/web/api/search"),
     }
 )
 _WEB_PUBLIC_GET = frozenset(
@@ -120,6 +123,7 @@ _WEB_PUBLIC_GET = frozenset(
 )
 _WEB_COOKIE_GET = frozenset({("GET", "/web/api/library")})
 _WEB_TRANSCRIPT_PATH = re.compile(r"^/web/api/transcripts/[^/]{1,256}\.html$")
+_WEB_SEARCH_LOCK = threading.Lock()
 
 
 def _https_authority(value: str, *, origin: bool) -> tuple[str, int] | None:
@@ -364,6 +368,30 @@ class WebLibraryEntry(BaseModel):
     source_id: str
     title: str
     created_at: float
+
+
+class WebSearchBody(BaseModel):
+    """A private query body that is never reflected by validation errors."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    query: str
+
+
+class WebSearchResult(BaseModel):
+    """The minimized projection for one matching transcript."""
+
+    source_id: str
+    title: str
+    excerpt: str
+
+
+class WebSearchResponse(BaseModel):
+    """Bounded search results plus aggregate completeness signals."""
+
+    results: list[WebSearchResult]
+    has_more: bool
+    partial: bool
 
 
 #: Cap on the unauthenticated claim body (per V4): a legitimate claim is a
@@ -650,6 +678,40 @@ def create_app(
             document,
             media_type="text/html",
             headers={"Content-Security-Policy": transcript_csp(document)},
+        )
+
+    @app.post("/web/api/search", response_model=WebSearchResponse)
+    def web_search(request: Request, body: WebSearchBody) -> WebSearchResponse | JSONResponse:
+        """Search bounded local artifacts without putting terms in a URL or cache."""
+        _require_web_session(request)
+        query = body.query.strip()
+        terms = query.split()
+        if not 2 <= len(query) <= 100 or not 1 <= len(terms) <= 8:
+            raise HTTPException(
+                status_code=422,
+                detail="query must be 2 to 100 characters and contain at most 8 terms",
+            )
+        if not _WEB_SEARCH_LOCK.acquire(blocking=False):
+            return JSONResponse(
+                {"detail": "search busy"},
+                status_code=429,
+                headers={"Retry-After": "1", "Cache-Control": "no-store"},
+            )
+        try:
+            outcome = search_library(list_entries(_library_dir(data_dir)), query)
+        finally:
+            _WEB_SEARCH_LOCK.release()
+        return WebSearchResponse(
+            results=[
+                WebSearchResult(
+                    source_id=result.source_id,
+                    title=result.title,
+                    excerpt=result.excerpt,
+                )
+                for result in outcome.results
+            ],
+            has_more=outcome.has_more,
+            partial=outcome.partial,
         )
 
     @app.post("/v1/shutdown", status_code=status.HTTP_202_ACCEPTED)
