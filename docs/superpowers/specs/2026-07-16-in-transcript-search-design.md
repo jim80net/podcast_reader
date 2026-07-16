@@ -157,10 +157,13 @@ or better against its adjacent background in light and dark, analogous to #73.
 
 ## Decision 3: one inert script, checked at every serving boundary
 
-`html.py` adds one `_SEARCH_SCRIPT` and always emits it for newly rendered
-artifacts. It also emits V2 rail and media-sync scripts for the geometry and
-scroll-ownership changes above. Exact historical script constants remain checked
-in for legacy CSP compatibility but are never emitted into new artifacts.
+`html.py` emits `_SEARCH_SCRIPT` for newly rendered artifacts and retains the
+first-release text as byte-pinned `_SEARCH_SCRIPT_V1`. The V1 guard watched the
+whole document and could fail closed on benign browser-extension decoration; it
+remains authorized only in its exact historical tuples so artifacts rendered
+between #90 and #92 keep working. It is never emitted into new artifacts. The
+renderer also emits V2 rail and media-sync scripts for the geometry and
+scroll-ownership changes above.
 The script uses DOM APIs, timers, `ResizeObserver`, `matchMedia`, and event listeners
 only. It contains no `fetch`, XHR, WebSocket, beacon, storage, cookie, history,
 clipboard, console, dynamic script/style insertion, or cross-frame messaging.
@@ -180,9 +183,10 @@ lists every ordered tuple that was valid at that release. At minimum this covers
 no-script, chapter-scroll-only, rail-only, media-sync-V1-only, rail-V1 +
 media-sync-V1, and chapter-scroll + media-sync-V1 shapes. Tests cover:
 
-- new empty artifact: media sync V2 + search;
-- new keyless artifact: rail V2 + media sync V2 + search;
-- new chaptered artifact: chapter scroll + media sync V2 + search;
+- new empty artifact: media sync V2 + search V2;
+- new keyless artifact: rail V2 + media sync V2 + search V2;
+- new chaptered artifact: chapter scroll + media sync V2 + search V2;
+- first-search-release artifacts: each exact renderer tuple with search V1;
 - stored V1 empty artifact: media sync V1 only;
 - stored V1 keyless/chaptered artifacts: their exact prior rail/sync hashes;
 - every older tuple pinned by a historical committed golden/release fixture;
@@ -191,7 +195,7 @@ media-sync-V1, and chapter-scroll + media-sync-V1 shapes. Tests cover:
 
 The Android design's checked-script section changes from three hashes to the
 same explicit versioned inventory (at minimum: unchanged chapter scroll, rail
-V1/V2, media sync V1/V2, and search) and keeps the same Kotlin parity requirement. Existing artifacts
+V1/V2, media sync V1/V2, and search V1/V2) and keeps the same Kotlin parity requirement. Existing artifacts
 with prior scripts remain valid; adding exact versioned constants does not
 authorize arbitrary discovered text.
 

@@ -1311,7 +1311,7 @@ _SYNC_SCRIPT = """\
 })();
 """
 
-_SEARCH_SCRIPT = """\
+_SEARCH_SCRIPT_V1 = """\
 (function() {
   var root = document.querySelector('.transcript-search');
   var content = document.querySelector('div#content');
@@ -1944,6 +1944,139 @@ _SEARCH_SCRIPT = """\
   layout();
 })();
 """
+
+# Keep the first search release byte-for-byte available for private-web CSP
+# compatibility.  The corrected script is derived with narrow, reviewable
+# substitutions so the legacy text cannot drift unnoticed (its digest is pinned
+# in the web-surface tests).
+_SEARCH_SCRIPT = (
+    _SEARCH_SCRIPT_V1.replace(
+        """  function exactAttributeValues(node, expected) {
+    var names = Object.keys(expected);
+    return node.attributes.length === names.length && names.every(function(name) {
+      return node.getAttribute(name) === expected[name];
+    });
+  }
+""",
+        """  function exactAttributeValues(node, expected) {
+    var names = Object.keys(expected);
+    return node.attributes.length === names.length && names.every(function(name) {
+      return node.getAttribute(name) === expected[name];
+    });
+  }
+
+  function decoratedAttributeValues(node, expected) {
+    var names = Object.keys(expected);
+    return names.every(function(name) { return node.getAttribute(name) === expected[name]; }) &&
+      Array.prototype.every.call(node.attributes, function(attribute) {
+        return names.indexOf(attribute.name) !== -1 || /^data-/.test(attribute.name);
+      });
+  }
+""",
+    )
+    .replace(
+        """  function canonicalDocument() {
+    var htmlTheme = document.documentElement.getAttribute('data-theme');
+    return document.documentElement.getAttribute('lang') === 'en' &&
+      exactAttributes(document.documentElement, ['lang', 'data-theme', 'style']) &&
+      (htmlTheme === null || htmlTheme === 'light' || htmlTheme === 'dark') &&
+      exactAttributes(document.body, ['class']) &&
+      Array.prototype.every.call(document.body.classList, function(name) {
+        return name === 'has-sidebar' || name === 'transcript-search-active';
+      }) &&
+      exactAttributes(content, ['id']) && exactAttributes(main, []);
+  }
+""",
+        """  function canonicalDocument() {
+    return exactAttributes(content, ['id']) && exactAttributes(main, []) &&
+      main.parentElement === content && content.parentElement === document.body;
+  }
+""",
+    )
+    .replace(
+        """      exactAttributeValues(input, { 'id': 'transcript-search-input',
+        'class': 'transcript-search-input', 'type': 'search', 'autocomplete': 'off',
+        'spellcheck': 'false', 'autocorrect': 'off', 'autocapitalize': 'none',
+        'inputmode': 'search', 'placeholder': 'Find in transcript' }) &&
+""",
+        """      decoratedAttributeValues(input, { 'id': 'transcript-search-input',
+        'class': 'transcript-search-input', 'type': 'search', 'autocomplete': 'off',
+        'spellcheck': 'false', 'autocorrect': 'off', 'autocapitalize': 'none',
+        'inputmode': 'search', 'placeholder': 'Find in transcript' }) &&
+""",
+    )
+    .replace(
+        """    var walker = document.createTreeWalker(
+      document.body,
+""",
+        """    var walker = document.createTreeWalker(
+      main,
+""",
+    )
+    .replace(
+        """    if (!target) return false;
+    if (rail && (target === rail || rail.contains(target))) return true;
+    if (sidebar && (target === sidebar || sidebar.contains(target))) return true;
+    if (target === document.documentElement) {
+      if (record.attributeName === 'data-theme') {
+        var theme = target.getAttribute('data-theme');
+        return theme === null || theme === 'light' || theme === 'dark';
+      }
+    }
+    if (target === document.body && record.attributeName === 'class') {
+      return false;
+    }
+    if (target.tagName === 'P') {
+""",
+        """    if (!target) return false;
+    if (target === content) {
+      return record.type === 'childList' && root.parentElement === content &&
+        main.parentElement === content;
+    }
+    if (target === root || root.contains(target)) {
+      return record.type === 'attributes' && /^data-/.test(record.attributeName || '') &&
+        canonicalSearchRoot();
+    }
+    if (rail && (target === rail || rail.contains(target))) return true;
+    if (target.tagName === 'P') {
+""",
+    )
+    .replace(
+        """  function observeMutations() {
+    mutationObserver.observe(document.documentElement, {
+      subtree: true,
+      childList: true,
+      characterData: true,
+      attributes: true
+    });
+    observerStarted = true;
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', observeMutations, { once: true });
+  } else {
+    observeMutations();
+  }
+""",
+        """  function observeMutations() {
+    mutationObserver.observe(content, { childList: true });
+    mutationObserver.observe(main, {
+      subtree: true,
+      childList: true,
+      characterData: true,
+      attributes: true
+    });
+    mutationObserver.observe(root, {
+      subtree: true,
+      childList: true,
+      characterData: true,
+      attributes: true
+    });
+    observerStarted = true;
+  }
+  observeMutations();
+""",
+    )
+)
 
 
 def build_html(

@@ -15,6 +15,7 @@ from podcast_reader.html import (
     _SCROLL_SCRIPT,
     _SEARCH_HTML,
     _SEARCH_SCRIPT,
+    _SEARCH_SCRIPT_V1,
     _SYNC_SCRIPT,
     _SYNC_SCRIPT_V1,
     build_html,
@@ -91,6 +92,34 @@ def test_legacy_sync_script_digest_is_byte_stable() -> None:
     assert hashlib.sha256(_SYNC_SCRIPT_V1.encode()).hexdigest() == (
         "a2dc9e5d8b1cb318cebc2c7b7d861d91db59612b600a2f3aed05285f359e6102"
     )
+
+
+def test_legacy_search_script_digest_is_byte_stable() -> None:
+    assert hashlib.sha256(_SEARCH_SCRIPT_V1.encode()).hexdigest() == (
+        "64359e69b0292a818b6d5a17df80ff516851a12d52176a5f7acf434382b2602a"
+    )
+
+
+def test_artifact_csp_preserves_exact_first_search_release_tuples() -> None:
+    documents = [
+        build_html([], "Empty"),
+        build_html(_SEGMENTS, "Keyless"),
+        build_html(_SEGMENTS, "Chaptered", chapters=_CHAPTERS),
+    ]
+    for current in documents:
+        legacy = current.replace(
+            f"<script>\n{_SEARCH_SCRIPT}</script>",
+            f"<script>\n{_SEARCH_SCRIPT_V1}</script>",
+        )
+        assert legacy != current
+        scripts = _SCRIPT_RE.findall(legacy)
+        actual = set(re.findall(r"'sha256-[A-Za-z0-9+/=]+'", transcript_csp(legacy.encode())))
+        assert actual == {_hash(script) for script in scripts}
+
+
+def test_legacy_search_script_outside_its_exact_tuple_is_never_blessed() -> None:
+    document = _document(f"\n{_SYNC_SCRIPT}", f"\n{_SEARCH_SCRIPT_V1}", f"\n{_SEARCH_SCRIPT_V1}")
+    assert "script-src 'none'" in transcript_csp(document)
 
 
 def test_current_sync_script_uses_the_search_capacity_bounds_before_array_work() -> None:
