@@ -257,8 +257,9 @@ test('real engine: dev-fallback spawn, handshake, key-set parity, clean quit', a
     expect(entries).toHaveLength(1)
     expectKeySetEquality(entries[0] ?? {}, LIBRARY_ENTRY_KEYS, 'LibraryEntry')
 
-    await window.reload()
-    await expectEngineState(window, 'ready')
+    await window.getByRole('link', { name: 'New', exact: true }).click()
+    await expect(window.getByRole('heading', { name: 'New transcript' })).toBeVisible()
+    await window.getByRole('link', { name: 'Library', exact: true }).click()
     await window.getByRole('link', { name: /Seeded Episode/ }).click()
     const transcript = window.frameLocator('.reader-frame')
     await expect(transcript.getByText('Seeded desktop search evidence.')).toBeVisible()
