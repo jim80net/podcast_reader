@@ -785,16 +785,17 @@ document.addEventListener('DOMContentLoaded', function() {
     });
   }
 
+  function decoratedAttributeValues(node, expected) {
+    var names = Object.keys(expected);
+    return names.every(function(name) { return node.getAttribute(name) === expected[name]; }) &&
+      Array.prototype.every.call(node.attributes, function(attribute) {
+        return names.indexOf(attribute.name) !== -1 || /^data-/.test(attribute.name);
+      });
+  }
+
   function canonicalDocument() {
-    var htmlTheme = document.documentElement.getAttribute('data-theme');
-    return document.documentElement.getAttribute('lang') === 'en' &&
-      exactAttributes(document.documentElement, ['lang', 'data-theme', 'style']) &&
-      (htmlTheme === null || htmlTheme === 'light' || htmlTheme === 'dark') &&
-      exactAttributes(document.body, ['class']) &&
-      Array.prototype.every.call(document.body.classList, function(name) {
-        return name === 'has-sidebar' || name === 'transcript-search-active';
-      }) &&
-      exactAttributes(content, ['id']) && exactAttributes(main, []);
+    return exactAttributes(content, ['id']) && exactAttributes(main, []) &&
+      main.parentElement === content && content.parentElement === document.body;
   }
 
   function canonicalSearchRoot() {
@@ -831,7 +832,7 @@ document.addEventListener('DOMContentLoaded', function() {
       exactAttributeValues(row, { 'class': 'transcript-search-row' }) &&
       input.parentElement === row && previous.parentElement === row && next.parentElement === row &&
       read.parentElement === row && clear.parentElement === row &&
-      exactAttributeValues(input, { 'id': 'transcript-search-input',
+      decoratedAttributeValues(input, { 'id': 'transcript-search-input',
         'class': 'transcript-search-input', 'type': 'search', 'autocomplete': 'off',
         'spellcheck': 'false', 'autocorrect': 'off', 'autocapitalize': 'none',
         'inputmode': 'search', 'placeholder': 'Find in transcript' }) &&
@@ -924,7 +925,7 @@ document.addEventListener('DOMContentLoaded', function() {
     var visits = 0;
     var candidates = [];
     var walker = document.createTreeWalker(
-      document.body,
+      main,
       NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT
     );
     while (walker.nextNode()) {
@@ -1042,17 +1043,15 @@ document.addEventListener('DOMContentLoaded', function() {
     var target = record.target.nodeType === Node.ELEMENT_NODE ?
       record.target : record.target.parentElement;
     if (!target) return false;
+    if (target === content) {
+      return record.type === 'childList' && root.parentElement === content &&
+        main.parentElement === content;
+    }
+    if (target === root || root.contains(target)) {
+      return record.type === 'attributes' && /^data-/.test(record.attributeName || '') &&
+        canonicalSearchRoot();
+    }
     if (rail && (target === rail || rail.contains(target))) return true;
-    if (sidebar && (target === sidebar || sidebar.contains(target))) return true;
-    if (target === document.documentElement) {
-      if (record.attributeName === 'data-theme') {
-        var theme = target.getAttribute('data-theme');
-        return theme === null || theme === 'light' || theme === 'dark';
-      }
-    }
-    if (target === document.body && record.attributeName === 'class') {
-      return false;
-    }
     if (target.tagName === 'P') {
       if (record.attributeName === 'class') {
         return coherentPassageState(target);
@@ -1289,7 +1288,14 @@ document.addEventListener('DOMContentLoaded', function() {
       'This transcript is too large to search.' : 'This transcript cannot be searched.');
   }
   function observeMutations() {
-    mutationObserver.observe(document.documentElement, {
+    mutationObserver.observe(content, { childList: true });
+    mutationObserver.observe(main, {
+      subtree: true,
+      childList: true,
+      characterData: true,
+      attributes: true
+    });
+    mutationObserver.observe(root, {
       subtree: true,
       childList: true,
       characterData: true,
@@ -1297,11 +1303,7 @@ document.addEventListener('DOMContentLoaded', function() {
     });
     observerStarted = true;
   }
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', observeMutations, { once: true });
-  } else {
-    observeMutations();
-  }
+  observeMutations();
 
   opener.addEventListener('click', openSearch);
   clear.addEventListener('click', function() { dismiss(true); });

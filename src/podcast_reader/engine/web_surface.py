@@ -12,6 +12,7 @@ from podcast_reader.html import (
     _RAIL_SCRIPT_V1,
     _SCROLL_SCRIPT,
     _SEARCH_SCRIPT,
+    _SEARCH_SCRIPT_V1,
     _SYNC_SCRIPT,
     _SYNC_SCRIPT_V1,
 )
@@ -32,12 +33,14 @@ _RAIL_V1 = _text(_RAIL_SCRIPT_V1)
 _RAIL_V2 = _text(_RAIL_SCRIPT)
 _SYNC_V1 = _text(_SYNC_SCRIPT_V1)
 _SYNC_V2 = _text(_SYNC_SCRIPT)
-_SEARCH = _text(_SEARCH_SCRIPT)
+_SEARCH_V1 = _text(_SEARCH_SCRIPT_V1)
+_SEARCH_V2 = _text(_SEARCH_SCRIPT)
 
 # Compatibility starts at the first private-web CSP release (#83). At that
 # boundary the renderer emitted the V1 rail/sync texts below; singleton shapes
 # remain accepted for older empty/pre-combination artifacts. New artifacts use
-# one of the three exact V2 tuples. Arbitrary subsets/orders are never blessed.
+# one of the exact V2 tuples, including the first search release for persisted
+# artifacts. Arbitrary subsets/orders are never blessed.
 _ALLOWED_SCRIPT_SEQUENCES = frozenset(
     {
         (),
@@ -46,18 +49,24 @@ _ALLOWED_SCRIPT_SEQUENCES = frozenset(
         (_SYNC_V1,),
         (_SCROLL, _SYNC_V1),
         (_RAIL_V1, _SYNC_V1),
-        (_SYNC_V2, _SEARCH),
-        (_RAIL_V2, _SYNC_V2, _SEARCH),
-        (_SCROLL, _SYNC_V2, _SEARCH),
+        (_SYNC_V2, _SEARCH_V1),
+        (_RAIL_V2, _SYNC_V2, _SEARCH_V1),
+        (_SCROLL, _SYNC_V2, _SEARCH_V1),
+        (_SYNC_V2, _SEARCH_V2),
+        (_RAIL_V2, _SYNC_V2, _SEARCH_V2),
+        (_SCROLL, _SYNC_V2, _SEARCH_V2),
     }
 )
 _ALLOWED_SCRIPT_TEXT = frozenset(
     text for sequence in _ALLOWED_SCRIPT_SEQUENCES for text in sequence
 )
 _EXPECTED_SCRIPT_SHAPES = {
-    (_SYNC_V2, _SEARCH): ("empty", True),
-    (_RAIL_V2, _SYNC_V2, _SEARCH): ("rail", True),
-    (_SCROLL, _SYNC_V2, _SEARCH): ("sidebar", True),
+    (_SYNC_V2, _SEARCH_V1): ("empty", True),
+    (_RAIL_V2, _SYNC_V2, _SEARCH_V1): ("rail", True),
+    (_SCROLL, _SYNC_V2, _SEARCH_V1): ("sidebar", True),
+    (_SYNC_V2, _SEARCH_V2): ("empty", True),
+    (_RAIL_V2, _SYNC_V2, _SEARCH_V2): ("rail", True),
+    (_SCROLL, _SYNC_V2, _SEARCH_V2): ("sidebar", True),
 }
 _VOID_TAGS = frozenset(
     {

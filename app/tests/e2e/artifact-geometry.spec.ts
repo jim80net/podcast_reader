@@ -33,6 +33,66 @@ const searchArtifactUrl = pathToFileURL(
   path.resolve(__dirname, '../../../tests/fixtures/sample_expected_search.html')
 ).href
 
+test('search tolerates extension decoration but rejects transcript mutation (#92)', async () => {
+  const browser = await chromium.launch()
+  try {
+    const source = await readFile(
+      path.resolve(__dirname, '../../../tests/fixtures/sample_expected_search.html'),
+      'utf8'
+    )
+    const page = await browser.newPage()
+    const mutations = [
+      'password-manager-input-attribute',
+      'grammarly-body-attribute',
+      'dark-reader-html-style',
+      'dark-reader-head-style',
+      'body-overlay'
+    ] as const
+
+    for (const mutation of mutations) {
+      await page.setContent(source)
+      await page.keyboard.press('/')
+      const input = page.getByRole('searchbox', { name: 'Find in transcript' })
+      await input.fill('resilience')
+      await expect(page.getByRole('status')).toContainText('1 of 2')
+      await page.evaluate((kind) => {
+        if (kind === 'password-manager-input-attribute') {
+          document.querySelector('.transcript-search-input')
+            ?.setAttribute('data-lastpass-icon-root', 'true')
+        } else if (kind === 'grammarly-body-attribute') {
+          document.body.setAttribute('data-gr-ext-installed', '')
+        } else if (kind === 'dark-reader-html-style') {
+          document.documentElement.style.setProperty('background-color', '#181a1b')
+        } else if (kind === 'dark-reader-head-style') {
+          const style = document.createElement('style')
+          style.textContent = 'body{}'
+          document.head.appendChild(style)
+        } else {
+          document.body.appendChild(document.createElement('div'))
+        }
+      }, mutation)
+      await input.fill('회복')
+      await expect(page.getByRole('status')).toContainText('1 of 1')
+    }
+
+    await page.setContent(source)
+    await page.evaluate(() => {
+      document.documentElement.style.setProperty('color-scheme', 'dark')
+      document.body.setAttribute('data-gr-ext-installed', '')
+    })
+    await page.keyboard.press('/')
+    await page.getByRole('searchbox', { name: 'Find in transcript' }).fill('회복')
+    await expect(page.getByRole('status')).toContainText('1 of 1')
+
+    await page.evaluate(() => {
+      document.querySelector('p[data-start]')?.append(' genuinely changed')
+    })
+    await expect(page.getByRole('status')).toHaveText('Transcript changed; reopen it to search.')
+  } finally {
+    await browser.close()
+  }
+})
+
 test('search rejects moving or noncanonical transcript DOM and preserves cross-node NFKC (#88)', async () => {
   const browser = await chromium.launch()
   try {
@@ -73,7 +133,7 @@ test('search rejects moving or noncanonical transcript DOM and preserves cross-n
     await page.keyboard.press('/')
     await page.getByRole('searchbox', { name: 'Find in transcript' }).fill('resilience')
     await expect(page.getByRole('status')).toContainText('1 of 2')
-    await page.evaluate(() => document.body.setAttribute('aria-hidden', 'true'))
+    await page.evaluate(() => document.querySelector('main')?.setAttribute('data-hostile', 'true'))
     await expect(page.locator('.transcript-search-status')).toHaveText(
       'Transcript changed; reopen it to search.'
     )
@@ -96,7 +156,8 @@ test('search rejects moving or noncanonical transcript DOM and preserves cross-n
     )
     await loadDocument(forged)
     await page.keyboard.press('/')
-    await expect(page.getByRole('status')).toHaveText('This transcript cannot be searched.')
+    await page.getByRole('searchbox', { name: 'Find in transcript' }).fill('forged header')
+    await expect(page.getByRole('status')).toHaveText('No matches.')
 
     const oversized = source.replace(
       'Resilience begins with deliberate practice.',
@@ -115,7 +176,8 @@ test('search rejects moving or noncanonical transcript DOM and preserves cross-n
     )
     await loadDocument(excludedNodes)
     await page.keyboard.press('/')
-    await expect(page.getByRole('status')).toHaveText('This transcript is too large to search.')
+    await page.getByRole('searchbox', { name: 'Find in transcript' }).fill('resilience')
+    await expect(page.getByRole('status')).toContainText('1 of 2')
 
     const expanding = 'ﷺ'.repeat(100_000)
     const normalizedOversized = source
@@ -144,7 +206,10 @@ test('search rejects moving or noncanonical transcript DOM and preserves cross-n
         'Resilience begins <em>unexpected</em> with deliberate practice.'
       )
     )
-    await expectRejected(source.replace('<main>', '<template><p data-start="1" data-end="2">hidden</p></template><main>'))
+    await expectRejected(source.replace(
+      '<main>',
+      '<main><template><p data-start="1" data-end="2">hidden</p></template>'
+    ))
     await expectRejected(source.replace('id="t-0"', 'id="t-0" class="search-match-active"'))
     await expectRejected(source.replace('autocomplete="off"', 'name="query" autocomplete="on"'))
     await expectRejected(source.replace(' spellcheck="false"', ''))
@@ -227,7 +292,7 @@ test('search rejects moving or noncanonical transcript DOM and preserves cross-n
     await loadDocument(source)
     await page.keyboard.press('/')
     await page.evaluate(() => {
-      document.querySelector('.transcript-search-input')?.setAttribute('data-query', 'private-canary')
+      document.querySelector('.transcript-search-input')?.setAttribute('name', 'private-canary')
     })
     await expect(page.getByRole('status')).toHaveText('Transcript changed; reopen it to search.')
   } finally {
