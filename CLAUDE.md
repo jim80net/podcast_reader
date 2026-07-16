@@ -88,6 +88,9 @@ For speaker diarization, set `HF_TOKEN` and accept model terms at:
 | `src/podcast_reader/engine/media.py` | Floating-player media core (`MediaManager`): source→kind classification (YouTube via `extract_video_id`, local, remote), `ffmpeg`-only probe (no ffprobe), lazy single-flight download (reuses `ytdlp.download_video`) + bounded LRU cache (`.part` staging, partials never served, atomic commit), `media_state`/`media_progress` events (carry `source_id`, never `job_id`) |
 | `src/podcast_reader/engine/managed_tools.py` | Bundle tool-seed reconciliation into `<data_dir>/tools` (newer wins), `PODCAST_READER_TOOLS_DIR` export, scheduled yt-dlp self-update |
 | `src/podcast_reader/engine/pairing.py` | In-memory pairing-code state: mint (6-char unambiguous alphabet, 300 s TTL, replaces prior), claim (constant-time, single-use, 5-failed-attempt budget, uniform rejection); never persisted or logged |
+| `src/podcast_reader/engine/web_session.py` | Stateless signed 180-day browser sessions: bearer-keyed HMAC, expiry, generation revocation, constant-time verification |
+| `src/podcast_reader/engine/web_surface.py` | Private-web shell assets and fail-closed transcript CSP: exact script text, order, renderer shape, and legacy tuple compatibility |
+| `src/podcast_reader/engine/search.py` | Bounded local-only library search over canonical transcript HTML; strict parsing, newest-first scan, minimized excerpts, partial-result signaling |
 | `src/podcast_reader/engine/cookies.py` | Netscape cookie-jar validation (domain suffix-match, 1 MB cap) + storage at `<data_dir>/cookies/<domain>.txt` (atomic 0600, dir 0700); metadata-only listing, delete |
 | `src/podcast_reader/engine/app.py` | FastAPI app: bearer auth (exemptions: `POST /v1/pair/claim`, `GET /v1/embed/{id}`), jobs (incl. confirm/dismiss of awaiting-confirmation), events, library, media (`/v1/media/{id}/info` + Range byte-serving), YouTube embed (`/v1/embed/{id}`), settings, keys (push + test), providers, packs (list/install/uninstall), pair (mint/claim), cookies (put/list/delete), health, shutdown routes |
 | `src/podcast_reader/engine/embed.py` | Tokenless YouTube embed page served from the loopback http origin (the Error 152/153 fix — a `file://` renderer isn't a valid embedding origin): hosts the YouTube IFrame API + a `pr-embed`/`pr-embed-cmd` postMessage protocol (ready/time/error ↔ seek), validated video id, shared with `app/src/renderer/src/embed-protocol.ts` |
@@ -99,7 +102,9 @@ For speaker diarization, set `HF_TOKEN` and accept model terms at:
 | `packaging/diarization.spec` + `build_diarization_pack.py` | Diarization worker pack build (CPU-torch venv per `DIARIZATION_SMOKE.md`, offline community-1 cache, tar.gz + manifest); release job in `pack-diarization.yml` is HF_TOKEN-gated |
 | `src/podcast_reader/providers.py` | Built-in chapter LLM provider defaults plus pure effective-registry resolution for validated named providers (base URL, default model, per-name key env, max_tokens); HTTPS-or-loopback and credential-free URL validation |
 | `src/podcast_reader/chapters.py` | Generate chapter markers via any registry provider's OpenAI-compatible `/chat/completions`; `verify_key` minimal round-trip backs `POST /v1/keys/test` |
-| `src/podcast_reader/html.py` | Convert whisper JSON to styled HTML with TOC, key points, pull quotes; optional speaker attribution; per-passage `data-start`/`data-end` + an inert-when-standalone `pr-sync` script for media↔transcript playback sync |
+| `src/podcast_reader/html.py` | Styled canonical HTML renderer with chapters/speakers, media sync, and private literal find-within-transcript (keyboard/IME, bounded index, mutation guard) |
+| `src/podcast_reader/web_assets/` | Dependency-free private-web pairing, library, library-wide search, and sandboxed transcript Reader shell |
+| `scripts/measure-private-search-capacity.ps1` | Aggregate-only real-library size/coverage probe for the shipped private-search scan limits; emits no titles, text, URLs, queries, or paths |
 | `pyproject.toml` | Dependencies, entry point, tool configuration |
 
 ### Desktop app (`app/` — independent npm package, see `app/README.md`)
@@ -140,6 +145,12 @@ loaded directly by the Reader iframe over the loopback origin — not via
 `packs` (+ `POST {id}/install`, `DELETE {id}`), `POST pair` (mint a pairing
 code), `cookies` (metadata list + `DELETE {domain}`).
 
+Tailnet browser `/web` surface: public shell/assets at `GET /web/` and
+`GET /web/assets/{app.js,app.css}`; same-origin `POST /web/api/pair/claim`;
+bearer-plus-same-origin `POST /web/api/session`; signed-cookie
+`GET /web/api/library` and `GET /web/api/transcripts/{source_id}.html`; plus
+signed-cookie, same-origin `POST /web/api/search` and `POST /web/api/logout`.
+
 ### Chrome extension (`extension/` — independent npm package, see `extension/README.md`)
 
 | Module | Purpose |
@@ -166,7 +177,7 @@ unauthenticated route — code → token), `health`, `POST jobs`
 3. **Local file** → `transcribe.py` runs whisper → whisper JSON
 4. `diarize.py` → segments enriched with `speaker` labels (engine jobs with the `diarize` setting on and the diarization pack installed; skipped with a warning otherwise — CLI diarization stays whisper-ctranslate2 `--hf_token`)
 5. `chapters.py` → `<stem>_chapters.json` (if an API key for the selected chapter provider is available — CLI: the provider's env var; engine: pushed key with env fallback)
-6. `html.py` → `<stem>.html` (styled transcript with TOC, key points, pull quotes, speaker attribution when present; per-passage `data-start`/`data-end` + an inert-standalone `pr-sync` script so the desktop Reader's inline media player can sync)
+6. `html.py` → `<stem>.html` (styled transcript with TOC, key points, pull quotes, speaker attribution when present; per-passage `data-start`/`data-end`, inert-standalone media sync, and private literal find-within-transcript available in standalone artifacts, desktop Reader, and private-web Reader)
 
 Inline media player (engine jobs / desktop app only): the app's Reader fetches `GET /v1/media/{source_id}/info` for the player kind, then plays YouTube via an iframe loading the engine's loopback `GET /v1/embed/{video_id}` page (real http origin, the Error 152/153 fix; "Watch on YouTube" browser fallback on embed error) or local/remote media streamed through the `app://media` → `GET /v1/media/{source_id}` Range proxy (remote sources lazily downloaded into a bounded LRU cache, `EngineSettings.media_cache_max_bytes`, default 5 GiB). The player docks in a left column beside the transcript (which fills the rest of the width at full height; stacks vertically on narrow windows) — never overlapping it; click a passage to seek; the current passage highlights and follows playback.
 
