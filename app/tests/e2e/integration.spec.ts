@@ -263,7 +263,7 @@ test('real engine: dev-fallback spawn, handshake, key-set parity, clean quit', a
     await window.evaluate(() => { globalThis.location.hash = '#/reader/seeded' })
     const transcript = window.frameLocator('.reader-frame')
     await expect(transcript.getByText('Seeded desktop search evidence.')).toBeVisible()
-    await transcript.locator('body').press('/')
+    await transcript.getByRole('button', { name: /Find in transcript/ }).click()
     await transcript.getByRole('searchbox', { name: 'Find in transcript' }).fill('desktop search')
     await expect(transcript.getByRole('status')).toContainText('1 of 1')
     await expect(transcript.locator('p.search-match-active')).toContainText(
