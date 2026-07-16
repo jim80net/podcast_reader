@@ -257,10 +257,10 @@ test('real engine: dev-fallback spawn, handshake, key-set parity, clean quit', a
     expect(entries).toHaveLength(1)
     expectKeySetEquality(entries[0] ?? {}, LIBRARY_ENTRY_KEYS, 'LibraryEntry')
 
-    await window.getByRole('link', { name: 'New', exact: true }).click()
-    await expect(window.getByRole('heading', { name: 'New transcript' })).toBeVisible()
-    await window.getByRole('link', { name: 'Library', exact: true }).click()
-    await window.getByRole('link', { name: /Seeded Episode/ }).click()
+    // The out-of-process seed deliberately emits no job_done/hydration event;
+    // route to the verified engine entry directly instead of asserting the
+    // unrelated Library refresh contract.
+    await window.evaluate(() => { globalThis.location.hash = '#/reader/seeded' })
     const transcript = window.frameLocator('.reader-frame')
     await expect(transcript.getByText('Seeded desktop search evidence.')).toBeVisible()
     await transcript.locator('body').press('/')
