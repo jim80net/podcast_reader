@@ -136,6 +136,15 @@ test('real engine: dev-fallback spawn, handshake, key-set parity, clean quit', a
   })
   try {
     const window = await app.firstWindow()
+    const rendererRequests: Array<{ url: string; method: string; body: string; headers: Record<string, string> }> = []
+    window.on('request', (request) => {
+      rendererRequests.push({
+        url: request.url(),
+        method: request.method(),
+        body: request.postData() ?? '',
+        headers: request.headers()
+      })
+    })
 
     // Sentinel → discovery → authed health all happened iff we reach ready
     // as a SPAWNED engine (the pill omits the "(adopted)" suffix).
@@ -231,11 +240,12 @@ test('real engine: dev-fallback spawn, handshake, key-set parity, clean quit', a
           'import sys, time',
           'from pathlib import Path',
           'from podcast_reader.engine.library import add_entry',
+          'from podcast_reader.html import build_html',
           'from podcast_reader.types import LibraryEntry',
           'lib = Path(sys.argv[1])',
           "html = lib / 'seeded' / 'seeded.html'",
           'html.parent.mkdir(parents=True, exist_ok=True)',
-          "html.write_text('<html><body>seeded</body></html>')",
+          "html.write_text(build_html([{'start': 0.0, 'end': 2.0, 'text': 'Seeded desktop search evidence.'}], 'Seeded Episode', sentences_per_para=1))",
           "add_entry(lib, LibraryEntry(source_id='seeded', source='https://example.com/seeded', title='Seeded Episode', html_path=str(html), created_at=time.time()))"
         ].join('\n'),
         settings.library_dir
@@ -246,6 +256,53 @@ test('real engine: dev-fallback spawn, handshake, key-set parity, clean quit', a
     const entries = (await (await engine('/v1/library')).json()) as LibraryEntry[]
     expect(entries).toHaveLength(1)
     expectKeySetEquality(entries[0] ?? {}, LIBRARY_ENTRY_KEYS, 'LibraryEntry')
+
+    // The out-of-process seed deliberately emits no job_done/hydration event;
+    // route to the verified engine entry directly instead of asserting the
+    // unrelated Library refresh contract.
+    await window.evaluate(() => { globalThis.location.hash = '#/reader/seeded' })
+    const transcript = window.frameLocator('.reader-frame')
+    await expect(transcript.getByText('Seeded desktop search evidence.')).toBeVisible()
+    await transcript.getByRole('button', { name: /Find in transcript/ }).click()
+    await transcript.getByRole('searchbox', { name: 'Find in transcript' }).fill('desktop search')
+    await expect(transcript.getByRole('status')).toContainText('1 of 1')
+    await expect(transcript.locator('p.search-match-active')).toContainText(
+      'Seeded desktop search evidence.'
+    )
+    const artifactCanary = 'electron-artifact-query-3f2a91'
+    const transcriptSearch = transcript.getByRole('searchbox', { name: 'Find in transcript' })
+    await transcriptSearch.fill(artifactCanary)
+    await expect(transcript.getByRole('status')).toHaveText('No matches.')
+    const frameSweep = async (includeInputs: boolean) => transcript.locator('html').evaluate(
+      async (_node, scanInputs) => {
+        const safely = async (read: () => unknown | Promise<unknown>) => {
+          try {
+            return JSON.stringify(await read())
+          } catch (error) {
+            if (error instanceof DOMException && error.name === 'SecurityError') return 'SecurityError'
+            throw error
+          }
+        }
+        return {
+          attributes: Array.from(document.querySelectorAll('*')).flatMap((element) =>
+            element.getAttributeNames().map((name) => `${name}=${element.getAttribute(name) ?? ''}`)
+          ),
+          local: await safely(() => JSON.stringify(localStorage)),
+          session: await safely(() => JSON.stringify(sessionStorage)),
+          cookie: await safely(() => document.cookie),
+          databases: await safely(() => indexedDB.databases()),
+          caches: await safely(() => caches.keys()),
+          inputs: scanInputs
+            ? Array.from(document.querySelectorAll<HTMLInputElement>('input')).map((item) => item.value)
+            : []
+        }
+      },
+      includeInputs
+    )
+    expect(JSON.stringify(await frameSweep(false))).not.toContain(artifactCanary)
+    expect(JSON.stringify(rendererRequests)).not.toContain(artifactCanary)
+    await transcript.getByRole('button', { name: 'Clear and close search' }).click()
+    expect(JSON.stringify(await frameSweep(true))).not.toContain(artifactCanary)
 
     // Clean quit against the REAL engine: window close → shutdown POST →
     // serve_engine's finally removes the discovery file; no engine survives.

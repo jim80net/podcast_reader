@@ -219,10 +219,17 @@ test('real HTTPS reader pairs, searches, renders, contains secrets, and rejects 
       viewport: { width: 390, height: 844 }
     })
     const requestUrls: string[] = []
+    const requestDetails: Array<{ url: string; method: string; body: string; headers: Record<string, string> }> = []
     const searchRequests: Array<{ body: string; headers: Record<string, string> }> = []
     const artifactFontRequests: string[] = []
     const artifactThirdPartyRequests: string[] = []
     context.on('request', (request) => {
+      requestDetails.push({
+        url: request.url(),
+        method: request.method(),
+        body: request.postData() ?? '',
+        headers: request.headers()
+      })
       if (request.url().startsWith(webOrigin)) requestUrls.push(request.url())
       if (new URL(request.url()).pathname === '/web/api/search') {
         searchRequests.push({ body: request.postData() ?? '', headers: request.headers() })
@@ -350,6 +357,48 @@ test('real HTTPS reader pairs, searches, renders, contains secrets, and rejects 
     await page.getByRole('button', { name: /Keyless episode/ }).click()
     const searchedFrame = page.frameLocator('iframe')
     await expect(searchedFrame.getByText('The team compares local retrieval architecture.')).toBeVisible()
+    await searchedFrame.getByRole('button', { name: /Find in transcript/ }).click()
+    const artifactSearch = searchedFrame.getByRole('searchbox', { name: 'Find in transcript' })
+    await expect(artifactSearch).toBeVisible({ timeout: 5000 })
+    await artifactSearch.fill('retrieval architecture')
+    await expect(searchedFrame.getByRole('status')).toContainText('1 of 1')
+    await expect(searchedFrame.locator('p.search-match-active')).toContainText(
+      'local retrieval architecture'
+    )
+    const artifactCanary = 'artifact-k4-query-7b3c1d'
+    await artifactSearch.fill(artifactCanary)
+    await expect(searchedFrame.getByRole('status')).toHaveText('No matches.')
+    const opaqueArtifactSweep = async (includeInputs: boolean) => searchedFrame.locator('html').evaluate(
+      async (_node, scanInputs) => {
+        const safely = async (read: () => unknown | Promise<unknown>) => {
+          try {
+            return JSON.stringify(await read())
+          } catch (error) {
+            if (error instanceof DOMException && error.name === 'SecurityError') return 'SecurityError'
+            throw error
+          }
+        }
+        return {
+          attributes: Array.from(document.querySelectorAll('*')).flatMap((element) =>
+            element.getAttributeNames().map((name) => `${name}=${element.getAttribute(name) ?? ''}`)
+          ),
+          local: await safely(() => JSON.stringify(localStorage)),
+          session: await safely(() => JSON.stringify(sessionStorage)),
+          cookie: await safely(() => document.cookie),
+          databases: await safely(() => indexedDB.databases()),
+          caches: await safely(() => caches.keys()),
+          inputs: scanInputs
+            ? Array.from(document.querySelectorAll<HTMLInputElement>('input')).map((item) => item.value)
+            : []
+        }
+      },
+      includeInputs
+    )
+    expect(JSON.stringify(await opaqueArtifactSweep(false))).not.toContain(artifactCanary)
+    expect(JSON.stringify(requestDetails)).not.toContain(artifactCanary)
+    await searchedFrame.getByRole('button', { name: 'Clear and close search' }).click()
+    await expect(searchedFrame.locator('p.search-match')).toHaveCount(0)
+    expect(JSON.stringify(await opaqueArtifactSweep(true))).not.toContain(artifactCanary)
     await page.getByRole('button', { name: '← Library' }).click()
     await expect(page.getByRole('heading', { name: 'Your library' })).toBeVisible()
     expect(await page.getByLabel('Search transcripts').evaluate((node) => document.activeElement === node)).toBe(false)
@@ -490,6 +539,7 @@ test('real HTTPS reader pairs, searches, renders, contains secrets, and rejects 
     }
     expect(JSON.stringify(browserStorage)).not.toContain(SEARCH_CANARY)
     expect(consoleText.join('\n')).not.toContain(SEARCH_CANARY)
+    expect(consoleText.join('\n')).not.toContain('artifact-k4-query-7b3c1d')
     expect(consoleText.filter((message) => message.startsWith('CSP-VIOLATION:'))).toEqual([])
 
     const attack = await context.newPage()
@@ -519,6 +569,10 @@ test('real HTTPS reader pairs, searches, renders, contains secrets, and rejects 
     for (const url of requestUrls) {
       for (const secret of forbidden) expect(url).not.toContain(secret)
       expect(url).not.toContain(SEARCH_CANARY)
+      expect(url).not.toContain('artifact-k4-query-7b3c1d')
+    }
+    for (const request of requestDetails) {
+      expect(JSON.stringify(request)).not.toContain('artifact-k4-query-7b3c1d')
     }
     expect(searchRequests.some((request) => request.body.includes(SEARCH_CANARY))).toBe(true)
     for (const request of searchRequests) {
@@ -557,6 +611,7 @@ test('real HTTPS reader pairs, searches, renders, contains secrets, and rejects 
     if (webSession) expect(engineLogs.join('\n')).not.toContain(webSession)
     expect(engineLogs.join('\n')).not.toContain('prws1.')
     expect(engineLogs.join('\n')).not.toContain(SEARCH_CANARY)
+    expect(engineLogs.join('\n')).not.toContain('artifact-k4-query-7b3c1d')
     await rm(dataDir, { recursive: true, force: true })
     await rm(tlsDir, { recursive: true, force: true })
   }

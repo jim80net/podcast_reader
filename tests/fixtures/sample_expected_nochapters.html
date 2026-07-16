@@ -17,6 +17,7 @@
   --accent: #d4a04a;
   --accent-dim: #9a7535;
   --accent-glow: rgba(212, 160, 74, 0.12);
+  --search-edge: #9a7535;
   --link: #5ba4cf;
   --link-hover: #7ec4f0;
   --red: #c0503a;
@@ -41,6 +42,7 @@
   --accent: #d4a04a;
   --accent-dim: #9a7535;
   --accent-glow: rgba(212, 160, 74, 0.12);
+  --search-edge: #9a7535;
   --link: #5ba4cf;
   --link-hover: #7ec4f0;
   --red: #c0503a;
@@ -63,6 +65,7 @@
   --accent: #9a3b2e;
   --accent-dim: #b8705f;
   --accent-glow: rgba(154, 59, 46, 0.1);
+  --search-edge: #a45b4a;
   --link: #2a6f97;
   --link-hover: #1f5675;
   --red: #b23a26;
@@ -85,6 +88,7 @@
     --accent: #9a3b2e;
     --accent-dim: #b8705f;
     --accent-glow: rgba(154, 59, 46, 0.1);
+    --search-edge: #a45b4a;
     --link: #2a6f97;
     --link-hover: #1f5675;
     --red: #b23a26;
@@ -217,7 +221,7 @@ h1 {
 /* ---- KEYLESS TIMELINE ---- */
 .timeline-nav {
   position: sticky;
-  top: 0;
+  top: var(--transcript-search-height, 0px);
   z-index: 20;
   display: flex;
   align-items: center;
@@ -470,7 +474,64 @@ footer {
 .sync-active {
   background: rgba(123, 155, 229, 0.18);
   border-radius: 4px;
-  transition: background 0.2s ease;
+  box-shadow: inset 0 -3px 0 var(--link);
+  transition: background 0.2s ease, box-shadow 0.2s ease;
+}
+
+/* ---- IN-TRANSCRIPT SEARCH ---- */
+.transcript-search {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  max-width: var(--reading-column);
+  margin: 0 auto 1rem;
+  padding: 0.4rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+.transcript-search button,
+.transcript-search input {
+  min-height: 44px;
+  color: var(--text-bright);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+}
+.transcript-search button { padding: 0.55rem 0.75rem; cursor: pointer; }
+.transcript-search button:focus-visible,
+.transcript-search input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.transcript-search-toggle { width: 100%; text-align: left; }
+.transcript-search-panel[hidden] { display: none; }
+.transcript-search-panel { display: grid; gap: 0.45rem; }
+.transcript-search-label { font-family: 'Oswald', sans-serif; color: var(--text-bright); }
+.transcript-search-row {
+  display: grid;
+  grid-template-columns: minmax(10rem, 1fr) repeat(4, auto);
+  gap: 0.4rem;
+}
+.transcript-search-input { width: 100%; min-width: 0; padding: 0.55rem 0.7rem; }
+.transcript-search-status { min-height: 1.3rem; color: var(--muted); font-size: 0.82rem; }
+.search-match {
+  background: var(--accent-glow);
+  border-left: 3px dashed var(--search-edge);
+  border-radius: 4px;
+}
+.search-match-active {
+  border-left-style: solid;
+  border-left-color: var(--accent);
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.search-match.sync-active {
+  box-shadow: inset 0 -3px 0 var(--link);
+}
+.search-match-active.sync-active {
+  box-shadow: inset 0 -3px 0 var(--link);
+}
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .sync-active, .search-match, .search-match-active { transition: none; }
 }
 
 /* ---- RESPONSIVE ---- */
@@ -481,6 +542,18 @@ footer {
   :root { --sidebar-w: 0px; }
   #sidebar { display: none; }
   #content { margin-left: 0; padding: 1.5rem; }
+  .transcript-search-row { grid-template-columns: repeat(4, minmax(44px, 1fr)); }
+  .transcript-search-input { grid-column: 1 / -1; }
+  .transcript-search-row button { padding-inline: 0.45rem; }
+  .transcript-search-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  body.transcript-search-active .timeline-label { display: none; }
 }
 </style>
 </head>
@@ -491,6 +564,28 @@ footer {
   <h1>Test Episode</h1>
   <div class="meta">1 min of audio &middot; 36 words &middot; about 1 min to read &middot; Auto-transcribed with test</div>
 </header>
+<div class="transcript-search" role="search">
+  <button type="button" class="transcript-search-toggle"
+          aria-controls="transcript-search-panel" aria-expanded="false"
+          aria-keyshortcuts="/">Find in transcript <span aria-hidden="true">/</span></button>
+  <div id="transcript-search-panel" class="transcript-search-panel" hidden>
+    <label class="transcript-search-label" for="transcript-search-input">Find in transcript</label>
+    <div class="transcript-search-row">
+      <input id="transcript-search-input" class="transcript-search-input" type="search"
+             autocomplete="off" spellcheck="false" autocorrect="off"
+             autocapitalize="none" inputmode="search" placeholder="Find in transcript">
+      <button type="button" class="transcript-search-prev"
+              aria-label="Previous match" disabled>&uarr;</button>
+      <button type="button" class="transcript-search-next"
+              aria-label="Next match" disabled>&darr;</button>
+      <button type="button" class="transcript-search-read"
+              aria-label="Read current passage" disabled>Read</button>
+      <button type="button" class="transcript-search-clear"
+              aria-label="Clear and close search">Clear</button>
+    </div>
+    <p class="transcript-search-status" role="status" aria-live="polite"></p>
+  </div>
+</div>
 <main>
 <nav class="timeline-nav" aria-label="Transcript timeline">
   <span class="timeline-label">Jump to</span>
@@ -512,42 +607,46 @@ footer {
   if (!rail) return;
   var sentinel = document.createElement('div');
   rail.parentNode.insertBefore(sentinel, rail);
-  function pad() {
-    document.documentElement.style.scrollPaddingTop = (rail.offsetHeight + 8) + 'px';
-  }
   var stuck = false;
+  function notify() { window.dispatchEvent(new Event('pr-rail-layout')); }
   function setStuck(v) {
     if (v === stuck) return;
     stuck = v;
     rail.classList.toggle('stuck', v);
-    pad();
+    notify();
   }
   if ('IntersectionObserver' in window) {
     new IntersectionObserver(function(entries) {
       setStuck(!entries[0].isIntersecting);
     }).observe(sentinel);
   }
-  window.addEventListener('resize', pad);
-  pad();
+  window.addEventListener('resize', notify);
+  notify();
 })();
 </script>
 <script>
 (function() {
   if (window.parent === window) return;
   var CH = 'pr-sync';
-  // Theme: the host (Reader) posts the resolved app theme so the transcript
-  // matches light/dark live. Registered before the passage logic so it works
-  // even for a transcript with no sync targets.
+  var reduced = window.matchMedia('(prefers-reduced-motion: reduce)');
   window.addEventListener('message', function(e) {
     var d = e.data;
     if (d && d.ch === 'pr-theme' && (d.theme === 'light' || d.theme === 'dark')) {
       document.documentElement.dataset.theme = d.theme;
     }
   });
-  // Only <p> passages are sync targets — NOT the chapter <section> containers
-  // (which also carry data-start as anchors). Including a section would let the
-  // highlight/seek land on a whole-chapter container instead of a passage.
-  var nodes = Array.prototype.slice.call(document.querySelectorAll('p[data-start]'));
+  var nodes = [];
+  var visits = 0;
+  var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT);
+  while (walker.nextNode()) {
+    visits += 1;
+    if (visits > 100000) return;
+    var node = walker.currentNode;
+    if (node.matches('p[data-start]')) {
+      nodes.push(node);
+      if (nodes.length > 10000) return;
+    }
+  }
   var items = nodes.map(function(el) {
     return { el: el, start: parseFloat(el.getAttribute('data-start')) };
   }).filter(function(it) { return !isNaN(it.start); });
@@ -573,7 +672,12 @@ footer {
     active = found;
     if (active) {
       active.el.classList.add('sync-active');
-      active.el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      if (!document.body.classList.contains('transcript-search-active')) {
+        active.el.scrollIntoView({
+          block: 'center',
+          behavior: reduced.matches ? 'auto' : 'smooth'
+        });
+      }
     }
   }
 
@@ -584,6 +688,639 @@ footer {
   });
 
   window.parent.postMessage({ ch: CH, type: 'ready' }, '*');
+})();
+</script>
+<script>
+(function() {
+  var root = document.querySelector('.transcript-search');
+  var content = document.querySelector('div#content');
+  var main = content && content.querySelector(':scope > main');
+  if (!root || !content || !main) return;
+  var opener = root.querySelector('.transcript-search-toggle');
+  var panel = root.querySelector('.transcript-search-panel');
+  var input = root.querySelector('.transcript-search-input');
+  var previous = root.querySelector('.transcript-search-prev');
+  var next = root.querySelector('.transcript-search-next');
+  var read = root.querySelector('.transcript-search-read');
+  var clear = root.querySelector('.transcript-search-clear');
+  var status = root.querySelector('.transcript-search-status');
+  if (!opener || !panel || !input || !previous || !next || !read || !clear || !status) {
+    if (status) status.textContent = 'This transcript cannot be searched.';
+    return;
+  }
+
+  var MAX_PASSAGES = 10000;
+  var MAX_PASSAGE_UNITS = 100000;
+  var MAX_TOTAL_UNITS = 4000000;
+  var MAX_VISITS = 100000;
+  var generation = 0;
+  var timer = null;
+  var composing = false;
+  var invalid = false;
+  var invalidMessage = '';
+  var index = [];
+  var matches = [];
+  var current = -1;
+  var observerStarted = false;
+  var ownedDepth = 0;
+  var rail = document.querySelector('.timeline-nav');
+  var sidebar = document.querySelector('#sidebar');
+  var reduced = window.matchMedia('(prefers-reduced-motion: reduce)');
+
+  function hiddenInChain(node) {
+    for (var item = node; item; item = item.parentElement) {
+      if (item.hidden || item.getAttribute('aria-hidden') === 'true') return true;
+      var style = window.getComputedStyle(item);
+      if (style.display === 'none' || style.visibility === 'hidden') return true;
+      if (item === document.documentElement) break;
+    }
+    return false;
+  }
+
+  function exactAttributes(node, allowed) {
+    var names = Array.prototype.map.call(node.attributes, function(attr) { return attr.name; });
+    return names.every(function(name) { return allowed.indexOf(name) !== -1; });
+  }
+
+  function exactAttributeValues(node, expected) {
+    var names = Object.keys(expected);
+    return node.attributes.length === names.length && names.every(function(name) {
+      return node.getAttribute(name) === expected[name];
+    });
+  }
+
+  function canonicalDocument() {
+    var htmlTheme = document.documentElement.getAttribute('data-theme');
+    return document.documentElement.getAttribute('lang') === 'en' &&
+      exactAttributes(document.documentElement, ['lang', 'data-theme', 'style']) &&
+      (htmlTheme === null || htmlTheme === 'light' || htmlTheme === 'dark') &&
+      exactAttributes(document.body, ['class']) &&
+      Array.prototype.every.call(document.body.classList, function(name) {
+        return name === 'has-sidebar' || name === 'transcript-search-active';
+      }) &&
+      exactAttributes(content, ['id']) && exactAttributes(main, []);
+  }
+
+  function canonicalSearchRoot() {
+    var label = root.querySelector('.transcript-search-label');
+    var row = root.querySelector('.transcript-search-row');
+    var openerAttributes = ['type', 'class', 'aria-controls', 'aria-expanded', 'aria-keyshortcuts'];
+    if (opener.hidden) openerAttributes.push('hidden');
+    var panelAttributes = ['id', 'class'];
+    if (panel.hidden) panelAttributes.push('hidden');
+    var expanded = opener.getAttribute('aria-expanded') === 'true';
+    var navigationDisabled = invalid || matches.length === 0;
+    var buttonShape = function(button, className, label, canDisable) {
+      var attributes = ['type', 'class', 'aria-label'];
+      if (canDisable && button.disabled) attributes.push('disabled');
+      return exactAttributes(button, attributes) && button.type === 'button' &&
+        button.getAttribute('class') === className && button.getAttribute('aria-label') === label;
+    };
+    return root.parentElement === content && root.children.length === 2 &&
+      exactAttributeValues(root, { 'class': 'transcript-search', 'role': 'search' }) &&
+      opener.parentElement === root && exactAttributes(opener, openerAttributes) &&
+      opener.type === 'button' && opener.getAttribute('class') === 'transcript-search-toggle' &&
+      opener.getAttribute('aria-controls') === 'transcript-search-panel' &&
+      opener.getAttribute('aria-keyshortcuts') === '/' &&
+      (opener.getAttribute('aria-expanded') === 'true' ||
+        opener.getAttribute('aria-expanded') === 'false') &&
+      panel.hidden === !expanded && opener.hidden === expanded &&
+      panel.parentElement === root && label && label.parentElement === panel &&
+      panel.children.length === 3 && exactAttributes(panel, panelAttributes) &&
+      panel.id === 'transcript-search-panel' && panel.className === 'transcript-search-panel' &&
+      exactAttributeValues(label,
+        { 'class': 'transcript-search-label', 'for': 'transcript-search-input' }) &&
+      row && row.parentElement === panel && status.parentElement === panel &&
+      row.children.length === 5 &&
+      exactAttributeValues(row, { 'class': 'transcript-search-row' }) &&
+      input.parentElement === row && previous.parentElement === row && next.parentElement === row &&
+      read.parentElement === row && clear.parentElement === row &&
+      exactAttributeValues(input, { 'id': 'transcript-search-input',
+        'class': 'transcript-search-input', 'type': 'search', 'autocomplete': 'off',
+        'spellcheck': 'false', 'autocorrect': 'off', 'autocapitalize': 'none',
+        'inputmode': 'search', 'placeholder': 'Find in transcript' }) &&
+      buttonShape(previous, 'transcript-search-prev', 'Previous match', true) &&
+      buttonShape(next, 'transcript-search-next', 'Next match', true) &&
+      buttonShape(read, 'transcript-search-read', 'Read current passage', true) &&
+      buttonShape(clear, 'transcript-search-clear', 'Clear and close search', false) &&
+      previous.disabled === navigationDisabled && next.disabled === navigationDisabled &&
+      read.disabled === navigationDisabled &&
+      exactAttributeValues(status,
+        { 'class': 'transcript-search-status', 'role': 'status', 'aria-live': 'polite' }) &&
+      root.querySelectorAll('.transcript-search-toggle').length === 1 &&
+      root.querySelectorAll('.transcript-search-panel').length === 1 &&
+      root.querySelectorAll('.transcript-search-input').length === 1 &&
+      root.querySelectorAll('.transcript-search-prev').length === 1 &&
+      root.querySelectorAll('.transcript-search-next').length === 1 &&
+      root.querySelectorAll('.transcript-search-read').length === 1 &&
+      root.querySelectorAll('.transcript-search-clear').length === 1 &&
+      root.querySelectorAll('.transcript-search-status').length === 1;
+  }
+
+  function canonicalPassageChildren(passage) {
+    var children = Array.prototype.slice.call(passage.childNodes);
+    var position = 0;
+    if (children[position] && children[position].nodeType === Node.ELEMENT_NODE &&
+        children[position].getAttribute('class') === 'speaker') {
+      var speakerNode = children[position];
+      if (speakerNode.tagName !== 'SPAN' || !exactAttributes(speakerNode, ['class']) ||
+          speakerNode.childNodes.length !== 1 ||
+          speakerNode.firstChild.nodeType !== Node.TEXT_NODE) return false;
+      position += 1;
+      if (!children[position] || children[position].nodeType !== Node.TEXT_NODE ||
+          children[position].data !== ' ') return false;
+      position += 1;
+    }
+    var timestampNode = children[position];
+    if (!timestampNode || timestampNode.nodeType !== Node.ELEMENT_NODE ||
+        timestampNode.tagName !== 'SPAN' || timestampNode.getAttribute('class') !== 'ts' ||
+        !exactAttributes(timestampNode, ['class']) || timestampNode.childNodes.length !== 1 ||
+        timestampNode.firstChild.nodeType !== Node.TEXT_NODE ||
+        !/^\d{2}:\d{2}:\d{2}$/.test(timestampNode.textContent)) return false;
+    position += 1;
+    var tail = children.slice(position);
+    var strongCount = 0;
+    if (!tail.length || tail[0].nodeType !== Node.TEXT_NODE || tail[0].data.charAt(0) !== ' ') {
+      return false;
+    }
+    return tail.every(function(child) {
+      if (child.nodeType === Node.TEXT_NODE) return true;
+      if (child.nodeType !== Node.ELEMENT_NODE || child.tagName !== 'STRONG' ||
+          !exactAttributes(child, []) || child.childNodes.length !== 1 ||
+          child.firstChild.nodeType !== Node.TEXT_NODE) return false;
+      strongCount += 1;
+      return strongCount <= 1;
+    });
+  }
+
+  function canonicalPassage(passage) {
+    if (!canonicalDocument() || passage.tagName !== 'P' || !passage.hasAttribute('data-start') ||
+        !passage.hasAttribute('data-end') || hiddenInChain(passage)) return false;
+    if (!/^\d+\.\d{3}$/.test(passage.getAttribute('data-start')) ||
+        !/^\d+\.\d{3}$/.test(passage.getAttribute('data-end'))) return false;
+    if (!allowedPassageClass(passage) || !canonicalPassageChildren(passage)) return false;
+    var ariaCurrent = passage.getAttribute('aria-current');
+    var tabIndex = passage.getAttribute('tabindex');
+    var styleValid = !passage.hasAttribute('style') ||
+      (passage.style.length === 1 && passage.style.cursor === 'pointer');
+    if ((ariaCurrent !== null && ariaCurrent !== 'location') ||
+        (tabIndex !== null && tabIndex !== '-1') || !styleValid) return false;
+    var parent = passage.parentElement;
+    var dynamic = ['class', 'aria-current', 'tabindex', 'style'];
+    var keyless = parent === main && /^t-\d+$/.test(passage.getAttribute('id') || '') &&
+      exactAttributes(passage, ['id', 'data-start', 'data-end'].concat(dynamic));
+    var chaptered = parent && parent.matches('div.chapter-main') &&
+      exactAttributes(parent, ['class']) &&
+      parent.parentElement && parent.parentElement.matches('section.chapter-section') &&
+      exactAttributes(parent.parentElement, ['id', 'class', 'data-start']) &&
+      parent.parentElement.parentElement === main &&
+      exactAttributes(passage, ['data-start', 'data-end'].concat(dynamic));
+    return keyless || chaptered;
+  }
+
+  function canonicalChain(passage) {
+    return canonicalPassage(passage) && main.parentElement === content &&
+      content.parentElement === document.body &&
+      document.body.parentElement === document.documentElement;
+  }
+
+  function buildIndex() {
+    var visits = 0;
+    var candidates = [];
+    var walker = document.createTreeWalker(
+      document.body,
+      NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT
+    );
+    while (walker.nextNode()) {
+      visits += 1;
+      if (visits > MAX_VISITS) throw new Error('capacity');
+      var node = walker.currentNode;
+      if (node.nodeType === Node.ELEMENT_NODE && node.tagName === 'TEMPLATE') {
+        throw new Error('shape');
+      }
+      if (node.nodeType === Node.ELEMENT_NODE && node.matches('p[data-start]')) {
+        if (!canonicalPassage(node)) throw new Error('shape');
+        candidates.push(node);
+        if (candidates.length > MAX_PASSAGES) throw new Error('capacity');
+      }
+    }
+    var totalRaw = 0;
+    var totalNormalized = 0;
+    var built = [];
+    candidates.forEach(function(passage) {
+      var pieces = [];
+      var raw = 0;
+      Array.prototype.forEach.call(passage.childNodes, function(child) {
+        if (child.nodeType === Node.TEXT_NODE || child.tagName === 'STRONG') {
+          var value = child.textContent || '';
+          raw += value.length;
+          totalRaw += value.length;
+          if (raw > MAX_PASSAGE_UNITS || totalRaw > MAX_TOTAL_UNITS) throw new Error('capacity');
+          pieces.push(value);
+        }
+      });
+      var normalized = pieces.join('').normalize('NFKC').replace(/\s+/g, ' ').trim().toLowerCase();
+      totalNormalized += normalized.length;
+      if (normalized.length > MAX_TOTAL_UNITS || totalNormalized > MAX_TOTAL_UNITS) {
+        throw new Error('capacity');
+      }
+      var timestamp = passage.querySelector('.ts');
+      built.push({
+        el: passage,
+        text: normalized,
+        timestamp: timestamp ? timestamp.textContent.trim() : ''
+      });
+    });
+    return built;
+  }
+
+  function layout() {
+    beginOwnedMutations();
+    var searchHeight = root.offsetHeight;
+    document.documentElement.style.setProperty('--transcript-search-height', searchHeight + 'px');
+    if (rail) rail.style.top = searchHeight + 'px';
+    document.documentElement.style.scrollPaddingTop =
+      (searchHeight + (rail ? rail.offsetHeight : 0) + 8) + 'px';
+    acceptOwnedMutations();
+  }
+
+  function beginOwnedMutations() {
+    if (ownedDepth === 0 && observerStarted) {
+      var pending = mutationObserver.takeRecords();
+      if (!invalid && pending.some(function(record) { return !allowedMutation(record); })) {
+        forceInvalid('Transcript changed; reopen it to search.');
+      }
+    }
+    ownedDepth += 1;
+  }
+
+  function acceptOwnedMutations() {
+    ownedDepth -= 1;
+    if (ownedDepth === 0 && observerStarted) {
+      var records = mutationObserver.takeRecords();
+      if (!invalid && records.some(function(record) { return !allowedOwnedMutation(record); })) {
+        forceInvalid('Transcript changed; reopen it to search.');
+      }
+    }
+  }
+
+  function forceInvalid(message) {
+    invalid = true;
+    invalidMessage = message;
+    generation += 1;
+    if (timer !== null) window.clearTimeout(timer);
+    timer = null;
+    index.forEach(function(item) {
+      item.el.classList.remove('search-match', 'search-match-active');
+      item.el.removeAttribute('aria-current');
+      item.el.removeAttribute('tabindex');
+    });
+    matches = [];
+    current = -1;
+    previous.disabled = true;
+    next.disabled = true;
+    read.disabled = true;
+    document.body.classList.remove('transcript-search-active');
+    status.textContent = message;
+    if (opener.hidden || !panel.hidden) {
+      panel.hidden = false;
+      opener.hidden = true;
+      opener.setAttribute('aria-expanded', 'true');
+    }
+    if (observerStarted) mutationObserver.takeRecords();
+  }
+
+  function setInvalid(message) {
+    beginOwnedMutations();
+    forceInvalid(message);
+    acceptOwnedMutations();
+  }
+
+  function allowedPassageClass(node) {
+    return Array.prototype.every.call(node.classList, function(name) {
+      return name === 'sync-active' || name === 'search-match' || name === 'search-match-active';
+    });
+  }
+
+  function allowedMutation(record) {
+    var target = record.target.nodeType === Node.ELEMENT_NODE ?
+      record.target : record.target.parentElement;
+    if (!target) return false;
+    if (rail && (target === rail || rail.contains(target))) return true;
+    if (sidebar && (target === sidebar || sidebar.contains(target))) return true;
+    if (target === document.documentElement) {
+      if (record.attributeName === 'data-theme') {
+        var theme = target.getAttribute('data-theme');
+        return theme === null || theme === 'light' || theme === 'dark';
+      }
+    }
+    if (target === document.body && record.attributeName === 'class') {
+      return false;
+    }
+    if (target.tagName === 'P') {
+      if (record.attributeName === 'class') {
+        return coherentPassageState(target);
+      }
+    }
+    return false;
+  }
+
+  function coherentPassageState(target) {
+    var matchPosition = matches.findIndex(function(item) { return item.el === target; });
+    var isMatch = matchPosition !== -1;
+    var isActive = isMatch && matchPosition === current;
+    return Array.prototype.every.call(target.classList, function(name) {
+      return name === 'sync-active' || name === 'search-match' ||
+        name === 'search-match-active';
+    }) && target.classList.contains('search-match') === isMatch &&
+      target.classList.contains('search-match-active') === isActive &&
+      target.hasAttribute('aria-current') === isActive &&
+      target.hasAttribute('tabindex') === isActive;
+  }
+
+  function allowedOwnedMutation(record) {
+    var target = record.target.nodeType === Node.ELEMENT_NODE ?
+      record.target : record.target.parentElement;
+    if (!target) return false;
+    if (allowedMutation(record)) return true;
+    if (target === status || status.contains(target)) return canonicalSearchRoot();
+    if (root.contains(target)) return record.type === 'attributes' && canonicalSearchRoot();
+    if (target.tagName === 'P') return record.type === 'attributes' && coherentPassageState(target);
+    if (target === document.body && record.attributeName === 'class') {
+      var expected = document.body.classList.contains('has-sidebar') ?
+        ['has-sidebar'] : [];
+      if (matches.length && !invalid) expected.push('transcript-search-active');
+      return Array.prototype.every.call(document.body.classList, function(name, index) {
+        return name === expected[index];
+      }) && document.body.classList.length === expected.length;
+    }
+    if (target === document.documentElement && record.attributeName === 'style') {
+      return Array.prototype.every.call(target.style, function(name) {
+        var value = target.style.getPropertyValue(name);
+        return (name === 'scroll-padding-top' || name === '--transcript-search-height') &&
+          /^\d+(?:\.\d+)?px$/.test(value);
+      });
+    }
+    return false;
+  }
+
+  var mutationObserver = new MutationObserver(function(records) {
+    if (invalid) return;
+    if (records.some(function(record) { return !allowedMutation(record); })) {
+      setInvalid('Transcript changed; reopen it to search.');
+    }
+  });
+
+  function cancelPending() {
+    generation += 1;
+    if (timer !== null) window.clearTimeout(timer);
+    timer = null;
+  }
+
+  function clearResults() {
+    beginOwnedMutations();
+    index.forEach(function(item) {
+      item.el.classList.remove('search-match', 'search-match-active');
+      item.el.removeAttribute('aria-current');
+      item.el.removeAttribute('tabindex');
+    });
+    matches = [];
+    current = -1;
+    previous.disabled = true;
+    next.disabled = true;
+    read.disabled = true;
+    document.body.classList.remove('transcript-search-active');
+    if (invalidMessage) status.textContent = invalidMessage;
+    acceptOwnedMutations();
+  }
+
+  function updateStatus() {
+    if (!matches.length || current < 0) return;
+    var timestamp = matches[current].timestamp;
+    status.textContent = (current + 1) + ' of ' + matches.length +
+      (timestamp ? ' · ' + timestamp : '');
+  }
+
+  function activate(position, scroll) {
+    if (invalid || !matches.length) return;
+    var candidate = matches[((position % matches.length) + matches.length) % matches.length];
+    if (!candidate || !canonicalChain(candidate.el)) {
+      setInvalid('Transcript changed; reopen it to search.');
+      return;
+    }
+    beginOwnedMutations();
+    matches.forEach(function(item) {
+      item.el.classList.remove('search-match-active');
+      item.el.removeAttribute('aria-current');
+      item.el.removeAttribute('tabindex');
+    });
+    current = matches.indexOf(candidate);
+    candidate.el.classList.add('search-match-active');
+    candidate.el.setAttribute('aria-current', 'location');
+    candidate.el.setAttribute('tabindex', '-1');
+    updateStatus();
+    acceptOwnedMutations();
+    if (scroll) candidate.el.scrollIntoView({
+      block: 'center',
+      behavior: reduced.matches ? 'auto' : 'smooth'
+    });
+  }
+
+  function boundedQuery(value) {
+    var compact = '';
+    var pendingSpace = false;
+    var compactCount = 0;
+    var rawCount = 0;
+    for (var iterator = value[Symbol.iterator](), step; !(step = iterator.next()).done;) {
+      rawCount += 1;
+      if (rawCount > 1000) return { compact: compact, tooLong: true };
+      var character = step.value;
+      if (/\s/u.test(character)) {
+        if (compact) pendingSpace = true;
+      } else {
+        if (pendingSpace) {
+          compact += ' ';
+          compactCount += 1;
+        }
+        compact += character;
+        compactCount += 1;
+        if (compactCount > 100) return { compact: compact, tooLong: true };
+        pendingSpace = false;
+      }
+    }
+    return { compact: compact, tooLong: false };
+  }
+
+  function run(query, expectedGeneration) {
+    if (invalid || expectedGeneration !== generation) return;
+    var bounded = boundedQuery(query);
+    var compact = bounded.compact;
+    if (!compact) {
+      clearResults();
+      beginOwnedMutations();
+      status.textContent = '';
+      acceptOwnedMutations();
+      return;
+    }
+    if (bounded.tooLong) {
+      clearResults();
+      beginOwnedMutations();
+      status.textContent = 'Search is limited to 100 characters.';
+      acceptOwnedMutations();
+      return;
+    }
+    var normalized = compact.normalize('NFKC').toLowerCase();
+    var found = index.filter(function(item) { return item.text.indexOf(normalized) !== -1; });
+    if (expectedGeneration !== generation) return;
+    clearResults();
+    beginOwnedMutations();
+    matches = found;
+    if (!matches.length) {
+      status.textContent = 'No matches.';
+      acceptOwnedMutations();
+      return;
+    }
+    matches.forEach(function(item) { item.el.classList.add('search-match'); });
+    document.body.classList.add('transcript-search-active');
+    previous.disabled = false;
+    next.disabled = false;
+    read.disabled = false;
+    activate(0, true);
+    acceptOwnedMutations();
+  }
+
+  function schedule() {
+    beginOwnedMutations();
+    cancelPending();
+    clearResults();
+    if (invalid) {
+      acceptOwnedMutations();
+      return;
+    }
+    var expected = generation;
+    var query = input.value;
+    status.textContent = boundedQuery(query).compact ? 'Searching…' : '';
+    acceptOwnedMutations();
+    timer = window.setTimeout(function() {
+      timer = null;
+      run(query, expected);
+    }, 150);
+  }
+
+  function openSearch() {
+    beginOwnedMutations();
+    panel.hidden = false;
+    opener.hidden = true;
+    opener.setAttribute('aria-expanded', 'true');
+    status.textContent = invalidMessage;
+    layout();
+    input.focus();
+    acceptOwnedMutations();
+  }
+
+  function dismiss(restoreFocus) {
+    beginOwnedMutations();
+    cancelPending();
+    input.value = '';
+    clearResults();
+    status.textContent = invalidMessage;
+    panel.hidden = true;
+    opener.hidden = false;
+    opener.setAttribute('aria-expanded', 'false');
+    layout();
+    if (restoreFocus) opener.focus();
+    acceptOwnedMutations();
+  }
+
+  try {
+    var preseededSearchState = Array.prototype.some.call(
+      main.querySelectorAll('p[data-start]'),
+      function(passage) {
+        return passage.classList.contains('search-match') ||
+          passage.classList.contains('search-match-active') ||
+          passage.hasAttribute('aria-current') || passage.hasAttribute('tabindex');
+      }
+    );
+    if (!canonicalSearchRoot() || preseededSearchState ||
+        document.body.classList.contains('transcript-search-active') ||
+        !panel.hidden || opener.hidden || opener.getAttribute('aria-expanded') !== 'false' ||
+        !previous.disabled || !next.disabled || !read.disabled || status.textContent !== '') {
+      throw new Error('shape');
+    }
+    index = buildIndex();
+  } catch (error) {
+    setInvalid(error && error.message === 'capacity' ?
+      'This transcript is too large to search.' : 'This transcript cannot be searched.');
+  }
+  function observeMutations() {
+    mutationObserver.observe(document.documentElement, {
+      subtree: true,
+      childList: true,
+      characterData: true,
+      attributes: true
+    });
+    observerStarted = true;
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', observeMutations, { once: true });
+  } else {
+    observeMutations();
+  }
+
+  opener.addEventListener('click', openSearch);
+  clear.addEventListener('click', function() { dismiss(true); });
+  previous.addEventListener('click', function() { activate(current - 1, true); });
+  next.addEventListener('click', function() { activate(current + 1, true); });
+  read.addEventListener('click', function() {
+    if (current >= 0 && matches[current] && canonicalChain(matches[current].el)) {
+      matches[current].el.focus({ preventScroll: true });
+    }
+  });
+  input.addEventListener('compositionstart', function() {
+    beginOwnedMutations();
+    composing = true;
+    cancelPending();
+    clearResults();
+    status.textContent = '';
+    acceptOwnedMutations();
+  });
+  input.addEventListener('compositionend', function() { composing = false; schedule(); });
+  input.addEventListener('input', function(e) { if (!e.isComposing && !composing) schedule(); });
+  input.addEventListener('keydown', function(e) {
+    if (e.defaultPrevented || e.isComposing || composing) return;
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      activate(current + (e.shiftKey ? -1 : 1), true);
+    }
+  });
+  document.addEventListener('keydown', function(e) {
+    var target = e.target;
+    var editable = target &&
+      (target.matches('input, textarea, select') || target.isContentEditable);
+    if (e.defaultPrevented || e.isComposing || composing ||
+        e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.key === 'Escape' && !panel.hidden &&
+        (root.contains(target) ||
+          (current >= 0 && matches[current] && matches[current].el === target))) {
+      e.preventDefault();
+      dismiss(true);
+      return;
+    }
+    if (e.key === '/' && !editable) {
+      e.preventDefault();
+      openSearch();
+    }
+  });
+  window.addEventListener('pr-rail-layout', layout);
+  window.addEventListener('resize', layout);
+  window.addEventListener('pagehide', function() { dismiss(false); });
+  window.addEventListener('pageshow', function(e) { if (e.persisted) dismiss(false); });
+  if ('ResizeObserver' in window) {
+    var resizeObserver = new ResizeObserver(layout);
+    resizeObserver.observe(root);
+    if (rail) resizeObserver.observe(rail);
+  }
+  layout();
 })();
 </script>
 </body>
