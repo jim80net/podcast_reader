@@ -59,6 +59,13 @@ test('Library lists entries as cards and opens the Reader', async ({ harness }) 
 test('Library searches private transcript text, clears, and opens the result', async ({ harness }) => {
   await expectEngineState(harness.window, 'ready')
   await seedLibrary(harness)
+  await harness.window.evaluate(() => {
+    window.location.hash = '#/new'
+  })
+  await expect(harness.window.locator('#new-source')).toBeVisible()
+  await harness.window.evaluate(() => {
+    window.location.hash = '#/library'
+  })
   await expect(harness.window.locator('.cards .card')).toHaveCount(2)
 
   const input = harness.window.getByRole('searchbox', { name: 'Search transcripts' })
@@ -66,7 +73,7 @@ test('Library searches private transcript text, clears, and opens the result', a
   await expect(input).toHaveAttribute('spellcheck', 'false')
   await expect(input).not.toHaveAttribute('name')
   await input.fill('episode two transcript')
-  await expect(harness.window.getByRole('status')).toHaveText('1 match.')
+  await expect(harness.window.locator('.library-search-status')).toHaveText('1 match.')
   const results = harness.window.locator('.cards .search-result')
   await expect(results).toHaveCount(1)
   await expect(results.first().locator('.card-title')).toHaveText('Second Episode')
@@ -154,11 +161,18 @@ test('Library search suppresses stale work, retries busy, and reports completene
       ]
     }
   })
+  await harness.window.evaluate(() => {
+    window.location.hash = '#/new'
+  })
+  await expect(harness.window.locator('#new-source')).toBeVisible()
+  await harness.window.evaluate(() => {
+    window.location.hash = '#/library'
+  })
   const input = harness.window.getByRole('searchbox', { name: 'Search transcripts' })
   await input.fill('slow old')
   await harness.window.waitForTimeout(350)
   await input.fill('current')
-  await expect(harness.window.getByRole('status')).toHaveText(
+  await expect(harness.window.locator('.library-search-status')).toHaveText(
     '1 match. Showing the first 20 matches. Some transcripts could not be searched.',
     { timeout: 5_000 }
   )
@@ -170,7 +184,9 @@ test('Library search suppresses stale work, retries busy, and reports completene
     (entry) => entry.kind === 'library-search'
   ).length
   await input.fill('😀')
-  await expect(harness.window.getByRole('status')).toHaveText('Enter at least 2 characters.')
+  await expect(harness.window.locator('.library-search-status')).toHaveText(
+    'Enter at least 2 characters.'
+  )
   await expect(harness.window.locator('.cards .card')).toHaveCount(2)
   await harness.window.waitForTimeout(350)
   const callsAfterShortQuery = (await harness.mock.log()).filter(
@@ -179,7 +195,7 @@ test('Library search suppresses stale work, retries busy, and reports completene
   expect(callsAfterShortQuery).toBe(callsBeforeShortQuery)
 
   await input.fill('😀'.repeat(51))
-  await expect(harness.window.getByRole('status')).toHaveText('0 matches.')
+  await expect(harness.window.locator('.library-search-status')).toHaveText('0 matches.')
   const callsAfterValidAstralQuery = (await harness.mock.log()).filter(
     (entry) => entry.kind === 'library-search'
   ).length
@@ -188,13 +204,13 @@ test('Library search suppresses stale work, retries busy, and reports completene
   await input.fill('recover')
   await expect(harness.window.getByRole('button', { name: 'Retry' })).toBeVisible()
   await harness.window.getByRole('button', { name: 'Retry' }).click()
-  await expect(harness.window.getByRole('status')).toHaveText('0 matches.')
+  await expect(harness.window.locator('.library-search-status')).toHaveText('0 matches.')
   await expect(harness.window.locator('.empty-search')).toHaveText('No transcript matches.')
 
   await input.fill('stale busy')
   await harness.window.waitForTimeout(350)
   await input.fill('fresh')
-  await expect(harness.window.getByRole('status')).toHaveText('1 match.')
+  await expect(harness.window.locator('.library-search-status')).toHaveText('1 match.')
   await harness.window.waitForTimeout(1100)
   const countsResponse = await harness.mock.control('/search-counts')
   const counts = (await countsResponse.json()) as Record<string, number>
