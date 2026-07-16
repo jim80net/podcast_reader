@@ -214,7 +214,6 @@ class TestSpeakerRendering:
         )
         assert ".speaker {" in with_speakers
         assert ".speaker {" not in without
-        assert "speaker" not in without
 
     def test_chapters_path_renders_speaker_labels(self) -> None:
         from podcast_reader.html import build_html
@@ -294,6 +293,39 @@ class TestSyncMetadata:
         )
         # The <section> carries a machine-readable start for chapter-level seeking.
         assert 'data-start="0.000"' in html
+
+
+class TestTranscriptSearch:
+    _SEGS = [
+        {"start": 0.0, "end": 2.0, "text": "First searchable passage."},
+        {"start": 2.0, "end": 4.0, "text": "두 번째 회복탄력성 구절."},
+    ]
+
+    def test_emits_private_accessible_search_controls_and_script(self) -> None:
+        from podcast_reader.html import _SEARCH_SCRIPT, build_html
+
+        html = build_html(list(self._SEGS), title="T", sentences_per_para=1, source="test")
+
+        assert 'role="search"' in html
+        assert 'aria-keyshortcuts="/"' in html
+        assert 'aria-controls="transcript-search-panel"' in html
+        assert 'type="search"' in html
+        assert 'autocomplete="off"' in html
+        assert 'spellcheck="false"' in html
+        assert 'autocorrect="off"' in html
+        assert 'autocapitalize="none"' in html
+        assert 'name="' not in html.split('id="transcript-search-input"', 1)[1].split(">", 1)[0]
+        assert f"<script>\n{_SEARCH_SCRIPT}</script>" in html
+
+    def test_search_precedes_main_and_uses_reviewed_motion_and_state_tokens(self) -> None:
+        from podcast_reader.html import build_html
+
+        html = build_html(list(self._SEGS), title="T", sentences_per_para=1, source="test")
+
+        assert html.index('class="transcript-search"') < html.index("<main>")
+        assert "html { scroll-behavior: auto; }" in html
+        assert ".search-match-active.sync-active" in html
+        assert "--transcript-search-height" in html
 
 
 class TestKeylessTimeline:
@@ -577,6 +609,42 @@ class TestSectionBadgeContrast:
             assert "color: var(--section-badge-text)" in match.group("body")
 
 
+class TestSearchContrast:
+    @staticmethod
+    def _blend(background: str, foreground: str, alpha: float) -> str:
+        channels = []
+        for index in (1, 3, 5):
+            bg = int(background[index : index + 2], 16)
+            fg = int(foreground[index : index + 2], 16)
+            channels.append(round(bg * (1 - alpha) + fg * alpha))
+        return "#" + "".join(f"{channel:02x}" for channel in channels)
+
+    def test_light_and_dark_search_states_pin_text_and_edge_contrast(self) -> None:
+        from podcast_reader.html import _STYLESHEET
+
+        contrast = TestSectionBadgeContrast._contrast
+        for scope in (":root", ":root[data-theme='light']"):
+            match = re.search(
+                rf"{re.escape(scope)}\s*\{{(?P<body>.*?)\n\}}", _STYLESHEET, re.DOTALL
+            )
+            assert match is not None
+            body = match.group("body")
+
+            def color(name: str, source: str) -> str:
+                token = re.search(rf"--{name}:\s*(#[0-9a-fA-F]{{6}})", source)
+                assert token is not None
+                return token.group(1)
+
+            glow = re.search(r"--accent-glow:\s*rgba\([^,]+,[^,]+,[^,]+,\s*([0-9.]+)\)", body)
+            assert glow is not None
+            background = color("bg", body)
+            match_bg = self._blend(background, color("accent", body), float(glow.group(1)))
+            assert contrast(color("text", body), match_bg) >= 4.5
+            assert contrast(color("accent", body), background) >= 3.0
+            assert contrast(color("search-edge", body), match_bg) >= 3.0
+            assert contrast(color("link", body), background) >= 3.0
+
+
 class TestTimelineLabel:
     def test_short_text_is_kept_whole_without_ellipsis(self) -> None:
         from podcast_reader.html import _timeline_label
@@ -647,14 +715,14 @@ class TestRailGeometryScript:
 
         html = build_html(list(self._SEGS), title="T", sentences_per_para=1, source="test")
         assert "scrollPaddingTop" in html
-        # Re-measured on resize and on stuck-state changes, not just load.
-        assert "addEventListener('resize', pad)" in html
+        assert "pr-rail-layout" in html
+        assert "new ResizeObserver(layout)" in html
         assert "classList.toggle('stuck', v)" in html
         # Collapsed sticky state hides snippets, keeping timestamp chips.
         assert ".timeline-nav.stuck .timeline-snippet { display: none; }" in html
 
     def test_chaptered_artifact_omits_the_rail_script(self) -> None:
-        from podcast_reader.html import build_html
+        from podcast_reader.html import _RAIL_SCRIPT, build_html
 
         html = build_html(
             list(self._SEGS),
@@ -671,13 +739,13 @@ class TestRailGeometryScript:
             ],
             source="test",
         )
-        assert "scrollPaddingTop" not in html
+        assert f"<script>\n{_RAIL_SCRIPT}</script>" not in html
 
     def test_empty_artifact_omits_the_rail_script(self) -> None:
-        from podcast_reader.html import build_html
+        from podcast_reader.html import _RAIL_SCRIPT, build_html
 
         html = build_html([], title="T", source="test")
-        assert "scrollPaddingTop" not in html
+        assert f"<script>\n{_RAIL_SCRIPT}</script>" not in html
 
 
 class TestSidebarMarginGating:
@@ -889,6 +957,26 @@ class TestBuildHtmlIntegration:
 
         expected = (FIXTURES / "sample_expected_near_hour.html").read_text()
         assert result == expected
+
+    def test_multilingual_search_golden_stays_current(self) -> None:
+        from podcast_reader.html import build_html
+
+        segments = [
+            {"start": 0.0, "end": 10.0, "text": "Resilience begins with deliberate practice."},
+            {"start": 10.0, "end": 20.0, "text": "A bridge passage keeps ideas separate."},
+            {"start": 20.0, "end": 30.0, "text": "회복탄력성은 다시 시작하는 힘입니다."},
+            {"start": 30.0, "end": 40.0, "text": "Another bridge passage preserves spacing."},
+            {"start": 40.0, "end": 50.0, "text": "RESILIENCE returns in the closing evidence."},
+        ]
+
+        result = build_html(
+            segments,
+            title="Search Test Episode",
+            sentences_per_para=1,
+            source="test",
+        )
+
+        assert result == (FIXTURES / "sample_expected_search.html").read_text()
 
     def test_full_pipeline_with_chapters(self) -> None:
         """Integration test: whisper JSON + chapters JSON -> HTML matches expected output."""

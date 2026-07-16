@@ -14,6 +14,8 @@ Goldens:
   current.
 - ``sample_expected_near_hour.html`` — a deterministic 59:56 keyless fixture
   that proves the #72 at-rest density boundary in the same browser suite.
+- ``sample_expected_search.html`` — multilingual repeated passages for the
+  renderer-level search interaction/privacy suite (#88).
 """
 
 from __future__ import annotations
@@ -65,6 +67,20 @@ def main() -> None:
         build_html(
             _near_hour_segments(),
             title="Near-hour Test Episode",
+            sentences_per_para=1,
+            source="test",
+        )
+    )
+    (FIXTURES / "sample_expected_search.html").write_text(
+        build_html(
+            [
+                {"start": 0.0, "end": 10.0, "text": "Resilience begins with deliberate practice."},
+                {"start": 10.0, "end": 20.0, "text": "A bridge passage keeps ideas separate."},
+                {"start": 20.0, "end": 30.0, "text": "회복탄력성은 다시 시작하는 힘입니다."},
+                {"start": 30.0, "end": 40.0, "text": "Another bridge passage preserves spacing."},
+                {"start": 40.0, "end": 50.0, "text": "RESILIENCE returns in the closing evidence."},
+            ],
+            title="Search Test Episode",
             sentences_per_para=1,
             source="test",
         )

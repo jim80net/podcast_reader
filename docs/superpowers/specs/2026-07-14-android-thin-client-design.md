@@ -320,16 +320,16 @@ The WebView containment policy is mechanical:
   are allowed because this is reader content, and WebView cookies/cache/history
   are cleared on forget even though the design creates none.
 
-The cached document receives a local response CSP generated from a checked-in
-allowlist of the three canonical script hashes emitted by `html.py`, with every
-network directive set to `none`. A Python parity test derives that allowlist
-from `_SCROLL_SCRIPT`, `_RAIL_SCRIPT`, and `_SYNC_SCRIPT`; the Kotlin parser
-extracts the exact script text nodes and refuses to render when any hash is not
-allowlisted. It includes only the allowlisted hashes present in that document,
-never hashes arbitrary discovered script text. This is the engine helper's
-fail-closed rule expressed at the Kotlin boundary, preserves `html.py` as the
-single renderer, and prevents a compromised cache document from reaching the
-network or native APIs.
+The cached document receives a local response CSP generated from the checked-in,
+versioned script-shape inventory emitted by `html.py`, with every network
+directive set to `none`. That inventory includes the historical rail/media-sync
+texts plus the V2 rail/media-sync and local-search text introduced by #88. A
+Python parity test derives the exact ordered tuples and body-tail placement; the
+Kotlin parser mirrors both and refuses the whole document when text, count,
+order, or placement is unknown. It never hashes arbitrary discovered script
+text. This is the engine helper's fail-closed rule expressed at the Kotlin
+boundary, preserves `html.py` as the single renderer, and prevents a compromised
+cache document from reaching the network or native APIs.
 
 ### Future media-element authentication decision
 
