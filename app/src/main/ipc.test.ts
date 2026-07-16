@@ -141,6 +141,14 @@ describe('registerIpcHandlers', () => {
     expect(calls).toContainEqual(['mediaInfo', 'abc123'])
   })
 
+  it('routes private library search through the credential-free bridge', async () => {
+    const reg = makeRegistrar()
+    const { manager, calls } = makeManager()
+    registerIpcHandlers(reg.ipcMain, manager, fakeUpdates, makeConfig())
+    await reg.invoke(CHANNELS.librarySearch, 'private phrase')
+    expect(calls).toContainEqual(['searchLibrary', 'private phrase'])
+  })
+
   it('composes the pairing display from the engine mint and the manager port', async () => {
     const reg = makeRegistrar()
     const { manager, calls } = makeManager({

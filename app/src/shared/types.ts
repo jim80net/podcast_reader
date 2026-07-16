@@ -119,6 +119,20 @@ export interface LibraryEntry {
   created_at: number
 }
 
+export interface LibrarySearchResult {
+  source_id: string
+  title: string
+  excerpt: string
+}
+
+export interface LibrarySearchResponse {
+  results: LibrarySearchResult[]
+  has_more: boolean
+  partial: boolean
+}
+
+export type LibrarySearchAttempt = LibrarySearchResponse | { busy: true }
+
 export interface CustomProviderConfig {
   name: string
   base_url: string

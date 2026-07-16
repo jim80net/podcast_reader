@@ -5,6 +5,7 @@ import type {
   JobRecord,
   KeyTestResult,
   LibraryEntry,
+  LibrarySearchAttempt,
   MediaInfo,
   PacksResponse,
   PipelineEvent,
@@ -28,6 +29,7 @@ export const CHANNELS = {
   jobsConfirm: 'jobs:confirm',
   jobsDismiss: 'jobs:dismiss',
   libraryList: 'library:list',
+  librarySearch: 'library:search',
   libraryTranscript: 'library:transcript',
   mediaInfo: 'media:info',
   youtubeEmbedUrl: 'media:youtube-embed-url',
@@ -139,6 +141,7 @@ export interface PodcastReaderApi {
   confirmJob(jobId: string): Promise<JobRecord>
   dismissJob(jobId: string): Promise<void>
   listLibrary(): Promise<LibraryEntry[]>
+  searchLibrary(query: string): Promise<LibrarySearchAttempt>
   transcriptHtml(sourceId: string): Promise<string>
   /**
    * A library entry's playback classification + prep status (`GET

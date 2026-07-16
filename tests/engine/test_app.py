@@ -2453,6 +2453,46 @@ class TestWebReadRoutes:
         assert "source-secret" not in response.text
         assert "html_path" not in response.text
 
+    def test_desktop_search_reuses_private_bounded_contract(self, engine: _Engine) -> None:
+        source_id, _html = self._seed(engine)
+        path = "/v1/search"
+        assert engine.client.post(path, json={"query": "private"}).status_code == 401
+
+        response = engine.client.post(path, json={"query": "private"}, headers=engine.headers)
+
+        assert response.status_code == 200
+        assert response.json() == {
+            "results": [
+                {
+                    "source_id": source_id,
+                    "title": "Private episode",
+                    "excerpt": "A private transcript.",
+                }
+            ],
+            "has_more": False,
+            "partial": False,
+        }
+        assert response.headers["cache-control"] == "no-store"
+        assert "private" not in str(response.request.url)
+        assert "source-secret" not in response.text
+        assert "html_path" not in response.text
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            {"query": "x"},
+            {"query": "private " * 9},
+            {"query": "search-private-canary-" * 8},
+            {"query": "private", "extra": "search-private-canary"},
+        ],
+    )
+    def test_desktop_search_validation_never_echoes_query(
+        self, engine: _Engine, body: dict[str, str]
+    ) -> None:
+        response = engine.client.post("/v1/search", json=body, headers=engine.headers)
+        assert response.status_code == 422
+        assert "search-private-canary" not in response.text
+
     def test_search_validation_never_echoes_query(self, engine: _Engine) -> None:
         self._session(engine)
         secret = "search-private-canary-" * 8
@@ -2466,20 +2506,40 @@ class TestWebReadRoutes:
         assert secret[:16] not in response.text
 
     def test_search_busy_is_detail_free_and_retryable(self, engine: _Engine) -> None:
-        from podcast_reader.engine.app import _WEB_SEARCH_LOCK
+        from podcast_reader.engine.app import _SEARCH_LOCK
 
         self._session(engine)
-        assert _WEB_SEARCH_LOCK.acquire(blocking=False)
+        assert _SEARCH_LOCK.acquire(blocking=False)
         try:
             response = engine.web_client.post(
                 "/web/api/search", json={"query": "private"}, headers=self._WEB_HEADERS
             )
         finally:
-            _WEB_SEARCH_LOCK.release()
+            _SEARCH_LOCK.release()
 
         assert response.status_code == 429
         assert response.json() == {"detail": "search busy"}
         assert response.headers["retry-after"] == "1"
+
+    def test_desktop_and_web_search_share_single_flight_lock(self, engine: _Engine) -> None:
+        from podcast_reader.engine.app import _SEARCH_LOCK
+
+        self._session(engine)
+        assert _SEARCH_LOCK.acquire(blocking=False)
+        try:
+            desktop = engine.client.post(
+                "/v1/search", json={"query": "private"}, headers=engine.headers
+            )
+            web = engine.web_client.post(
+                "/web/api/search", json={"query": "private"}, headers=self._WEB_HEADERS
+            )
+        finally:
+            _SEARCH_LOCK.release()
+        for response in (desktop, web):
+            assert response.status_code == 429
+            assert response.json() == {"detail": "search busy"}
+            assert response.headers["retry-after"] == "1"
+            assert response.headers["cache-control"] == "no-store"
 
     def test_search_failure_releases_single_flight_lock(
         self, engine: _Engine, monkeypatch: pytest.MonkeyPatch

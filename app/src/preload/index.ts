@@ -30,6 +30,7 @@ const api: PodcastReaderApi = {
   confirmJob: (jobId) => ipcRenderer.invoke(CHANNELS.jobsConfirm, jobId),
   dismissJob: (jobId) => ipcRenderer.invoke(CHANNELS.jobsDismiss, jobId),
   listLibrary: () => ipcRenderer.invoke(CHANNELS.libraryList),
+  searchLibrary: (query) => ipcRenderer.invoke(CHANNELS.librarySearch, query),
   transcriptHtml: (sourceId) => ipcRenderer.invoke(CHANNELS.libraryTranscript, sourceId),
   mediaInfo: (sourceId) => ipcRenderer.invoke(CHANNELS.mediaInfo, sourceId),
   youtubeEmbedUrl: (videoId) => ipcRenderer.invoke(CHANNELS.youtubeEmbedUrl, videoId),

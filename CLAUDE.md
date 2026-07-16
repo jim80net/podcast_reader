@@ -137,7 +137,8 @@ Engine `/v1` surface the app consumes: `health`, `shutdown`, `jobs` (+
 `overrides`), `events` (SSE; job events carry
 `data.job_id`, pack events carry `data.pack_id`, media events carry
 `data.source_id`, and only job events carry `job_id`), `library`,
-`transcripts/{id}.html`, `media/{id}/info` + `media/{id}` (Range bytes via
+`POST search` (private bounded transcript search), `transcripts/{id}.html`,
+`media/{id}/info` + `media/{id}` (Range bytes via
 the `app://media` proxy), `embed/{video_id}` (tokenless YouTube embed page,
 loaded directly by the Reader iframe over the loopback origin — not via
 `window.api`; main builds the URL from the engine coordinates), `settings`,
