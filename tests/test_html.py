@@ -310,6 +310,8 @@ class TestTranscriptSearch:
         assert 'aria-keyshortcuts="/"' in html
         assert 'aria-controls="transcript-search-panel"' in html
         assert 'type="search"' in html
+        assert "&uarr;" in html and "&darr;" in html
+        assert "↑" not in html and "↓" not in html
         assert 'autocomplete="off"' in html
         assert 'spellcheck="false"' in html
         assert 'autocorrect="off"' in html
