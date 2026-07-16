@@ -130,6 +130,10 @@ prove safe—the app leaves it untouched and reports a conflict. Disable or move
 the existing mapping with the Tailscale CLI before trying again. Desktop and
 extension access continue to work when private web access is unavailable.
 
+To check whether private search's bounded scan covers a real library, run
+`powershell -ExecutionPolicy Bypass -File .\scripts\measure-private-search-capacity.ps1`.
+It prints aggregate counts and byte sizes only—never transcript text, titles, URLs, queries, or paths.
+
 ### Chrome extension (`extension/`)
 
 A Manifest V3 extension (see [`extension/README.md`](extension/README.md))
