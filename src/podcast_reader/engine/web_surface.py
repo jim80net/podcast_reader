@@ -195,11 +195,7 @@ class _ScriptShapeParser(HTMLParser):
             marker = "header"
         elif tag == "footer" and parent_marker == "content":
             marker = "footer"
-        elif (
-            tag == "nav"
-            and attributes.get("class") == "timeline-nav"
-            and parent_marker == "main"
-        ):
+        elif tag == "nav" and attributes.get("class") == "timeline-nav" and parent_marker == "main":
             marker = "timeline"
             self.timeline_count += 1
         elif (
