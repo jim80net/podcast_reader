@@ -136,6 +136,12 @@ interface MediaEntry {
   contentType: string
 }
 
+interface SearchScript {
+  status?: number
+  delay_ms?: number
+  response?: unknown
+}
+
 // ---- state ------------------------------------------------------------------
 
 const token = process.env.MOCK_ENGINE_TOKEN ?? ''
@@ -150,6 +156,8 @@ const PROVIDERS = ['anthropic', 'openai', 'xai', 'openrouter', 'deepseek', 'cust
 const jobs = new Map<string, JobRecord>()
 const library: LibraryEntry[] = []
 const transcripts = new Map<string, string>()
+const searchScripts = new Map<string, SearchScript[]>()
+const searchCounts = new Map<string, number>()
 let settings: EngineSettings = {
   whisper_model: 'large-v3',
   whisper_lang: 'en',
@@ -293,9 +301,14 @@ function record(kind: string, detail = ''): void {
 
 // ---- helpers ------------------------------------------------------------------
 
-function sendJson(res: ServerResponse, status: number, payload: unknown): void {
+function sendJson(
+  res: ServerResponse,
+  status: number,
+  payload: unknown,
+  headers: Record<string, string> = {}
+): void {
   const body = JSON.stringify(payload)
-  res.writeHead(status, { 'content-type': 'application/json' })
+  res.writeHead(status, { 'content-type': 'application/json', ...headers })
   res.end(body)
 }
 
@@ -456,6 +469,10 @@ async function handleControl(
     sendJson(res, 200, log)
     return
   }
+  if (req.method === 'GET' && path === '/__mock/search-counts') {
+    sendJson(res, 200, Object.fromEntries(searchCounts))
+    return
+  }
   if (req.method === 'POST' && path === '/__mock/seed') {
     const body = await readBody(req)
     for (const job of (body.jobs as JobRecord[] | undefined) ?? []) jobs.set(job.id, job)
@@ -464,6 +481,11 @@ async function handleControl(
       (body.transcripts as Record<string, string> | undefined) ?? {}
     )) {
       transcripts.set(id, html)
+    }
+    for (const [query, scripts] of Object.entries(
+      (body.searchResponses as Record<string, SearchScript[]> | undefined) ?? {}
+    )) {
+      searchScripts.set(query, [...scripts])
     }
     if (body.settings !== undefined) {
       settings = { ...settings, ...(body.settings as Partial<EngineSettings>) }
@@ -773,6 +795,49 @@ async function handleV1(req: IncomingMessage, res: ServerResponse, path: string)
   }
   if (req.method === 'GET' && path === '/v1/library') {
     sendJson(res, 200, library)
+    return
+  }
+  if (req.method === 'POST' && path === '/v1/search') {
+    const body = await readBody(req)
+    const query = typeof body.query === 'string' ? body.query.trim() : ''
+    const terms = query.toLocaleLowerCase().split(/\s+/).filter(Boolean)
+    const queryLength = Array.from(query).length
+    if (queryLength < 2 || queryLength > 100 || terms.length > 8) {
+      return detail(res, 422, 'query must be 2 to 100 characters and contain at most 8 terms')
+    }
+    record('library-search', 'performed')
+    searchCounts.set(query, (searchCounts.get(query) ?? 0) + 1)
+    const scripted = searchScripts.get(query)?.shift()
+    if (scripted?.delay_ms !== undefined) {
+      await new Promise((resolve) => setTimeout(resolve, scripted.delay_ms))
+    }
+    if (scripted !== undefined) {
+      const scriptedStatus = scripted.status ?? 200
+      if (scriptedStatus !== 200) return detail(res, scriptedStatus, 'search unavailable')
+      sendJson(res, 200, scripted.response ?? { results: [], has_more: false, partial: false }, {
+        'cache-control': 'no-store'
+      })
+      return
+    }
+    const matches = library.filter((entry) => {
+      const transcript = transcripts.get(entry.source_id) ?? ''
+      const text = `${entry.title} ${transcript.replace(/<[^>]*>/g, ' ')}`.toLocaleLowerCase()
+      return terms.every((term) => text.includes(term))
+    })
+    sendJson(
+      res,
+      200,
+      {
+        results: matches.slice(0, 20).map((entry) => ({
+          source_id: entry.source_id,
+          title: entry.title,
+          excerpt: (transcripts.get(entry.source_id) ?? '').replace(/<[^>]*>/g, ' ').trim()
+        })),
+        has_more: matches.length > 20,
+        partial: false
+      },
+      { 'cache-control': 'no-store' }
+    )
     return
   }
   const mediaInfoMatch = /^\/v1\/media\/([^/]+)\/info$/.exec(path)

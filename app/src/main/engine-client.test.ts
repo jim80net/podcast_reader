@@ -88,6 +88,23 @@ describe('EngineClient', () => {
     expect(calls[0]?.url).toContain('/v1/transcripts/src1.html')
   })
 
+  it('posts private library search terms only in the authenticated JSON body', async () => {
+    const payload = { results: [], has_more: false, partial: false }
+    const { calls, client: c } = client(() => json(payload))
+    await expect(c.searchLibrary('private phrase')).resolves.toEqual(payload)
+    expect(calls[0]?.method).toBe('POST')
+    expect(calls[0]?.url).toBe('http://127.0.0.1:51234/v1/search')
+    expect(calls[0]?.url).not.toContain('private')
+    expect(calls[0]?.headers['authorization']).toBe('Bearer tok-123')
+    expect(JSON.parse(calls[0]?.body ?? '')).toEqual({ query: 'private phrase' })
+  })
+
+  it('maps search-busy to a typed renderer-owned retry signal', async () => {
+    const { calls, client: c } = client(() => json({ detail: 'search busy' }, 429))
+    await expect(c.searchLibrary('current query')).resolves.toEqual({ busy: true })
+    expect(calls).toHaveLength(1)
+  })
+
   it('puts keys and never returns key material', async () => {
     const { calls, client: c } = client(() => new Response(null, { status: 204 }))
     await c.putKey('anthropic', 'sk-secret')

@@ -62,6 +62,7 @@ export function registerIpcHandlers(
   ipcMain.handle(CHANNELS.jobsDismiss, (_e, jobId: string) => client().discardJob(jobId))
 
   ipcMain.handle(CHANNELS.libraryList, () => client().listLibrary())
+  ipcMain.handle(CHANNELS.librarySearch, (_e, query: string) => client().searchLibrary(query))
   ipcMain.handle(CHANNELS.libraryTranscript, (_e, sourceId: string) =>
     client().transcriptHtml(sourceId)
   )

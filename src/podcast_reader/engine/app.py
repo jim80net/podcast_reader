@@ -123,7 +123,7 @@ _WEB_PUBLIC_GET = frozenset(
 )
 _WEB_COOKIE_GET = frozenset({("GET", "/web/api/library")})
 _WEB_TRANSCRIPT_PATH = re.compile(r"^/web/api/transcripts/[^/]{1,256}\.html$")
-_WEB_SEARCH_LOCK = threading.Lock()
+_SEARCH_LOCK = threading.Lock()
 
 
 def _https_authority(value: str, *, origin: bool) -> tuple[str, int] | None:
@@ -446,6 +446,39 @@ def create_app(
         if web_session_signer is not None
         else WebSessionSigner(expected_token, generation=_WEB_SESSION_GENERATION)
     )
+
+    def _search(body: WebSearchBody) -> WebSearchResponse | JSONResponse:
+        """Run the one bounded search contract shared by desktop and web."""
+        query = body.query.strip()
+        terms = query.split()
+        if not 2 <= len(query) <= 100 or not 1 <= len(terms) <= 8:
+            raise HTTPException(
+                status_code=422,
+                detail="query must be 2 to 100 characters and contain at most 8 terms",
+            )
+        if not _SEARCH_LOCK.acquire(blocking=False):
+            return JSONResponse(
+                {"detail": "search busy"},
+                status_code=429,
+                headers={"Retry-After": "1", "Cache-Control": "no-store"},
+            )
+        try:
+            outcome = search_library(list_entries(_library_dir(data_dir)), query)
+        finally:
+            _SEARCH_LOCK.release()
+        return WebSearchResponse(
+            results=[
+                WebSearchResult(
+                    source_id=result.source_id,
+                    title=result.title,
+                    excerpt=result.excerpt,
+                )
+                for result in outcome.results
+            ],
+            has_more=outcome.has_more,
+            partial=outcome.partial,
+        )
+
     provider_config_lock = threading.RLock()
 
     @app.exception_handler(RequestValidationError)
@@ -684,35 +717,7 @@ def create_app(
     def web_search(request: Request, body: WebSearchBody) -> WebSearchResponse | JSONResponse:
         """Search bounded local artifacts without putting terms in a URL or cache."""
         _require_web_session(request)
-        query = body.query.strip()
-        terms = query.split()
-        if not 2 <= len(query) <= 100 or not 1 <= len(terms) <= 8:
-            raise HTTPException(
-                status_code=422,
-                detail="query must be 2 to 100 characters and contain at most 8 terms",
-            )
-        if not _WEB_SEARCH_LOCK.acquire(blocking=False):
-            return JSONResponse(
-                {"detail": "search busy"},
-                status_code=429,
-                headers={"Retry-After": "1", "Cache-Control": "no-store"},
-            )
-        try:
-            outcome = search_library(list_entries(_library_dir(data_dir)), query)
-        finally:
-            _WEB_SEARCH_LOCK.release()
-        return WebSearchResponse(
-            results=[
-                WebSearchResult(
-                    source_id=result.source_id,
-                    title=result.title,
-                    excerpt=result.excerpt,
-                )
-                for result in outcome.results
-            ],
-            has_more=outcome.has_more,
-            partial=outcome.partial,
-        )
+        return _search(body)
 
     @app.post("/v1/shutdown", status_code=status.HTTP_202_ACCEPTED)
     def shutdown(background: BackgroundTasks) -> None:
@@ -899,6 +904,12 @@ def create_app(
     @app.get("/v1/library")
     def library() -> list[LibraryEntry]:
         return list_entries(_library_dir(data_dir))
+
+    @app.post("/v1/search", response_model=WebSearchResponse)
+    def desktop_search(response: Response, body: WebSearchBody) -> WebSearchResponse | JSONResponse:
+        """Search private artifacts without exposing the query in a URL or cache."""
+        response.headers["Cache-Control"] = "no-store"
+        return _search(body)
 
     @app.get("/v1/transcripts/{source_id}.html")
     def transcript_html(source_id: str) -> Response:

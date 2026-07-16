@@ -457,6 +457,48 @@ button.button-secondary:hover:not(:disabled) {
    Library rows get their list-row layout via a.card so job cards keep their
    own boxed treatment below. */
 
+.library-search {
+  max-width: none;
+  margin-bottom: var(--space-5);
+}
+
+.library-search-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-2);
+}
+
+.library-search-status {
+  min-height: 1.5rem;
+  margin: 0;
+  font-size: var(--text-sm);
+}
+
+.search-retry {
+  padding: var(--space-1) var(--space-2);
+}
+
+.search-result {
+  align-items: flex-start;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.search-result-excerpt {
+  margin: 0;
+  color: var(--muted);
+  font-family: var(--serif);
+  line-height: var(--leading-snug);
+  overflow-wrap: anywhere;
+}
+
+.empty-search {
+  margin: 0;
+  padding: var(--space-5) 0;
+  color: var(--muted);
+  border-top: 1px solid var(--border);
+}
+
 .cards {
   display: flex;
   flex-direction: column;

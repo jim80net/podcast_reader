@@ -7,6 +7,8 @@ import type {
   JobSubmission,
   KeyTestResult,
   LibraryEntry,
+  LibrarySearchAttempt,
+  LibrarySearchResponse,
   MediaInfo,
   PacksResponse,
   PairStartResponse,
@@ -85,6 +87,15 @@ export class EngineClient {
   // engine/app.py:262 (GET /v1/library)
   listLibrary(): Promise<LibraryEntry[]> {
     return this.json('GET', '/v1/library')
+  }
+
+  async searchLibrary(query: string): Promise<LibrarySearchAttempt> {
+    try {
+      return await this.json<LibrarySearchResponse>('POST', '/v1/search', { query })
+    } catch (error) {
+      if (error instanceof EngineRequestError && error.status === 429) return { busy: true }
+      throw error
+    }
   }
 
   // engine/app.py:266 (GET /v1/transcripts/{source_id}.html)

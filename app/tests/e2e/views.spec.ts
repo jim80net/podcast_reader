@@ -56,6 +56,153 @@ test('Library lists entries as cards and opens the Reader', async ({ harness }) 
   ).toHaveText('episode two transcript')
 })
 
+test('Library searches private transcript text, clears, and opens the result', async ({ harness }) => {
+  await expectEngineState(harness.window, 'ready')
+  await seedLibrary(harness)
+  await expect(harness.window.locator('.cards .card')).toHaveCount(2)
+
+  const input = harness.window.getByRole('searchbox', { name: 'Search transcripts' })
+  await expect(input).toHaveAttribute('autocomplete', 'off')
+  await expect(input).toHaveAttribute('spellcheck', 'false')
+  await expect(input).not.toHaveAttribute('name')
+  await input.fill('episode two transcript')
+  await expect(harness.window.getByRole('status')).toHaveText('1 match.')
+  const results = harness.window.locator('.cards .search-result')
+  await expect(results).toHaveCount(1)
+  await expect(results.first().locator('.card-title')).toHaveText('Second Episode')
+  await expect(results.first().locator('.search-result-excerpt')).toContainText(
+    'episode two transcript'
+  )
+  await expect(harness.window).not.toHaveURL(/episode%20two|episode two/)
+
+  const privacy = await harness.window.evaluate(() => ({
+    attributes: Array.from(document.querySelectorAll('*')).flatMap((node) =>
+      Array.from(node.attributes, (attribute) => `${attribute.name}=${attribute.value}`)
+    ),
+    localStorage: JSON.stringify(localStorage),
+    sessionStorage: JSON.stringify(sessionStorage),
+    windowName: window.name
+  }))
+  expect(privacy.attributes.join('\n')).not.toContain('episode two transcript')
+  expect(privacy.localStorage).not.toContain('episode two transcript')
+  expect(privacy.sessionStorage).not.toContain('episode two transcript')
+  expect(privacy.windowName).not.toContain('episode two transcript')
+
+  const log = await harness.mock.log()
+  expect(log).toContainEqual(expect.objectContaining({ kind: 'library-search', detail: 'performed' }))
+  expect(JSON.stringify(log)).not.toContain('episode two transcript')
+
+  await harness.window.getByRole('button', { name: 'Clear' }).click()
+  await expect(input).toHaveValue('')
+  await expect(input).toBeFocused()
+  await expect(harness.window.locator('.cards .card')).toHaveCount(2)
+
+  await input.fill('episode two transcript')
+  await expect(results).toHaveCount(1)
+  await results.first().click()
+  await expect(harness.window.locator('iframe.reader-frame')).toBeVisible()
+  await harness.window.evaluate(() => {
+    window.location.hash = '#/library'
+  })
+  await expect(input).toHaveValue('')
+  await expect(harness.window.locator('.cards .card')).toHaveCount(2)
+})
+
+test('Library search suppresses stale work, retries busy, and reports completeness', async ({
+  harness
+}) => {
+  await expectEngineState(harness.window, 'ready')
+  await seedLibrary(harness)
+  await harness.mock.control('/seed', {
+    searchResponses: {
+      'slow old': [
+        {
+          delay_ms: 800,
+          response: {
+            results: [{ source_id: 'ep-one', title: 'Stale result', excerpt: 'must not paint' }],
+            has_more: false,
+            partial: false
+          }
+        }
+      ],
+      current: [
+        { status: 429 },
+        {
+          response: {
+            results: [{ source_id: 'ep-two', title: 'Current result', excerpt: 'current text' }],
+            has_more: true,
+            partial: true
+          }
+        }
+      ],
+      recover: [
+        { status: 500 },
+        { response: { results: [], has_more: false, partial: false } }
+      ],
+      'stale busy': [
+        { status: 429 },
+        { response: { results: [], has_more: false, partial: false } }
+      ],
+      fresh: [
+        {
+          response: {
+            results: [{ source_id: 'ep-one', title: 'Fresh result', excerpt: 'fresh text' }],
+            has_more: false,
+            partial: false
+          }
+        }
+      ]
+    }
+  })
+  const input = harness.window.getByRole('searchbox', { name: 'Search transcripts' })
+  await input.fill('slow old')
+  await harness.window.waitForTimeout(350)
+  await input.fill('current')
+  await expect(harness.window.getByRole('status')).toHaveText(
+    '1 match. Showing the first 20 matches. Some transcripts could not be searched.',
+    { timeout: 5_000 }
+  )
+  await expect(harness.window.locator('.cards .search-result')).toHaveCount(1)
+  await expect(harness.window.locator('.cards')).toContainText('Current result')
+  await expect(harness.window.locator('.cards')).not.toContainText('Stale result')
+
+  const callsBeforeShortQuery = (await harness.mock.log()).filter(
+    (entry) => entry.kind === 'library-search'
+  ).length
+  await input.fill('😀')
+  await expect(harness.window.getByRole('status')).toHaveText('Enter at least 2 characters.')
+  await expect(harness.window.locator('.cards .card')).toHaveCount(2)
+  await harness.window.waitForTimeout(350)
+  const callsAfterShortQuery = (await harness.mock.log()).filter(
+    (entry) => entry.kind === 'library-search'
+  ).length
+  expect(callsAfterShortQuery).toBe(callsBeforeShortQuery)
+
+  await input.fill('😀'.repeat(51))
+  await expect(harness.window.getByRole('status')).toHaveText('0 matches.')
+  const callsAfterValidAstralQuery = (await harness.mock.log()).filter(
+    (entry) => entry.kind === 'library-search'
+  ).length
+  expect(callsAfterValidAstralQuery).toBe(callsAfterShortQuery + 1)
+
+  await input.fill('recover')
+  await expect(harness.window.getByRole('button', { name: 'Retry' })).toBeVisible()
+  await harness.window.getByRole('button', { name: 'Retry' }).click()
+  await expect(harness.window.getByRole('status')).toHaveText('0 matches.')
+  await expect(harness.window.locator('.empty-search')).toHaveText('No transcript matches.')
+
+  await input.fill('stale busy')
+  await harness.window.waitForTimeout(350)
+  await input.fill('fresh')
+  await expect(harness.window.getByRole('status')).toHaveText('1 match.')
+  await harness.window.waitForTimeout(1100)
+  const countsResponse = await harness.mock.control('/search-counts')
+  const counts = (await countsResponse.json()) as Record<string, number>
+  expect(counts['stale busy']).toBe(1)
+  expect(counts.fresh).toBe(1)
+  await expect(harness.window.locator('.cards')).toContainText('Fresh result')
+})
+
 test('Library empty state shows a branded first-transcript CTA routing to New', async ({
   harness
 }) => {
