@@ -36,7 +36,8 @@ An unavailable host is not a relaxed gate. Run the local unit/static coverage an
 use exact-SHA hosted E2E for the missing display/platform leg; the hosted app and
 extension jobs invoke this same command. Typical remedies are printed directly:
 `uv sync --extra dev`, `npm ci`, `npx playwright install chromium`, Node 24, or
-Xvfb. Missing committed transcript goldens point to
+Xvfb. An incomplete Electron package points to the explicit
+`node node_modules/electron/install.js` repair. Missing committed transcript goldens point to
 `uv run python tests/regen_goldens.py`.
 
 The command never installs dependencies or browsers implicitly. Build steps are

@@ -103,7 +103,18 @@ def _browser_executable(package_root: Path) -> Path | None:
 
 
 def _electron_executable(package_root: Path) -> Path | None:
-    return _node_executable(package_root, "console.log(require('electron'))")
+    electron_root = package_root / "node_modules/electron"
+    try:
+        relative = (electron_root / "path.txt").read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    if not relative:
+        return None
+    distribution = (electron_root / "dist").resolve()
+    executable = (distribution / relative).resolve()
+    if not executable.is_relative_to(distribution):
+        return None
+    return executable if executable.is_file() else None
 
 
 def _expand_suites(requested: str) -> tuple[str, ...]:
@@ -245,7 +256,9 @@ def prerequisite_errors(
         if not electron_package.is_file():
             errors.append("Electron is missing; run `cd app && npm ci`")
         elif _electron_executable(root / "app") is None:
-            errors.append("Electron is incomplete; run `cd app && npm ci`")
+            errors.append(
+                "Electron is incomplete; run `cd app && node node_modules/electron/install.js`"
+            )
 
     if "walk" in suites:
         manifests = sorted((root / "docs/walk-repros").glob("*.json"))

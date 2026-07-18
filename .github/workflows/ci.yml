@@ -219,8 +219,10 @@ jobs:
       - name: Sync Python engine (dev posture for the real-engine smoke)
         run: uv sync --extra dev
         working-directory: .
-      - name: Install dependencies
-        run: npm ci
+      - name: Install dependencies + Electron runtime
+        run: |
+          npm ci
+          node node_modules/electron/install.js
       - name: Cache Playwright browsers
         uses: actions/cache@v4
         with:

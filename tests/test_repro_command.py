@@ -6,10 +6,10 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import pytest
+
 if TYPE_CHECKING:
     from types import ModuleType
-
-    import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -121,6 +121,25 @@ def test_preflight_ready_with_dependencies_and_xvfb(
     )
 
 
+def test_electron_probe_is_side_effect_free_and_bounded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    electron = tmp_path / "node_modules/electron"
+    binary = electron / "dist/electron"
+    binary.parent.mkdir(parents=True)
+    binary.write_bytes(b"binary")
+    (electron / "path.txt").write_text("electron\n", encoding="utf-8")
+    monkeypatch.setattr(
+        repro,
+        "_probe",
+        lambda *_args, **_kwargs: pytest.fail("Electron readiness must not execute Node"),
+    )
+    assert repro._electron_executable(tmp_path) == binary
+
+    (electron / "path.txt").write_text("../../outside\n", encoding="utf-8")
+    assert repro._electron_executable(tmp_path) is None
+
+
 def test_check_only_distinguishes_unavailable_environment(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -164,3 +183,16 @@ def test_ci_app_and_extension_jobs_use_unified_command() -> None:
     workflow = (REPO_ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
     assert "python3 scripts/repro.py extension" in workflow
     assert "uv run python scripts/repro.py app" in workflow
+
+
+def test_ci_materializes_electron_before_app_preflight() -> None:
+    workflow = (REPO_ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+    assert "node node_modules/electron/install.js" in workflow
+
+
+def test_ci_electron_install_is_scoped_to_app_e2e() -> None:
+    workflow = (REPO_ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+    before_app, app_job = workflow.split("  app-e2e:", maxsplit=1)
+    command = "node node_modules/electron/install.js"
+    assert command not in before_app
+    assert app_job.count(command) == 1
