@@ -7,6 +7,7 @@ import hashlib
 from html.parser import HTMLParser
 from importlib.resources import files
 
+from podcast_reader.engine.script_policy import ScriptPin, compile_script_policy
 from podcast_reader.html import (
     _RAIL_SCRIPT,
     _RAIL_SCRIPT_V1,
@@ -36,30 +37,55 @@ _SYNC_V2 = _text(_SYNC_SCRIPT)
 _SEARCH_V1 = _text(_SEARCH_SCRIPT_V1)
 _SEARCH_V2 = _text(_SEARCH_SCRIPT)
 
+_TRANSCRIPT_SCRIPT_PINS = (
+    ScriptPin(
+        "scroll-v1", _SCROLL, "4918667b859797821d76ba6b013c4e7302955a8e3a97bf35f9808804cf218edb"
+    ),
+    ScriptPin(
+        "rail-v1", _RAIL_V1, "cf52a37bfb57285a94f6bf25e65b399e0a2f826dfa224b817c70f993b3cadc80"
+    ),
+    ScriptPin(
+        "rail-v2", _RAIL_V2, "51a9806b953ed0866c0213bbad4efd52b42eb52feb1704975a9508d26ab27a46"
+    ),
+    ScriptPin(
+        "sync-v1", _SYNC_V1, "3681c1372593523cbceba3ffaacc9ccf3adfc67279da8bcd89ad102257296d97"
+    ),
+    ScriptPin(
+        "sync-v2", _SYNC_V2, "36da7e8aa7c5f869f042ad7dd4a49034de6487c653e9ce68cc81da48c552b9ba"
+    ),
+    ScriptPin(
+        "search-v1", _SEARCH_V1, "63b437ad235772db86afd9932809a3697edc7adb9e93d3e1708033b1db822d82"
+    ),
+    ScriptPin(
+        "search-v2", _SEARCH_V2, "c77ddac5429f5d047b1f08b3430f787536832e6f11f2f9d223216e98c83988c6"
+    ),
+)
+
 # Compatibility starts at the first private-web CSP release (#83). At that
 # boundary the renderer emitted the V1 rail/sync texts below; singleton shapes
-# remain accepted for older empty/pre-combination artifacts. New artifacts use
-# one of the exact V2 tuples, including the first search release for persisted
-# artifacts. Arbitrary subsets/orders are never blessed.
-_ALLOWED_SCRIPT_SEQUENCES = frozenset(
-    {
-        (),
-        (_SCROLL,),
-        (_RAIL_V1,),
-        (_SYNC_V1,),
-        (_SCROLL, _SYNC_V1),
-        (_RAIL_V1, _SYNC_V1),
-        (_SYNC_V2, _SEARCH_V1),
-        (_RAIL_V2, _SYNC_V2, _SEARCH_V1),
-        (_SCROLL, _SYNC_V2, _SEARCH_V1),
-        (_SYNC_V2, _SEARCH_V2),
-        (_RAIL_V2, _SYNC_V2, _SEARCH_V2),
-        (_SCROLL, _SYNC_V2, _SEARCH_V2),
-    }
+# remain accepted for older empty/pre-combination artifacts. Search V1 remains
+# authorized only in its exact just-shipped tuples from #90. Arbitrary subsets,
+# orders, and mixes are never blessed.
+_TRANSCRIPT_SCRIPT_SEQUENCE_NAMES = (
+    (),
+    ("scroll-v1",),
+    ("rail-v1",),
+    ("sync-v1",),
+    ("scroll-v1", "sync-v1"),
+    ("rail-v1", "sync-v1"),
+    ("sync-v2", "search-v1"),
+    ("rail-v2", "sync-v2", "search-v1"),
+    ("scroll-v1", "sync-v2", "search-v1"),
+    ("sync-v2", "search-v2"),
+    ("rail-v2", "sync-v2", "search-v2"),
+    ("scroll-v1", "sync-v2", "search-v2"),
 )
-_ALLOWED_SCRIPT_TEXT = frozenset(
-    text for sequence in _ALLOWED_SCRIPT_SEQUENCES for text in sequence
+_TRANSCRIPT_SCRIPT_POLICY = compile_script_policy(
+    _TRANSCRIPT_SCRIPT_PINS, _TRANSCRIPT_SCRIPT_SEQUENCE_NAMES
 )
+# A bad or stale pin makes this empty: transcript_csp then emits script-src
+# 'none' rather than silently blessing edited text.
+_ALLOWED_SCRIPT_SEQUENCES = _TRANSCRIPT_SCRIPT_POLICY.sequences
 _EXPECTED_SCRIPT_SHAPES = {
     (_SYNC_V2, _SEARCH_V1): ("empty", True),
     (_RAIL_V2, _SYNC_V2, _SEARCH_V1): ("rail", True),
