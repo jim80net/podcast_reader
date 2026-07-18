@@ -105,6 +105,7 @@ For speaker diarization, set `HF_TOKEN` and accept model terms at:
 | `src/podcast_reader/html.py` | Styled canonical HTML renderer with chapters/speakers, media sync, and private literal find-within-transcript (keyboard/IME, bounded index, mutation guard) |
 | `src/podcast_reader/web_assets/` | Dependency-free private-web pairing, library, library-wide search, and sandboxed transcript Reader shell |
 | `scripts/measure-private-search-capacity.ps1` | Aggregate-only real-library size/coverage probe for the shipped private-search scan limits; emits no titles, text, URLs, queries, or paths |
+| `scripts/walk_repros.py` + `docs/walk-repros/` | Fail-closed weekly-walk repro ingestion: explicit temporary-artifact quarantine, hashes, durable disposition manifests, prior-implementation failure proof, and hostile controls for integrity-sensitive fixes |
 | `pyproject.toml` | Dependencies, entry point, tool configuration |
 
 ### Desktop app (`app/` — independent npm package, see `app/README.md`)
@@ -199,6 +200,9 @@ uv run pytest
 # Refresh the golden HTML fixtures after intentional renderer changes
 # (includes the longform golden measured by app/tests/e2e/artifact-geometry.spec.ts)
 uv run python tests/regen_goldens.py
+
+# Verify every captured product-walk artifact has durable evidence or a reasoned discard
+uv run python scripts/walk_repros.py verify docs/walk-repros/*.json
 
 # Type checking (strict mode)
 uv run mypy src/

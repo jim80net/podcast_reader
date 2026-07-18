@@ -14,6 +14,10 @@
 # Superpowers brainstorm sessions
 .superpowers/
 
+# Explicitly selected product-walk artifacts are quarantined here before
+# curation. The checked-in disposition manifests live under docs/walk-repros/.
+.walk-repros/
+
 # Audio files (large, download fresh)
 *.mp3
 *.wav
@@ -49,6 +53,7 @@
 !extension/**/*.json
 !extension/**/*.html
 !src/podcast_reader/web_assets/*.html
+!docs/walk-repros/*.json
 
 # Python
 __pycache__/

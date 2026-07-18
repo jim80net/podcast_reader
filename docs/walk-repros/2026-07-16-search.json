@@ -1,0 +1,54 @@
+{
+  "schema": 1,
+  "walk_id": "2026-07-16-search",
+  "captured_at": "2026-07-18T16:02:32.560074+00:00",
+  "source": {
+    "kind": "temporary",
+    "path_hint": "/tmp/pr-walk2"
+  },
+  "findings": [
+    {
+      "issue": 92,
+      "summary": "Benign browser-extension DOM decoration permanently invalidated in-transcript search, including before its first use.",
+      "integrity_sensitive": true,
+      "artifacts": [
+        {
+          "name": "repro-extension.mjs",
+          "sha256": "cd2e0b2624b69a8515dbc7188dc2cdfb04255ec7606a9a0a302e05538b8550e6",
+          "size_bytes": 2702,
+          "disposition": "regression-test",
+          "durable_paths": [
+            "app/tests/e2e/artifact-geometry.spec.ts"
+          ],
+          "rationale": "The five post-load extension vectors were normalized into the stable artifact E2E fixture; the raw driver hard-coded temporary Playwright and HTML paths.",
+          "prior_failure_verified": true
+        },
+        {
+          "name": "repro-ext-before.mjs",
+          "sha256": "b76d1482523b75434135a095fda018e750fd87a4534e0ec4878007511f187886",
+          "size_bytes": 1305,
+          "disposition": "regression-test",
+          "durable_paths": [
+            "app/tests/e2e/artifact-geometry.spec.ts"
+          ],
+          "rationale": "The mutation-before-first-search failure is part of the stable artifact E2E fixture; the raw driver depended on temporary machine paths.",
+          "prior_failure_verified": true
+        }
+      ],
+      "scenarios": [
+        "Password-manager data attribute added to the search input after search starts remains usable.",
+        "Grammarly-style body data attribute added after search starts remains usable.",
+        "Dark Reader-style inline html style added after search starts remains usable.",
+        "Dark Reader-style style node appended under head after search starts remains usable.",
+        "Extension overlay appended outside transcript content after search starts remains usable.",
+        "Benign html and body decorations applied before the first search do not poison first use."
+      ],
+      "hostile_controls": [
+        {
+          "description": "Appending text to a canonical transcript passage still invalidates search.",
+          "durable_path": "app/tests/e2e/artifact-geometry.spec.ts"
+        }
+      ]
+    }
+  ]
+}
