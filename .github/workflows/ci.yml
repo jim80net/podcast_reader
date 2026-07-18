@@ -26,12 +26,14 @@ jobs:
           wheel-smoke-venv/bin/python -c "from importlib.resources import files; root = files('podcast_reader.web_assets'); assert all(root.joinpath(name).is_file() for name in ('shell.html', 'app.js', 'app.css'))"
       - name: Unit tests
         run: uv run pytest -m "not integration" -q
+      - name: Byte-exact transcript CSP policy
+        run: uv run python scripts/csp_scripts.py check
       - name: Type check (strict)
-        run: uv run mypy src/ scripts/repro.py scripts/walk_repros.py
+        run: uv run mypy src/ scripts/csp_scripts.py scripts/repro.py scripts/walk_repros.py
       - name: Lint
-        run: uv run ruff check src/ tests/ scripts/repro.py scripts/walk_repros.py
+        run: uv run ruff check src/ tests/ scripts/csp_scripts.py scripts/repro.py scripts/walk_repros.py
       - name: Format check
-        run: uv run ruff format --check src/ tests/ scripts/repro.py scripts/walk_repros.py
+        run: uv run ruff format --check src/ tests/ scripts/csp_scripts.py scripts/repro.py scripts/walk_repros.py
 
   frozen-smoke:
     # Builds the REAL frozen engine (task 7.2 — the spike stub is retired;

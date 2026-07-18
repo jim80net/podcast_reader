@@ -8,7 +8,12 @@ import re
 
 import pytest
 
-from podcast_reader.engine.web_surface import SHELL_CSP, asset_bytes, transcript_csp
+from podcast_reader.engine.web_surface import (
+    _TRANSCRIPT_SCRIPT_POLICY,
+    SHELL_CSP,
+    asset_bytes,
+    transcript_csp,
+)
 from podcast_reader.html import (
     _RAIL_SCRIPT,
     _RAIL_SCRIPT_V1,
@@ -76,6 +81,19 @@ def test_artifact_csp_hashes_exact_emitted_text_for_each_renderer_path() -> None
     empty_csp = transcript_csp(documents[0].encode())
     assert _hash(f"\n{_SYNC_SCRIPT}") in empty_csp
     assert _hash(_SYNC_SCRIPT) not in empty_csp
+
+
+def test_transcript_script_policy_is_fully_pinned_and_coherent() -> None:
+    assert _TRANSCRIPT_SCRIPT_POLICY.errors == ()
+    assert {pin.name for pin in _TRANSCRIPT_SCRIPT_POLICY.pins} == {
+        "scroll-v1",
+        "rail-v1",
+        "rail-v2",
+        "sync-v1",
+        "sync-v2",
+        "search-v1",
+        "search-v2",
+    }
 
 
 def test_artifact_csp_preserves_exact_legacy_shapes() -> None:

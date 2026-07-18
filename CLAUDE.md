@@ -107,6 +107,7 @@ For speaker diarization, set `HF_TOKEN` and accept model terms at:
 | `scripts/measure-private-search-capacity.ps1` | Aggregate-only real-library size/coverage probe for the shipped private-search scan limits; emits no titles, text, URLs, queries, or paths |
 | `scripts/walk_repros.py` + `docs/walk-repros/` | Fail-closed weekly-walk repro ingestion: explicit temporary-artifact quarantine, hashes, durable disposition manifests, prior-implementation failure proof, and hostile controls for integrity-sensitive fixes |
 | `scripts/repro.py` + `docs/repro.md` | Root walk/browser proof command: suite discovery, focused Playwright selection, fail-fast prerequisite diagnostics, distinct environment-vs-assertion exits, and the shared CI execution path |
+| `scripts/csp_scripts.py` + `docs/csp-script-evolution.md` | Fail-closed byte-exact transcript-script pins and sequence-policy evolution: inspect/check digests, legacy decisions, hostile controls, goldens, retirement |
 | `pyproject.toml` | Dependencies, entry point, tool configuration |
 
 ### Desktop app (`app/` — independent npm package, see `app/README.md`)
