@@ -27,11 +27,11 @@ jobs:
       - name: Unit tests
         run: uv run pytest -m "not integration" -q
       - name: Type check (strict)
-        run: uv run mypy src/
+        run: uv run mypy src/ scripts/repro.py scripts/walk_repros.py
       - name: Lint
-        run: uv run ruff check src/ tests/
+        run: uv run ruff check src/ tests/ scripts/repro.py scripts/walk_repros.py
       - name: Format check
-        run: uv run ruff format --check src/ tests/
+        run: uv run ruff format --check src/ tests/ scripts/repro.py scripts/walk_repros.py
 
   frozen-smoke:
     # Builds the REAL frozen engine (task 7.2 — the spike stub is retired;
@@ -181,8 +181,6 @@ jobs:
         run: npm run lint
       - name: Unit tests
         run: npm run test
-      - name: Build (vite MV3 + deterministic zip)
-        run: npm run build
       - name: Cache Playwright browsers
         uses: actions/cache@v4
         with:
@@ -190,8 +188,9 @@ jobs:
           key: playwright-${{ runner.os }}-${{ hashFiles('extension/package-lock.json') }}
       - name: Install Playwright chromium
         run: npx playwright install chromium
-      - name: Mock-engine e2e (xvfb — extensions need a headed Chromium)
-        run: xvfb-run -a npx playwright test
+      - name: Build + mock-engine e2e (unified diagnosed repro path)
+        run: python3 scripts/repro.py extension
+        working-directory: .
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
@@ -220,8 +219,10 @@ jobs:
       - name: Sync Python engine (dev posture for the real-engine smoke)
         run: uv sync --extra dev
         working-directory: .
-      - name: Install dependencies
-        run: npm ci
+      - name: Install dependencies + Electron runtime
+        run: |
+          npm ci
+          node node_modules/electron/install.js
       - name: Cache Playwright browsers
         uses: actions/cache@v4
         with:
@@ -229,10 +230,9 @@ jobs:
           key: playwright-${{ runner.os }}-${{ hashFiles('app/package-lock.json') }}
       - name: Install Playwright chromium
         run: npx playwright install chromium
-      - name: Build app
-        run: npm run build
-      - name: Mock-engine e2e + real-engine smoke (xvfb)
-        run: xvfb-run -a npx playwright test
+      - name: Build + mock-engine e2e + real-engine smoke (unified diagnosed repro path)
+        run: uv run python scripts/repro.py app
+        working-directory: .
       - uses: actions/upload-artifact@v4
         if: always()
         with:

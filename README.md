@@ -332,6 +332,16 @@ environment variable instead; a pushed key takes precedence.
 
 See [CLAUDE.md](CLAUDE.md) for the package structure and pipeline details.
 
+The primary weekly-walk and browser repro entry point diagnoses local
+prerequisites before it starts. See [the repro guide](docs/repro.md) for suites,
+focused selection, and the environment-unavailable exit contract.
+
+```bash
+python3 scripts/repro.py              # weekly walk proof
+python3 scripts/repro.py all          # walk + desktop + extension E2E
+python3 scripts/repro.py all --check-only
+```
+
 ```bash
 # Run tests (unit only)
 uv run pytest -m "not integration"
