@@ -218,6 +218,51 @@ h1 {
   letter-spacing: 0.04em;
 }
 
+/* ---- TRANSCRIPT EXPORT ---- */
+.transcript-export {
+  position: fixed;
+  right: 1rem;
+  bottom: 1rem;
+  z-index: 40;
+  width: min(22rem, calc(100vw - 2rem));
+  max-height: calc(100vh - 2rem);
+  padding: 0.4rem;
+  overflow-y: auto;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  box-shadow: 0 0.2rem 0.8rem rgba(0, 0, 0, 0.2);
+}
+.transcript-export button,
+.transcript-export select,
+.transcript-export textarea {
+  min-height: 44px;
+  color: var(--text-bright);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+}
+.transcript-export button { padding: 0.55rem 0.75rem; cursor: pointer; }
+.transcript-export button:focus-visible,
+.transcript-export select:focus-visible,
+.transcript-export textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.transcript-export-toggle { width: 100%; text-align: left; }
+.transcript-export-panel[hidden],
+.transcript-export-output[hidden] { display: none; }
+.transcript-export-panel { display: grid; gap: 0.65rem; margin-top: 0.65rem; }
+.transcript-export-options { display: grid; grid-template-columns: 1fr 1fr; gap: 0.65rem; }
+.transcript-export-field { display: grid; gap: 0.25rem; color: var(--muted); font-size: 0.78rem; }
+.transcript-export-field select { width: 100%; padding: 0.5rem; }
+.transcript-export-timestamps {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: var(--muted);
+}
+.transcript-export-timestamps input { width: 1rem; height: 1rem; }
+.transcript-export-output { width: 100%; min-height: 8rem; padding: 0.65rem; resize: vertical; }
+.transcript-export-status { min-height: 1.3rem; color: var(--muted); font-size: 0.82rem; }
+
 /* ---- KEYLESS TIMELINE ---- */
 .timeline-nav {
   position: sticky;
@@ -553,6 +598,7 @@ footer {
     clip-path: inset(50%);
     white-space: nowrap;
   }
+  .transcript-export-options { grid-template-columns: 1fr; }
   body.transcript-search-active .timeline-label { display: none; }
 }
 </style>
@@ -563,6 +609,33 @@ footer {
 <header>
   <h1>Near-hour Test Episode</h1>
   <div class="meta">1 hr of audio &middot; ~1,300 words &middot; about 6 min to read &middot; Auto-transcribed with test</div>
+<div class="transcript-export">
+  <button type="button" class="transcript-export-toggle"
+          aria-controls="transcript-export-panel" aria-expanded="false">Copy transcript</button>
+  <div id="transcript-export-panel" class="transcript-export-panel" hidden>
+    <div class="transcript-export-options">
+      <label class="transcript-export-field" for="transcript-export-format">Format
+        <select id="transcript-export-format" class="transcript-export-format">
+          <option value="text">Plain text</option>
+          <option value="markdown">Markdown</option>
+        </select>
+      </label>
+      <label class="transcript-export-field" for="transcript-export-scope">Copy
+        <select id="transcript-export-scope" class="transcript-export-scope">
+          <option value="all">Whole transcript</option>
+          <option value="chapter">Current chapter</option>
+        </select>
+      </label>
+    </div>
+    <label class="transcript-export-timestamps">
+      <input type="checkbox" class="transcript-export-include-timestamps"> Include timestamps
+    </label>
+    <button type="button" class="transcript-export-copy">Copy</button>
+    <textarea class="transcript-export-output" readonly hidden
+              aria-label="Transcript export text"></textarea>
+    <p class="transcript-export-status" role="status" aria-live="polite"></p>
+  </div>
+</div>
 </header>
 <div class="transcript-search" role="search">
   <button type="button" class="transcript-search-toggle"
@@ -1361,6 +1434,183 @@ footer {
     if (rail) resizeObserver.observe(rail);
   }
   layout();
+})();
+</script>
+<script>
+(function() {
+  var root = document.querySelector('.transcript-export');
+  var main = document.querySelector('div#content > main');
+  var title = document.querySelector('div#content > header > h1');
+  if (!root || !main || !title) return;
+  var opener = root.querySelector('.transcript-export-toggle');
+  var panel = root.querySelector('.transcript-export-panel');
+  var format = root.querySelector('.transcript-export-format');
+  var scope = root.querySelector('.transcript-export-scope');
+  var timestamps = root.querySelector('.transcript-export-include-timestamps');
+  var copy = root.querySelector('.transcript-export-copy');
+  var output = root.querySelector('.transcript-export-output');
+  var status = root.querySelector('.transcript-export-status');
+  if (!opener || !panel || !format || !scope || !timestamps || !copy || !output || !status) {
+    return;
+  }
+
+  var chapters = Array.prototype.slice.call(main.querySelectorAll(':scope > .chapter-section'));
+  var chapterOption = scope.querySelector('option[value="chapter"]');
+  if (chapterOption) chapterOption.disabled = chapters.length === 0;
+
+  function setOpen(open) {
+    opener.setAttribute('aria-expanded', open ? 'true' : 'false');
+    panel.hidden = !open;
+  }
+
+  function currentChapter() {
+    if (!chapters.length) return null;
+    var targeted = document.querySelector(':target');
+    if (targeted && chapters.indexOf(targeted) !== -1) return targeted;
+    var activePassage = main.querySelector('.search-match-active, .sync-active');
+    var activeChapter = activePassage && activePassage.closest('.chapter-section');
+    if (activeChapter && chapters.indexOf(activeChapter) !== -1) return activeChapter;
+    var line = Math.max(0, Math.min(window.innerHeight - 1, window.innerHeight * 0.35));
+    var current = chapters[0];
+    chapters.forEach(function(chapter) {
+      var rect = chapter.getBoundingClientRect();
+      if (rect.top <= line) current = chapter;
+    });
+    return current;
+  }
+
+  function passageParts(passage) {
+    var timestamp = passage.querySelector(':scope > .ts');
+    if (!timestamp) return null;
+    var speaker = passage.querySelector(':scope > .speaker');
+    var node = timestamp.nextSibling;
+    var text = '';
+    while (node) {
+      text += node.textContent || '';
+      node = node.nextSibling;
+    }
+    if (text.charAt(0) !== ' ') return null;
+    return {
+      speaker: speaker ? speaker.textContent || '' : '',
+      timestamp: timestamp.textContent || '',
+      text: text.slice(1)
+    };
+  }
+
+  function chapterTitle(chapter) {
+    var heading = chapter.querySelector(':scope > .chapter-main > h2');
+    var timestamp = heading && heading.querySelector(':scope > .ts');
+    if (!heading || !timestamp) return '';
+    var node = timestamp.nextSibling;
+    var text = '';
+    var hadBadge = false;
+    while (node) {
+      if (node.nodeType === Node.ELEMENT_NODE && node.classList.contains('badge')) {
+        hadBadge = true;
+      } else {
+        text += node.textContent || '';
+      }
+      node = node.nextSibling;
+    }
+    if (text.charAt(0) === ' ') text = text.slice(1);
+    if (hadBadge && text.charAt(text.length - 1) === ' ') text = text.slice(0, -1);
+    return text;
+  }
+
+  function markdownLabel(text) {
+    return text.replace(/([\`*_#])/g, '\$1');
+  }
+
+  function appendPassages(blocks, container, markdown, includeTimestamps) {
+    var passages = container.querySelectorAll('p[data-start][data-end]');
+    Array.prototype.forEach.call(passages, function(passage) {
+      var parts = passageParts(passage);
+      if (!parts) return;
+      if (parts.speaker) {
+        blocks.push(markdown ? '**' + markdownLabel(parts.speaker) + '**' : parts.speaker);
+      }
+      blocks.push((includeTimestamps ? '[' + parts.timestamp + '] ' : '') + parts.text);
+    });
+    return passages.length;
+  }
+
+  function buildExport() {
+    var markdown = format.value === 'markdown';
+    var includeTimestamps = timestamps.checked;
+    var documentTitle = title.textContent || '';
+    var blocks = [markdown ? '# ' + markdownLabel(documentTitle) : documentTitle];
+    var count = 0;
+    if (scope.value === 'chapter' && chapters.length) {
+      var selected = currentChapter();
+      if (selected) {
+        var selectedTitle = chapterTitle(selected);
+        if (selectedTitle) {
+          blocks.push(markdown ? '## ' + markdownLabel(selectedTitle) : selectedTitle);
+        }
+        count += appendPassages(blocks, selected, markdown, includeTimestamps);
+      }
+    } else if (chapters.length) {
+      chapters.forEach(function(chapter) {
+        var heading = chapterTitle(chapter);
+        if (heading) blocks.push(markdown ? '## ' + markdownLabel(heading) : heading);
+        count += appendPassages(blocks, chapter, markdown, includeTimestamps);
+      });
+    } else {
+      count += appendPassages(blocks, main, markdown, includeTimestamps);
+    }
+    return count ? blocks.join('\n\n') + '\n' : '';
+  }
+
+  function selectOutput(text) {
+    output.value = text;
+    output.hidden = false;
+    output.focus();
+    output.select();
+  }
+
+  async function copyExport() {
+    var text = buildExport();
+    if (!text) {
+      status.textContent = 'This transcript has no exportable passages.';
+      return;
+    }
+    selectOutput(text);
+    var copied = false;
+    try {
+      if (window.isSecureContext && navigator.clipboard && navigator.clipboard.writeText) {
+        copied = await Promise.race([
+          navigator.clipboard.writeText(text).then(function() { return true; }, function() {
+            return false;
+          }),
+          new Promise(function(resolve) { setTimeout(function() { resolve(false); }, 1000); })
+        ]);
+      }
+    } catch (_) {
+      copied = false;
+    }
+    if (!copied) {
+      selectOutput(text);
+      try {
+        copied = document.execCommand('copy');
+      } catch (_) {
+        copied = false;
+      }
+    }
+    if (copied) {
+      status.textContent = 'Copied to the clipboard.';
+    } else {
+      selectOutput(text);
+      status.textContent =
+        'Clipboard access is unavailable in this reader. The export text is selected; ' +
+        'press Ctrl+C or Command+C.';
+    }
+  }
+
+  opener.addEventListener('click', function() {
+    setOpen(panel.hidden);
+    if (!panel.hidden) format.focus();
+  });
+  copy.addEventListener('click', copyExport);
 })();
 </script>
 </body>

@@ -32,6 +32,77 @@ const chapteredArtifactUrl = pathToFileURL(
 const searchArtifactUrl = pathToFileURL(
   path.resolve(__dirname, '../../../tests/fixtures/sample_expected_search.html')
 ).href
+const exportArtifactPath = path.resolve(
+  __dirname,
+  '../../../tests/fixtures/sample_expected_export.html'
+)
+const exportArtifactUrl = pathToFileURL(exportArtifactPath).href
+
+test('transcript export preserves Korean/CJK bytes and offers an honest opaque fallback (#101)', async () => {
+  const browser = await chromium.launch()
+  try {
+    const page = await browser.newPage({ viewport: { width: 390, height: 844 } })
+    await page.goto(exportArtifactUrl)
+    await page.evaluate(() => {
+      Object.defineProperty(navigator, 'clipboard', {
+        configurable: true,
+        value: {
+          writeText: async (text: string) => {
+            ;(window as unknown as { __copiedText: string }).__copiedText = text
+          }
+        }
+      })
+    })
+    const opener = page.getByRole('button', { name: 'Copy transcript' })
+    await opener.click()
+    const timestampToggle = page.getByRole('checkbox', { name: 'Include timestamps' })
+    await expect(timestampToggle).not.toBeChecked()
+    await page.getByRole('button', { name: 'Copy', exact: true }).click()
+    const expectedPlain =
+      '한국어 인용\n\n시작\n\nSpeaker 1\n\n한글 NFC와 한글 NFD를 그대로 보존합니다.\n\n' +
+        '인용\n\nSpeaker 2\n\n引用에는 中文과 日本語도 함께 있습니다.\n'
+    await expect(page.getByLabel('Transcript export text')).toHaveValue(expectedPlain)
+    expect(
+      await page.evaluate(
+        () => (window as unknown as { __copiedText: string }).__copiedText
+      )
+    ).toBe(expectedPlain)
+
+    const source = await readFile(exportArtifactPath, 'utf8')
+    await page.setContent(
+      '<style>html,body{margin:0}iframe{width:100%;height:800px;border:0}</style>' +
+        '<iframe sandbox="allow-scripts"></iframe>'
+    )
+    await page.locator('iframe').evaluate((node, documentSource) => {
+      ;(node as HTMLIFrameElement).srcdoc = documentSource
+    }, source)
+    const frame = page.frameLocator('iframe')
+    await frame.locator('html').evaluate(() => {
+      location.hash = '#ch-인용'
+    })
+    await frame.getByRole('button', { name: 'Copy transcript' }).click()
+    await frame.getByLabel('Format').selectOption('markdown')
+    await frame.getByLabel('Copy').selectOption('chapter')
+    await frame.getByRole('checkbox', { name: 'Include timestamps' }).check()
+    await frame.locator('html').evaluate(() => {
+      document.execCommand = () => false
+    })
+    await frame.getByRole('button', { name: 'Copy', exact: true }).click()
+    const output = frame.getByLabel('Transcript export text')
+    await expect(output).toHaveValue(
+      '# 한국어 인용\n\n## 인용\n\n**Speaker 2**\n\n[00:00:10] 引用에는 中文과 日本語도 함께 있습니다.\n'
+    )
+    await expect(frame.getByRole('status').filter({ hasText: 'Clipboard access is unavailable' }))
+      .toContainText('press Ctrl+C or Command+C')
+    const selection = await output.evaluate((node) => {
+      const field = node as HTMLTextAreaElement
+      return { start: field.selectionStart, end: field.selectionEnd, length: field.value.length }
+    })
+    expect(selection).toEqual({ start: 0, end: selection.length, length: selection.length })
+  } finally {
+    await browser.close()
+  }
+})
 
 test('search tolerates extension decoration but rejects transcript mutation (#92)', async () => {
   const browser = await chromium.launch()

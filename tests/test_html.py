@@ -330,6 +330,28 @@ class TestTranscriptSearch:
         assert "--transcript-search-height" in html
 
 
+class TestTranscriptExport:
+    def test_emits_accessible_default_private_export_controls_and_script(self) -> None:
+        from podcast_reader.html import _EXPORT_SCRIPT, build_html
+
+        html = build_html(
+            [{"start": 0.0, "end": 2.0, "text": "그대로 보존합니다."}],
+            title="한국어",
+            sentences_per_para=1,
+            source="test",
+        )
+
+        assert 'aria-controls="transcript-export-panel"' in html
+        assert '<option value="text">Plain text</option>' in html
+        assert '<option value="all">Whole transcript</option>' in html
+        assert 'class="transcript-export-include-timestamps"' in html
+        assert 'class="transcript-export-include-timestamps" checked' not in html
+        assert 'aria-label="Transcript export text"' in html
+        assert f"<script>\n{_EXPORT_SCRIPT}</script>" in html
+        for network_primitive in ("fetch(", "XMLHttpRequest", "WebSocket", "sendBeacon"):
+            assert network_primitive not in _EXPORT_SCRIPT
+
+
 class TestKeylessTimeline:
     def test_no_chapters_gets_coarse_timestamp_landmarks_and_upsell(self) -> None:
         from podcast_reader.html import build_html
@@ -979,6 +1001,20 @@ class TestBuildHtmlIntegration:
         )
 
         assert result == (FIXTURES / "sample_expected_search.html").read_text()
+
+    def test_multilingual_export_golden_stays_current(self) -> None:
+        from podcast_reader.html import build_html
+        from tests.regen_goldens import _export_chapters, _export_segments
+
+        result = build_html(
+            _export_segments(),
+            title="한국어 인용",
+            chapters=_export_chapters(),
+            sentences_per_para=1,
+            source="test",
+        )
+
+        assert result == (FIXTURES / "sample_expected_export.html").read_text()
 
     def test_full_pipeline_with_chapters(self) -> None:
         """Integration test: whisper JSON + chapters JSON -> HTML matches expected output."""

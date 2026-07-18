@@ -16,6 +16,8 @@ Goldens:
   that proves the #72 at-rest density boundary in the same browser suite.
 - ``sample_expected_search.html`` — multilingual repeated passages for the
   renderer-level search interaction/privacy suite (#88).
+- ``sample_expected_export.html`` — chaptered Korean/CJK + speaker fixture for
+  byte-exact plain-text/Markdown export and sandbox clipboard fallback (#101).
 """
 
 from __future__ import annotations
@@ -45,6 +47,44 @@ def _near_hour_segments() -> list[dict[str, object]]:
             ),
         }
         for minute in range(60)
+    ]
+
+
+def _export_segments() -> list[dict[str, object]]:
+    return [
+        {
+            "start": 0.0,
+            "end": 10.0,
+            "text": "한글 NFC와 한글 NFD를 그대로 보존합니다.",
+            "speaker": "SPEAKER_00",
+        },
+        {
+            "start": 10.0,
+            "end": 20.0,
+            "text": "引用에는 中文과 日本語도 함께 있습니다.",
+            "speaker": "SPEAKER_01",
+        },
+    ]
+
+
+def _export_chapters() -> list[dict[str, object]]:
+    return [
+        {
+            "start": 0.0,
+            "end": 10.0,
+            "title": "시작",
+            "abstract": "첫 장입니다.",
+            "type": "intro",
+            "key_points": [],
+        },
+        {
+            "start": 10.0,
+            "end": 20.0,
+            "title": "인용",
+            "abstract": "둘째 장입니다.",
+            "type": "content",
+            "key_points": [],
+        },
     ]
 
 
@@ -81,6 +121,15 @@ def main() -> None:
                 {"start": 40.0, "end": 50.0, "text": "RESILIENCE returns in the closing evidence."},
             ],
             title="Search Test Episode",
+            sentences_per_para=1,
+            source="test",
+        )
+    )
+    (FIXTURES / "sample_expected_export.html").write_text(
+        build_html(
+            _export_segments(),
+            title="한국어 인용",
+            chapters=_export_chapters(),
             sentences_per_para=1,
             source="test",
         )
