@@ -39,6 +39,13 @@ text, repeated member, duplicate tuple, or orphaned pin makes the compiled allow
 empty, so transcript responses authorize no inline script. CI runs the checker to
 give the contributor the exact repair instead of discovering the failure in-browser.
 
+The first post-playbook evolution is transcript export (#101): `export-v1` is a
+new literal pin appended only to the three current `sync-v2` + `search-v2`
+renderer tuples. The three pre-export current tuples remain byte-exact for stored
+artifacts, while a `search-v1` + `export-v1` mix is a hostile rejection control.
+This is the reference shape for adding a capability without blessing a tuple
+cross-product.
+
 ## Retire a legacy sequence
 
 Remove the old complete tuples first, with release-age evidence in the PR. Then

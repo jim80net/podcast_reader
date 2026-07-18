@@ -9,6 +9,7 @@ from importlib.resources import files
 
 from podcast_reader.engine.script_policy import ScriptPin, compile_script_policy
 from podcast_reader.html import (
+    _EXPORT_SCRIPT,
     _RAIL_SCRIPT,
     _RAIL_SCRIPT_V1,
     _SCROLL_SCRIPT,
@@ -36,6 +37,7 @@ _SYNC_V1 = _text(_SYNC_SCRIPT_V1)
 _SYNC_V2 = _text(_SYNC_SCRIPT)
 _SEARCH_V1 = _text(_SEARCH_SCRIPT_V1)
 _SEARCH_V2 = _text(_SEARCH_SCRIPT)
+_EXPORT_V1 = _text(_EXPORT_SCRIPT)
 
 _TRANSCRIPT_SCRIPT_PINS = (
     ScriptPin(
@@ -59,6 +61,9 @@ _TRANSCRIPT_SCRIPT_PINS = (
     ScriptPin(
         "search-v2", _SEARCH_V2, "c77ddac5429f5d047b1f08b3430f787536832e6f11f2f9d223216e98c83988c6"
     ),
+    ScriptPin(
+        "export-v1", _EXPORT_V1, "acd2b0de74c66942282339dfd5fc86b64fb21d4594c06179a495dd8b81b6c2dc"
+    ),
 )
 
 # Compatibility starts at the first private-web CSP release (#83). At that
@@ -79,6 +84,9 @@ _TRANSCRIPT_SCRIPT_SEQUENCE_NAMES = (
     ("sync-v2", "search-v2"),
     ("rail-v2", "sync-v2", "search-v2"),
     ("scroll-v1", "sync-v2", "search-v2"),
+    ("sync-v2", "search-v2", "export-v1"),
+    ("rail-v2", "sync-v2", "search-v2", "export-v1"),
+    ("scroll-v1", "sync-v2", "search-v2", "export-v1"),
 )
 _TRANSCRIPT_SCRIPT_POLICY = compile_script_policy(
     _TRANSCRIPT_SCRIPT_PINS, _TRANSCRIPT_SCRIPT_SEQUENCE_NAMES
@@ -93,6 +101,9 @@ _EXPECTED_SCRIPT_SHAPES = {
     (_SYNC_V2, _SEARCH_V2): ("empty", True),
     (_RAIL_V2, _SYNC_V2, _SEARCH_V2): ("rail", True),
     (_SCROLL, _SYNC_V2, _SEARCH_V2): ("sidebar", True),
+    (_SYNC_V2, _SEARCH_V2, _EXPORT_V1): ("empty", True),
+    (_RAIL_V2, _SYNC_V2, _SEARCH_V2, _EXPORT_V1): ("rail", True),
+    (_SCROLL, _SYNC_V2, _SEARCH_V2, _EXPORT_V1): ("sidebar", True),
 }
 _VOID_TAGS = frozenset(
     {
