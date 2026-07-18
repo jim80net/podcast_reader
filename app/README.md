@@ -7,7 +7,7 @@ HTTP/SSE happens in the main process and crosses to the UI over typed IPC).
 
 ## Development
 
-Requires Node >= 20 and (for the dev engine posture) the repo's Python
+Requires Node >= 24 and (for the dev engine posture) the repo's Python
 toolchain (`uv sync --extra dev` at the repo root).
 
 ```bash
@@ -18,20 +18,24 @@ npm run test       # vitest unit tests
 npm run typecheck  # tsc --noEmit (node + web + e2e projects)
 npm run lint       # eslint
 npm run build      # electron-vite production build into out/
-npm run e2e        # Playwright e2e against the mock engine (build first)
+python3 ../scripts/repro.py app  # build + diagnosed mock/real-engine Playwright
 npm run dist       # build + electron-builder installers (see Packaging)
 ```
 
 ## End-to-end tests
 
-The Playwright suite launches the BUILT app (`npm run build` first; on
-headless hosts wrap in `xvfb-run -a`):
+The root repro command diagnoses Node, Python, Electron, Chromium, and display
+support, builds the app, and launches both Playwright projects (using Xvfb
+automatically on headless Linux):
 
 ```bash
-npm run build
-xvfb-run -a npx playwright test                 # both projects
-npm run e2e                                     # mock-engine project only
-npm run e2e:integration                         # real-engine smoke only
+python3 scripts/repro.py app                     # from the repository root
+python3 scripts/repro.py app --grep "Library"    # focused title match
+python3 scripts/repro.py app --check-only        # prerequisites only
+
+# Lower-level drill-down from the repository root
+(cd app && npm run e2e)                         # mock-engine project only
+(cd app && npm run e2e:integration)             # real-engine smoke only
 ```
 
 - **`e2e` project** — runs against the mock engine

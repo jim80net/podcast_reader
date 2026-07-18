@@ -57,11 +57,14 @@ so the loop is `npm run build` → reload the extension (`chrome://extensions`
 ### E2e (Playwright)
 
 ```bash
-npm run build                  # the suite loads the real dist/
-npm run e2e                    # xvfb-run -a npm run e2e on headless hosts
+python3 scripts/repro.py extension              # from the repository root
+python3 scripts/repro.py extension --grep jobs  # focused title match
+python3 scripts/repro.py extension --check-only # prerequisites only
 ```
 
-The harness (`tests/e2e/fixtures.ts`) spawns the app's scriptable mock
+The root command diagnoses Node, Chromium, and display support, builds the real
+extension, and uses Xvfb automatically on headless Linux. The harness
+(`tests/e2e/fixtures.ts`) spawns the app's scriptable mock
 engine (`../app/tests/mock-engine/server.ts`) and launches a persistent
 Chromium context with `--load-extension` — extensions need a headed
 Chromium, hence xvfb in CI (the `extension` job in
