@@ -218,9 +218,11 @@ await page.evaluate((href) => {
 }, readerHref)
 const readerFrame = page.locator('iframe.reader-frame')
 await readerFrame.waitFor({ timeout: WIZARD_TIMEOUT_MS })
+// Wait for a canonical transcript passage, not the first generic paragraph:
+// controls may contain hidden live-region <p> elements before <main> (#101).
 await page
   .frameLocator('iframe.reader-frame')
-  .locator('p')
+  .locator('p[data-start][data-end]')
   .first()
   .waitFor({ timeout: WIZARD_TIMEOUT_MS })
 await page.screenshot({ path: join(outDir, '04-reader-transcript.png') })
