@@ -2025,7 +2025,7 @@ _SEARCH_SCRIPT_V1 = """\
 # compatibility.  The corrected script is derived with narrow, reviewable
 # substitutions so the legacy text cannot drift unnoticed (its digest is pinned
 # in the web-surface tests).
-_SEARCH_SCRIPT = (
+_SEARCH_SCRIPT_V2 = (
     _SEARCH_SCRIPT_V1.replace(
         """  function exactAttributeValues(node, expected) {
     var names = Object.keys(expected);
@@ -2152,6 +2152,22 @@ _SEARCH_SCRIPT = (
   observeMutations();
 """,
     )
+)
+
+# Search V3 keeps V2 byte-exact for recently rendered private-web artifacts and
+# broadens only visual decoration on the search input.  The canonical semantic
+# attributes above remain exact, while style changes cannot affect the indexed
+# transcript or the search-control contract.
+_SEARCH_SCRIPT = _SEARCH_SCRIPT_V2.replace(
+    "return names.indexOf(attribute.name) !== -1 || /^data-/.test(attribute.name);",
+    "return names.indexOf(attribute.name) !== -1 || attribute.name === 'style' || "
+    "/^data-/.test(attribute.name);",
+).replace(
+    "return record.type === 'attributes' && /^data-/.test(record.attributeName || '') &&\n"
+    "        canonicalSearchRoot();",
+    "return record.type === 'attributes' && "
+    "(record.attributeName === 'style' || /^data-/.test(record.attributeName || '')) &&\n"
+    "        canonicalSearchRoot();",
 )
 
 _EXPORT_SCRIPT = """\

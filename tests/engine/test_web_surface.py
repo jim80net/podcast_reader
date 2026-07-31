@@ -22,6 +22,7 @@ from podcast_reader.html import (
     _SEARCH_HTML,
     _SEARCH_SCRIPT,
     _SEARCH_SCRIPT_V1,
+    _SEARCH_SCRIPT_V2,
     _SYNC_SCRIPT,
     _SYNC_SCRIPT_V1,
     build_html,
@@ -94,6 +95,7 @@ def test_transcript_script_policy_is_fully_pinned_and_coherent() -> None:
         "sync-v2",
         "search-v1",
         "search-v2",
+        "search-v3",
         "export-v1",
     }
 
@@ -120,6 +122,12 @@ def test_legacy_search_script_digest_is_byte_stable() -> None:
     )
 
 
+def test_extension_safe_search_v2_script_digest_is_byte_stable() -> None:
+    assert hashlib.sha256(_SEARCH_SCRIPT_V2.encode()).hexdigest() == (
+        "d1eff5ae8d21da45ce7f10ef248f241559cc30afb27c7d5fa1521be803e93f6c"
+    )
+
+
 def test_artifact_csp_preserves_exact_first_search_release_tuples() -> None:
     documents = [
         build_html([], "Empty"),
@@ -142,21 +150,27 @@ def test_legacy_search_script_outside_its_exact_tuple_is_never_blessed() -> None
     assert "script-src 'none'" in transcript_csp(document)
 
 
-def test_pre_export_current_tuples_remain_byte_exact() -> None:
+def test_search_v2_tuples_remain_byte_exact() -> None:
     for current in [
         build_html([], "Empty"),
         build_html(_SEGMENTS, "Keyless"),
         build_html(_SEGMENTS, "Chaptered", chapters=_CHAPTERS),
     ]:
-        legacy = current.replace(f"\n<script>\n{_EXPORT_SCRIPT}</script>", "")
-        scripts = _SCRIPT_RE.findall(legacy)
-        actual = set(re.findall(r"'sha256-[A-Za-z0-9+/=]+'", transcript_csp(legacy.encode())))
-        assert actual == {_hash(script) for script in scripts}
+        search_v2 = current.replace(
+            f"<script>\n{_SEARCH_SCRIPT}</script>",
+            f"<script>\n{_SEARCH_SCRIPT_V2}</script>",
+        )
+        for legacy in [search_v2, search_v2.replace(f"\n<script>\n{_EXPORT_SCRIPT}</script>", "")]:
+            scripts = _SCRIPT_RE.findall(legacy)
+            actual = set(re.findall(r"'sha256-[A-Za-z0-9+/=]+'", transcript_csp(legacy.encode())))
+            assert actual == {_hash(script) for script in scripts}
 
 
 def test_export_script_only_runs_in_new_current_tuple() -> None:
     mixed = _document(f"\n{_SYNC_SCRIPT}", f"\n{_SEARCH_SCRIPT_V1}", f"\n{_EXPORT_SCRIPT}")
     assert "script-src 'none'" in transcript_csp(mixed)
+    missing_export = _document(f"\n{_SYNC_SCRIPT}", f"\n{_SEARCH_SCRIPT}")
+    assert "script-src 'none'" in transcript_csp(missing_export)
 
 
 def test_current_sync_script_uses_the_search_capacity_bounds_before_array_work() -> None:
