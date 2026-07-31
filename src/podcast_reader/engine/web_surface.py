@@ -15,6 +15,7 @@ from podcast_reader.html import (
     _SCROLL_SCRIPT,
     _SEARCH_SCRIPT,
     _SEARCH_SCRIPT_V1,
+    _SEARCH_SCRIPT_V2,
     _SYNC_SCRIPT,
     _SYNC_SCRIPT_V1,
 )
@@ -36,7 +37,8 @@ _RAIL_V2 = _text(_RAIL_SCRIPT)
 _SYNC_V1 = _text(_SYNC_SCRIPT_V1)
 _SYNC_V2 = _text(_SYNC_SCRIPT)
 _SEARCH_V1 = _text(_SEARCH_SCRIPT_V1)
-_SEARCH_V2 = _text(_SEARCH_SCRIPT)
+_SEARCH_V2 = _text(_SEARCH_SCRIPT_V2)
+_SEARCH_V3 = _text(_SEARCH_SCRIPT)
 _EXPORT_V1 = _text(_EXPORT_SCRIPT)
 
 _TRANSCRIPT_SCRIPT_PINS = (
@@ -60,6 +62,9 @@ _TRANSCRIPT_SCRIPT_PINS = (
     ),
     ScriptPin(
         "search-v2", _SEARCH_V2, "c77ddac5429f5d047b1f08b3430f787536832e6f11f2f9d223216e98c83988c6"
+    ),
+    ScriptPin(
+        "search-v3", _SEARCH_V3, "d8dfbe28ff975988556129e35c3216b624f86275fc8a9f5c0028bd8ee3626785"
     ),
     ScriptPin(
         "export-v1", _EXPORT_V1, "acd2b0de74c66942282339dfd5fc86b64fb21d4594c06179a495dd8b81b6c2dc"
@@ -87,6 +92,9 @@ _TRANSCRIPT_SCRIPT_SEQUENCE_NAMES = (
     ("sync-v2", "search-v2", "export-v1"),
     ("rail-v2", "sync-v2", "search-v2", "export-v1"),
     ("scroll-v1", "sync-v2", "search-v2", "export-v1"),
+    ("sync-v2", "search-v3", "export-v1"),
+    ("rail-v2", "sync-v2", "search-v3", "export-v1"),
+    ("scroll-v1", "sync-v2", "search-v3", "export-v1"),
 )
 _TRANSCRIPT_SCRIPT_POLICY = compile_script_policy(
     _TRANSCRIPT_SCRIPT_PINS, _TRANSCRIPT_SCRIPT_SEQUENCE_NAMES
@@ -104,6 +112,9 @@ _EXPECTED_SCRIPT_SHAPES = {
     (_SYNC_V2, _SEARCH_V2, _EXPORT_V1): ("empty", True),
     (_RAIL_V2, _SYNC_V2, _SEARCH_V2, _EXPORT_V1): ("rail", True),
     (_SCROLL, _SYNC_V2, _SEARCH_V2, _EXPORT_V1): ("sidebar", True),
+    (_SYNC_V2, _SEARCH_V3, _EXPORT_V1): ("empty", True),
+    (_RAIL_V2, _SYNC_V2, _SEARCH_V3, _EXPORT_V1): ("rail", True),
+    (_SCROLL, _SYNC_V2, _SEARCH_V3, _EXPORT_V1): ("sidebar", True),
 }
 _VOID_TAGS = frozenset(
     {

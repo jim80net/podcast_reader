@@ -104,7 +104,7 @@ test('transcript export preserves Korean/CJK bytes and offers an honest opaque f
   }
 })
 
-test('search tolerates extension decoration but rejects transcript mutation (#92)', async () => {
+test('search tolerates extension decoration but rejects transcript mutation (#92, #106)', async () => {
   const browser = await chromium.launch()
   try {
     const source = await readFile(
@@ -114,6 +114,7 @@ test('search tolerates extension decoration but rejects transcript mutation (#92
     const page = await browser.newPage()
     const mutations = [
       'password-manager-input-attribute',
+      'password-manager-input-style',
       'grammarly-body-attribute',
       'dark-reader-html-style',
       'dark-reader-head-style',
@@ -130,6 +131,9 @@ test('search tolerates extension decoration but rejects transcript mutation (#92
         if (kind === 'password-manager-input-attribute') {
           document.querySelector('.transcript-search-input')
             ?.setAttribute('data-lastpass-icon-root', 'true')
+        } else if (kind === 'password-manager-input-style') {
+          document.querySelector<HTMLElement>('.transcript-search-input')
+            ?.style.setProperty('caret-color', 'transparent', 'important')
         } else if (kind === 'grammarly-body-attribute') {
           document.body.setAttribute('data-gr-ext-installed', '')
         } else if (kind === 'dark-reader-html-style') {
@@ -150,6 +154,8 @@ test('search tolerates extension decoration but rejects transcript mutation (#92
     await page.evaluate(() => {
       document.documentElement.style.setProperty('color-scheme', 'dark')
       document.body.setAttribute('data-gr-ext-installed', '')
+      document.querySelector<HTMLElement>('.transcript-search-input')
+        ?.style.setProperty('caret-color', 'transparent', 'important')
     })
     await page.keyboard.press('/')
     await page.getByRole('searchbox', { name: 'Find in transcript' }).fill('회복')

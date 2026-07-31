@@ -862,7 +862,7 @@ document.addEventListener('DOMContentLoaded', function() {
     var names = Object.keys(expected);
     return names.every(function(name) { return node.getAttribute(name) === expected[name]; }) &&
       Array.prototype.every.call(node.attributes, function(attribute) {
-        return names.indexOf(attribute.name) !== -1 || /^data-/.test(attribute.name);
+        return names.indexOf(attribute.name) !== -1 || attribute.name === 'style' || /^data-/.test(attribute.name);
       });
   }
 
@@ -1121,7 +1121,7 @@ document.addEventListener('DOMContentLoaded', function() {
         main.parentElement === content;
     }
     if (target === root || root.contains(target)) {
-      return record.type === 'attributes' && /^data-/.test(record.attributeName || '') &&
+      return record.type === 'attributes' && (record.attributeName === 'style' || /^data-/.test(record.attributeName || '')) &&
         canonicalSearchRoot();
     }
     if (rail && (target === rail || rail.contains(target))) return true;

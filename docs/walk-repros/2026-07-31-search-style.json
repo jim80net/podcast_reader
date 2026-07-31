@@ -1,0 +1,66 @@
+{
+  "schema": 1,
+  "walk_id": "2026-07-31-search-style",
+  "captured_at": "2026-07-31T15:58:56.190107+00:00",
+  "source": {
+    "kind": "temporary",
+    "path_hint": "/tmp/pr-walk-20260731"
+  },
+  "findings": [
+    {
+      "issue": 106,
+      "summary": "Benign inline style decoration on the canonical search input permanently invalidated in-transcript search even though transcript content and search semantics were unchanged.",
+      "integrity_sensitive": true,
+      "artifacts": [
+        {
+          "name": "persona-artifact.mjs",
+          "sha256": "c7014a4bd3afb59c39a1f62d395ae2c6a001edf0dd89de5d28c3f951ceb8704f",
+          "size_bytes": 1962,
+          "disposition": "regression-test",
+          "durable_paths": [
+            "app/tests/e2e/artifact-geometry.spec.ts"
+          ],
+          "rationale": "The phone-sized Korean, reload, and extension-style sequence was normalized into the stable artifact E2E fixture; the raw driver hard-coded local Playwright and fixture paths.",
+          "prior_failure_verified": true
+        },
+        {
+          "name": "reduce-search.mjs",
+          "sha256": "2adddda70f1ca7cbe712746dcdb32056d4823da03e770f045c77e92bc6a1efac",
+          "size_bytes": 3618,
+          "disposition": "regression-test",
+          "durable_paths": [
+            "app/tests/e2e/artifact-geometry.spec.ts"
+          ],
+          "rationale": "The reduction proved style-only search-input decoration was the failing vector across fresh and reloaded documents; the focused regression failed on the prior implementation.",
+          "prior_failure_verified": true
+        },
+        {
+          "name": "phone-korean-extension.png",
+          "sha256": "c1e4bd95fd76495d80082d3de1146d20ce574821810cb08a7066d1cd3489d0ee",
+          "size_bytes": 41610,
+          "disposition": "discarded",
+          "durable_paths": [],
+          "rationale": "The screenshot captured the deterministic failure message but was redundant once the prior-failing Playwright assertion represented the behavior without image-comparison noise.",
+          "prior_failure_verified": false
+        }
+      ],
+      "scenarios": [
+        "Inline caret styling added to the canonical search input after search starts remains usable.",
+        "Inline caret styling present before the first search after a reload does not poison first use.",
+        "Korean and CJK transcript search remains usable at a 390 by 844 phone viewport.",
+        "A genuine transcript passage mutation still permanently invalidates search.",
+        "A semantic search-input mutation still permanently invalidates search."
+      ],
+      "hostile_controls": [
+        {
+          "description": "Appending text to a canonical transcript passage still invalidates search.",
+          "durable_path": "app/tests/e2e/artifact-geometry.spec.ts"
+        },
+        {
+          "description": "Adding a noncanonical name attribute to the search input still invalidates search.",
+          "durable_path": "app/tests/e2e/artifact-geometry.spec.ts"
+        }
+      ]
+    }
+  ]
+}
