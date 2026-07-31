@@ -699,6 +699,129 @@ test('in-transcript search is multilingual, keyboard-complete, private, and rese
   }
 })
 
+test('term search paints exact browser-owned ranges without rewriting transcript nodes (#93)', async () => {
+  const browser = await chromium.launch()
+  try {
+    const page = await browser.newPage()
+    await page.goto(searchArtifactUrl)
+    await page.evaluate(() => {
+      const main = document.querySelector('main')
+      if (!main) throw new Error('transcript main missing')
+      const state = {
+        nodes: Array.from(main.querySelectorAll('p[data-start]')).flatMap((passage) =>
+          Array.from(passage.childNodes)
+        ),
+        text: Array.from(main.querySelectorAll('p[data-start]')).flatMap((passage) =>
+          Array.from(passage.childNodes).map((node) => node.textContent)
+        ),
+        mutations: [] as string[]
+      }
+      ;(window as typeof window & { __termHighlightState?: typeof state }).__termHighlightState = state
+      new MutationObserver((records) => {
+        state.mutations.push(...records.map((record) => record.type))
+      }).observe(main, { subtree: true, childList: true, characterData: true })
+    })
+
+    await page.keyboard.press('/')
+    const input = page.getByRole('searchbox', { name: 'Find in transcript' })
+    await input.fill('resilience')
+    await expect(page.getByRole('status')).toContainText('1 of 2')
+
+    const initial = await page.evaluate(() => {
+      const registry = CSS.highlights
+      const texts = (name: string) => Array.from(registry.get(name) ?? []).map((range) => range.toString())
+      const passages = Array.from(document.querySelectorAll<HTMLElement>('p.search-match'))
+      const state = (window as typeof window & {
+        __termHighlightState?: { nodes: Node[]; text: Array<string | null>; mutations: string[] }
+      }).__termHighlightState
+      if (!state) throw new Error('term highlight state missing')
+      return {
+        active: texts('podcast-reader-search-active'),
+        passive: texts('podcast-reader-search-match'),
+        termMode: document.body.classList.contains('search-term-highlights'),
+        passagePaint: passages.map((passage) => ({
+          background: getComputedStyle(passage).backgroundColor,
+          borderWidth: getComputedStyle(passage).borderLeftWidth,
+          outlineWidth: getComputedStyle(passage).outlineWidth
+        })),
+        sameNodes: state.nodes.every((node, index) =>
+          node.isConnected && node.textContent === state.text[index]
+        ),
+        transcriptMutations: state.mutations
+      }
+    })
+    expect(initial.active).toEqual(['Resilience'])
+    expect(initial.passive).toEqual(['RESILIENCE'])
+    expect(initial.termMode).toBe(true)
+    expect(initial.passagePaint.every(({ background, borderWidth }) =>
+      background === 'rgba(0, 0, 0, 0)' && borderWidth === '0px'
+    )).toBe(true)
+    expect(initial.passagePaint[0]?.outlineWidth).toBe('0px')
+    expect(initial.sameNodes).toBe(true)
+    expect(initial.transcriptMutations).toEqual([])
+
+    await input.press('Enter')
+    await expect(page.getByRole('status')).toContainText('2 of 2')
+    const moved = await page.evaluate(() => ({
+      active: Array.from(CSS.highlights.get('podcast-reader-search-active') ?? []).map((range) =>
+        range.toString()
+      ),
+      passive: Array.from(CSS.highlights.get('podcast-reader-search-match') ?? []).map((range) =>
+        range.toString()
+      )
+    }))
+    expect(moved.active).toEqual(['RESILIENCE'])
+    expect(moved.passive).toEqual(['Resilience'])
+
+    await input.fill('e')
+    await expect(page.getByRole('status')).toContainText('1 of')
+    const repeated = await page.evaluate(() => [
+      ...Array.from(CSS.highlights.get('podcast-reader-search-active') ?? []),
+      ...Array.from(CSS.highlights.get('podcast-reader-search-match') ?? [])
+    ].map((range) => range.toString()))
+    expect(repeated.length).toBeGreaterThan(5)
+    expect(repeated.every((text) => text.toLowerCase() === 'e')).toBe(true)
+
+    await input.fill('회복탄력성')
+    await expect(page.getByRole('status')).toContainText('1 of 1')
+    expect(await page.evaluate(() =>
+      Array.from(CSS.highlights.get('podcast-reader-search-active') ?? []).map((range) => range.toString())
+    )).toEqual(['회복탄력성'])
+
+    await page.getByRole('button', { name: 'Clear and close search' }).click()
+    expect(await page.evaluate(() => ({
+      active: CSS.highlights.has('podcast-reader-search-active'),
+      passive: CSS.highlights.has('podcast-reader-search-match'),
+      termMode: document.body.classList.contains('search-term-highlights')
+    }))).toEqual({ active: false, passive: false, termMode: false })
+
+    const fallback = await browser.newPage()
+    await fallback.addInitScript(() => {
+      Object.defineProperty(CSS.highlights, 'set', { value: undefined })
+    })
+    await fallback.goto(searchArtifactUrl)
+    await fallback.keyboard.press('/')
+    await fallback.getByRole('searchbox', { name: 'Find in transcript' }).fill('resilience')
+    await expect(fallback.getByRole('status')).toContainText('1 of 2')
+    const fallbackState = await fallback.evaluate(() => {
+      const passage = document.querySelector<HTMLElement>('p.search-match-active')
+      if (!passage) throw new Error('fallback match missing')
+      return {
+        termMode: document.body.classList.contains('search-term-highlights'),
+        background: getComputedStyle(passage).backgroundColor,
+        borderWidth: getComputedStyle(passage).borderLeftWidth,
+        outlineWidth: getComputedStyle(passage).outlineWidth
+      }
+    })
+    expect(fallbackState.termMode).toBe(false)
+    expect(fallbackState.background).not.toBe('rgba(0, 0, 0, 0)')
+    expect(fallbackState.borderWidth).toBe('3px')
+    expect(fallbackState.outlineWidth).toBe('2px')
+  } finally {
+    await browser.close()
+  }
+})
+
 test('computed search, active, sync, and combined styles use the reviewed theme tokens (#88)', async () => {
   const browser = await chromium.launch()
   try {

@@ -23,6 +23,7 @@ from podcast_reader.html import (
     _SEARCH_SCRIPT,
     _SEARCH_SCRIPT_V1,
     _SEARCH_SCRIPT_V2,
+    _SEARCH_SCRIPT_V3,
     _SYNC_SCRIPT,
     _SYNC_SCRIPT_V1,
     build_html,
@@ -96,6 +97,7 @@ def test_transcript_script_policy_is_fully_pinned_and_coherent() -> None:
         "search-v1",
         "search-v2",
         "search-v3",
+        "search-v4",
         "export-v1",
     }
 
@@ -126,6 +128,32 @@ def test_extension_safe_search_v2_script_digest_is_byte_stable() -> None:
     assert hashlib.sha256(_SEARCH_SCRIPT_V2.encode()).hexdigest() == (
         "d1eff5ae8d21da45ce7f10ef248f241559cc30afb27c7d5fa1521be803e93f6c"
     )
+
+
+def test_visual_decoration_safe_search_v3_script_digest_is_byte_stable() -> None:
+    assert hashlib.sha256(_SEARCH_SCRIPT_V3.encode()).hexdigest() == (
+        "31c5193bb7f9ef7c8901c80f12267c364f67c8d102ddde681d036cd752ce08d5"
+    )
+
+
+def test_search_v3_export_tuples_remain_byte_exact() -> None:
+    for current in [
+        build_html([], "Empty"),
+        build_html(_SEGMENTS, "Keyless"),
+        build_html(_SEGMENTS, "Chaptered", chapters=_CHAPTERS),
+    ]:
+        search_v3 = current.replace(
+            f"<script>\n{_SEARCH_SCRIPT}</script>",
+            f"<script>\n{_SEARCH_SCRIPT_V3}</script>",
+        )
+        scripts = _SCRIPT_RE.findall(search_v3)
+        actual = set(re.findall(r"'sha256-[A-Za-z0-9+/=]+'", transcript_csp(search_v3.encode())))
+        assert actual == {_hash(script) for script in scripts}
+
+
+def test_search_v4_cannot_mix_with_a_pre_export_shape() -> None:
+    document = _document(f"\n{_SYNC_SCRIPT}", f"\n{_SEARCH_SCRIPT}")
+    assert "script-src 'none'" in transcript_csp(document)
 
 
 def test_artifact_csp_preserves_exact_first_search_release_tuples() -> None:
