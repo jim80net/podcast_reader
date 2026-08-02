@@ -158,6 +158,27 @@ async function captureSurface(number, surface) {
       log(`captured ${surface} at ${scale.label} in ${theme}`)
     }
   }
+
+  // Leave interactions at the stable product default. The Windows proof run
+  // showed a pointer click immediately after the 125% batch being intercepted
+  // by an adjacent field; scaling remains active for every capture, while
+  // route transitions and submissions happen from a deterministic baseline.
+  await app.evaluate(({ BrowserWindow }) => {
+    const window = BrowserWindow.getAllWindows()[0]
+    if (window === undefined) throw new Error('installed app window is unavailable')
+    window.webContents.setZoomFactor(1)
+  })
+  await page.locator('.theme-select').selectOption('light')
+  await waitFor(
+    () =>
+      page.evaluate(
+        () =>
+          Math.abs(window.devicePixelRatio - 1) < 0.01 &&
+          document.documentElement.dataset.theme === 'light'
+      ),
+    WIZARD_TIMEOUT_MS,
+    'default interaction state to restore'
+  )
 }
 
 log(`launching ${args.main ? 'dev build' : 'installed app'}: ${args.exe}`)
