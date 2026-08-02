@@ -8,12 +8,14 @@ on:
       - ".github/workflows/android.yml"
       - "src/podcast_reader/engine/app.py"
       - "src/podcast_reader/types.py"
+      - "services/premium/contracts/**"
   pull_request:
     paths:
       - "android/**"
       - ".github/workflows/android.yml"
       - "src/podcast_reader/engine/app.py"
       - "src/podcast_reader/types.py"
+      - "services/premium/contracts/**"
   workflow_dispatch:
 
 permissions:
