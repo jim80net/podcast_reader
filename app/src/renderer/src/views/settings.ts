@@ -3,7 +3,7 @@ import { mountPacksSection } from './packs-section'
 import { mountPairingSection } from './pairing-section'
 import { mountPrivateWebSection } from './private-web-section'
 import { planChapterSave } from '../chapter-onboarding'
-import { THEME_KEY, THEME_PREF_CHANGE_EVENT, getThemePref } from '../app-theme'
+import { THEME_PREF_CHANGE_EVENT, getThemePref } from '../app-theme'
 import { el } from '../dom'
 import { extractEngineDetail, settingsErrorField } from '../engine-error'
 import { keyPlaceholder, modelPlaceholder, toSettingsUpdate } from '../settings-form'
@@ -88,7 +88,6 @@ export function mountSettings(container: HTMLElement): ViewCleanup {
     themeSelect.addEventListener('change', () => {
       const selected = themeSelect.value
       if (selected !== 'light' && selected !== 'dark' && selected !== 'system') return
-      localStorage.setItem(THEME_KEY, selected)
       window.dispatchEvent(new CustomEvent(THEME_PREF_CHANGE_EVENT, { detail: selected }))
     })
     const appearance = el(

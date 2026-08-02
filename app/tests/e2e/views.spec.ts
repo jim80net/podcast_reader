@@ -232,9 +232,17 @@ test('Library empty state shows a branded first-transcript CTA routing to New', 
   await expect(harness.window.locator('.empty-mark')).toHaveCount(0)
   const emptyStyle = await empty.evaluate((node) => {
     const style = getComputedStyle(node)
-    return { textAlign: style.textAlign, borderTopStyle: style.borderTopStyle }
+    return {
+      textAlign: style.textAlign,
+      borderTopStyle: style.borderTopStyle,
+      borderTopWidth: style.borderTopWidth,
+    }
   })
-  expect(emptyStyle).toEqual({ textAlign: 'left', borderTopStyle: 'solid' })
+  expect(emptyStyle).toEqual({
+    textAlign: 'left',
+    borderTopStyle: 'solid',
+    borderTopWidth: '2px',
+  })
   await cta.click()
   await expect(harness.window).toHaveURL(/#\/new$/)
   await expect(harness.window.locator('#new-source')).toBeVisible()
