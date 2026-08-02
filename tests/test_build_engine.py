@@ -82,7 +82,10 @@ class TestDownload:
 def _stub_tool(directory: Path, filename: str, version_line: str) -> Path:
     """An executable stub that answers --version/-version like the real tool."""
     path = directory / filename
-    path.write_text(f'#!/bin/sh\necho "{version_line}"\n')
+    configuration = ""
+    if filename.startswith(("ffmpeg", "ffprobe")):
+        configuration = '\necho "configuration: --enable-version3 --disable-gpl"'
+    path.write_text(f'#!/bin/sh\necho "{version_line}"{configuration}\n')
     path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
     return path
 
@@ -100,13 +103,18 @@ class TestStageToolSeeds:
             "ffprobe": _stub_tool(source_dir, "ffprobe", "ffprobe version 7.1-static built"),
         }
         bundle_tools = tmp_path / "bundle" / "tools"
-        versions = build_engine.stage_tool_seeds(sources, bundle_tools)
+        license_file = source_dir / "ffmpeg-LICENSE.txt"
+        license_file.write_text("GNU LESSER GENERAL PUBLIC LICENSE Version 3")
+        versions = build_engine.stage_tool_seeds(sources, bundle_tools, ffmpeg_license=license_file)
         assert versions == {"yt-dlp": "2026.06.09", "ffmpeg": "7.1-static", "ffprobe": "7.1-static"}
         assert (bundle_tools / "yt-dlp").is_file()
         assert os.access(bundle_tools / "yt-dlp", os.X_OK)
         manifest = json.loads((bundle_tools / "tools-manifest.json").read_text())
         # flat {name: version} — exactly what _load_seed_manifest parses
         assert manifest == versions
+        assert (bundle_tools / "ffmpeg-LICENSE.txt").read_text().startswith("GNU LESSER")
+        provenance = json.loads((bundle_tools / "tool-seed-provenance.json").read_text())
+        assert provenance["ffmpeg"]["license"] == "LGPL-3.0-or-later"
 
     def test_staged_seeds_feed_engine_seeding(self, tmp_path: Path) -> None:
         """End-to-end with the real consumer: managed_tools.seed_tools reads
@@ -142,6 +150,8 @@ class TestVerifyEngineLayout:
         (dist / f"podcast-reader-engine{suffix}").write_bytes(b"exe")
         (dist / f"whisper-worker{suffix}").write_bytes(b"exe")
         (dist / "_internal" / "tools" / "tools-manifest.json").write_text("{}")
+        (dist / "_internal" / "tools" / "tool-seed-provenance.json").write_text("{}")
+        (dist / "_internal" / "tools" / "ffmpeg-LICENSE.txt").write_text("LGPL")
         return dist
 
     def test_complete_layout_passes(self, tmp_path: Path) -> None:
@@ -168,3 +178,37 @@ class TestVerifyEngineLayout:
         dist = self._layout(tmp_path)
         (dist / "_internal" / "tools" / "tools-manifest.json").unlink()
         build_engine.verify_engine_layout(dist, windows=False, require_tools=False)
+
+
+class TestFfmpegProvenance:
+    def test_pin_is_immutable_lgpl_build(self) -> None:
+        provenance = build_engine.load_ffmpeg_provenance()
+        assert provenance["release_tag"].startswith("autobuild-")
+        assert provenance["license"] == "LGPL-3.0-or-later"
+        assert provenance["integration"] == "separate-process"
+        for platform in ("linux", "win32"):
+            asset = provenance["platforms"][platform]
+            assert "-lgpl." in asset["asset"]
+            assert len(asset["sha256"]) == 64
+
+    def test_sha256_accepts_pin_and_rejects_mismatch(self, tmp_path: Path) -> None:
+        payload = tmp_path / "payload"
+        payload.write_bytes(b"known")
+        build_engine.verify_file_sha256(
+            payload, "7117fff2d0fd294462b3c802b7cb8753579f23f3946b99cf55f38e873f013f10"
+        )
+        with pytest.raises(build_engine.BuildError, match="SHA-256 mismatch"):
+            build_engine.verify_file_sha256(payload, "0" * 64)
+
+    def test_license_config_accepts_lgpl_and_rejects_gpl(self) -> None:
+        build_engine.verify_ffmpeg_license_config(
+            "configuration: --enable-version3 --disable-libx264"
+        )
+        with pytest.raises(build_engine.BuildError, match="forbidden flag --enable-gpl"):
+            build_engine.verify_ffmpeg_license_config(
+                "configuration: --enable-version3 --enable-gpl"
+            )
+
+    def test_license_config_requires_version3(self) -> None:
+        with pytest.raises(build_engine.BuildError, match="required flag --enable-version3"):
+            build_engine.verify_ffmpeg_license_config("configuration: --disable-libx264")

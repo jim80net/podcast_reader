@@ -68,7 +68,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: packaging/.tool-cache
-          key: tool-seeds-${{ runner.os }}-v1-${{ hashFiles('packaging/build_engine.py') }}
+          key: tool-seeds-${{ runner.os }}-v2-${{ hashFiles('packaging/build_engine.py', 'packaging/tool-seed-provenance.json') }}
       - name: Cache installed tiny model pack
         # Keyed on the registry (any pin bump re-downloads). The data dir is
         # reused, so a cache hit makes the install POST an idempotent no-op
