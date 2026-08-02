@@ -2,7 +2,7 @@
  * Single app stylesheet — Editorial / Reader design system (app-editorial-uplift).
  *
  * A cohesive editorial look: a warm-paper light palette and a calm dark
- * palette, serif display titles over a system-ui body, a consistent type and
+ * palette, Source Serif display titles over a Source Sans body, a consistent type and
  * spacing scale, dividers over boxes, and a single warm red-brown accent
  * (matching the recolored app icon). Everything reads from the tokens below, so light/dark
  * and future tweaks live in one place. Restyle only — element roles, headings,
@@ -11,14 +11,30 @@
  * first-class via prefers-color-scheme; the same tokens feed both.
  */
 
+@font-face {
+  font-family: 'Source Serif 4';
+  src: url('./assets/fonts/SourceSerif4Variable-Roman.otf.woff2') format('woff2');
+  font-style: normal;
+  font-weight: 200 900;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Source Sans 3';
+  src: url('./assets/fonts/SourceSans3VF-Upright.otf.woff2') format('woff2');
+  font-style: normal;
+  font-weight: 200 900;
+  font-display: swap;
+}
+
 :root {
   color-scheme: light dark;
 
   /* -- type ----------------------------------------------------------- */
-  /* Display/titles: system serif (Georgia ships on Win+mac; serif fallback
-     elsewhere). No font asset is bundled and no font-src/CSP change is made. */
-  --serif: Georgia, 'Iowan Old Style', 'Times New Roman', serif;
-  --sans: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  /* Local variable fonts make the app-shell typography deterministic across
+     platforms. System faces remain fail-safe fallbacks; no remote font loads. */
+  --serif: 'Source Serif 4', Georgia, 'Iowan Old Style', 'Times New Roman', serif;
+  --sans: 'Source Sans 3', system-ui, -apple-system, 'Segoe UI', sans-serif;
 
   --text-xs: 0.75rem; /* 12px — eyebrows, metadata, badges */
   --text-sm: 0.85rem; /* 13.6px — secondary text, controls */
