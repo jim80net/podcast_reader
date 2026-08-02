@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from podcast_reader_premium.security import RateLimiter, verify_password
 
 
@@ -14,5 +16,9 @@ def test_rate_limiter_bounds_and_evicts_key_store() -> None:
     assert len(limiter._events) == 2
 
 
-def test_malformed_argon2_hash_is_not_an_exception() -> None:
-    assert not verify_password("$argon2id$malformed", "candidate")
+@pytest.mark.parametrize(
+    "malformed_hash",
+    ["$argon2id$malformed", "not-a-hash", "$2b$12$bcryptstylehash", ""],
+)
+def test_malformed_password_hash_is_not_an_exception(malformed_hash: str) -> None:
+    assert not verify_password(malformed_hash, "candidate")

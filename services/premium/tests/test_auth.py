@@ -91,14 +91,18 @@ def test_api_errors_use_the_bounded_envelope(client: TestClient) -> None:
     assert response.json()["code"] == "not_found"
 
 
-def test_malformed_stored_argon2_hash_remains_a_generic_login_failure(
-    client: TestClient, account: dict[str, object]
+@pytest.mark.parametrize(
+    "malformed_hash",
+    ["$argon2id$malformed", "not-a-hash", "$2b$12$bcryptstylehash", ""],
+)
+def test_malformed_stored_hash_remains_a_generic_login_failure(
+    client: TestClient, account: dict[str, object], malformed_hash: str
 ) -> None:
     app = cast("Any", client.app)
     with Session(app.state.engine) as database:
         user = database.scalar(select(User))
         assert user is not None
-        user.password_hash = "$argon2id$malformed"
+        user.password_hash = malformed_hash
         database.commit()
     response = client.post(
         "/v1/browser-sessions",

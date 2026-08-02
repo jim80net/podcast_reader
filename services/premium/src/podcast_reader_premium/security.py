@@ -9,7 +9,7 @@ from collections import OrderedDict, deque
 from threading import Lock
 
 from argon2 import PasswordHasher
-from argon2.exceptions import VerificationError
+from argon2.exceptions import InvalidHashError, VerificationError
 from argon2.low_level import Type
 
 PASSWORD_HASHER = PasswordHasher(
@@ -79,7 +79,7 @@ def hash_password(value: str) -> str:
 def verify_password(encoded: str, candidate: str) -> bool:
     try:
         return PASSWORD_HASHER.verify(encoded, candidate)
-    except VerificationError:
+    except (VerificationError, InvalidHashError):
         return False
 
 
