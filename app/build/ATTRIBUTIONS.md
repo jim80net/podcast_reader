@@ -9,9 +9,14 @@ Installed builds bundle the following third-party components:
 |-----------|---------|--------|
 | Electron (incl. Chromium and Node.js) | MIT (Chromium: BSD-3-Clause and others) | https://github.com/electron/electron |
 | electron-updater | MIT | https://github.com/electron-userland/electron-builder |
+| Source Serif 4 | SIL Open Font License 1.1 | https://github.com/adobe-fonts/source-serif |
+| Source Sans 3 | SIL Open Font License 1.1 | https://github.com/adobe-fonts/source-sans |
 
 Chromium and Node.js carry their own bundled third-party notices; see
 `LICENSES.chromium.html` shipped alongside the Electron binaries.
+
+The complete font licenses and immutable-release provenance ship in the
+renderer at `fonts/`.
 
 The packaged engine under `resources/engine/` (when present) is a frozen
 Python application; its bundled dependency licenses (faster-whisper, FastAPI,
