@@ -1,6 +1,6 @@
 import './style.css'
 
-import { THEME_KEY, applyThemePref, getThemePref, nextThemePref } from './app-theme'
+import { THEME_KEY, applyThemePref, getThemePref } from './app-theme'
 import { el } from './dom'
 import { engineStatusView } from './engine-status-view'
 import { createJobsHydrator } from './jobs-hydrator'
@@ -36,38 +36,40 @@ const navLinks = new Map<Route['view'], HTMLAnchorElement>([
   ['settings', el('a', { text: 'Settings', attrs: { href: hrefFor({ view: 'settings' }) } })]
 ])
 
-// Theme toggle: cycles System → Light → Dark, persisted (app-theme.ts). The
-// warm-paper Light palette is the "white and brown" theme; Dark is the calm
-// palette; System follows the OS.
-const THEME_LABEL: Record<string, { glyph: string; name: string }> = {
-  system: { glyph: '🖥', name: 'System' },
-  light: { glyph: '☀', name: 'Light' },
-  dark: { glyph: '🌙', name: 'Dark' }
-}
+// A fresh install starts on warm-paper Light. The explicit selector avoids an
+// OS-dependent emoji glyph and keeps Dark + live OS-following System available.
 let themePref = getThemePref()
-const themeToggle = el('button', {
-  class: 'theme-toggle',
-  attrs: { type: 'button', title: 'Theme' }
+const themeSelect = el('select', {
+  class: 'theme-select',
+  attrs: { 'aria-label': 'Theme' }
 })
-function renderThemeToggle(): void {
-  const { glyph, name } = THEME_LABEL[themePref] ?? { glyph: '🖥', name: 'System' }
-  themeToggle.textContent = glyph
-  themeToggle.setAttribute('aria-label', `Theme: ${name} (click to change)`)
-  themeToggle.setAttribute('title', `Theme: ${name}`)
+for (const [value, label] of [
+  ['light', 'Light'],
+  ['dark', 'Dark'],
+  ['system', 'System']
+] as const) {
+  themeSelect.append(el('option', { text: label, attrs: { value } }))
 }
+themeSelect.value = themePref
+const themeControl = el(
+  'label',
+  { class: 'theme-control' },
+  el('span', { text: 'Theme' }),
+  themeSelect
+)
 // Broadcast the resolved theme so open views (the Reader) can re-theme their
 // sandboxed iframes, which can't read the document's data-theme directly.
 function applyAndBroadcast(): void {
   const resolved = applyThemePref(themePref)
   window.dispatchEvent(new CustomEvent('pr-theme-change', { detail: resolved }))
 }
-themeToggle.addEventListener('click', () => {
-  themePref = nextThemePref(themePref)
+themeSelect.addEventListener('change', () => {
+  const selected = themeSelect.value
+  if (selected !== 'light' && selected !== 'dark' && selected !== 'system') return
+  themePref = selected
   localStorage.setItem(THEME_KEY, themePref)
   applyAndBroadcast()
-  renderThemeToggle()
 })
-renderThemeToggle()
 applyAndBroadcast()
 // Follow OS changes while on System.
 window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
@@ -94,7 +96,7 @@ root.append(
     { class: 'app-header' },
     el('span', { class: 'app-name', text: 'Podcast Reader' }),
     el('nav', { class: 'app-nav', attrs: { 'aria-label': 'Views' } }, ...navLinks.values()),
-    themeToggle,
+    themeControl,
     enginePill
   ),
   engineBanner,
