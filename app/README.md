@@ -60,7 +60,7 @@ vault location and single-instance lock scope).
 
 The renderer's single stylesheet (`src/renderer/src/style.css`) is a token-driven
 **editorial** design — a warm-paper light palette and a calm dark palette, serif
-display titles over a `system-ui` body, a consistent type/spacing scale, dividers
+display titles over a sans body, a consistent type/spacing scale, dividers
 over boxes, and a single warm red-brown accent (matching the recolored app icon).
 Light is the intentional first-run default. A labelled header selector persists
 Light, Dark, or System; explicit System follows `prefers-color-scheme` live. Every
@@ -72,11 +72,13 @@ setup, job progress, and navigation use flat editorial treatments rather than
 ornamental marks, outlined status pills, or elevated dashboard cards. Settings
 provides the canonical Theme field and stays synchronized with the header control.
 
-- **Typography** — display/titles use a system serif stack
-  (`--serif: Georgia, 'Iowan Old Style', 'Times New Roman', serif`; Georgia ships
-  on Windows + macOS, serif fallback elsewhere). Body, labels, metadata, and form
-  controls stay `--sans` (`system-ui`). **No web font is bundled and there is no
-  `font-src`/CSP change.**
+- **Typography** — the app shell bundles the official variable WOFF2 builds of
+  Source Serif 4 (`4.005R`) for display/titles and Source Sans 3 (`3.052R`) for
+  body, labels, metadata, and controls. This removes platform fallback variance;
+  system stacks remain fail-safe fallbacks. Fonts are local-only, OFL-1.1, and
+  their exact release archives, selected members, hashes, and license texts live
+  under `src/renderer/public/fonts/`. The sandboxed transcript artifacts and
+  their CSP are unchanged.
 - **Tokens** (`:root` + the `prefers-color-scheme: dark` block):
   - Type: `--serif`, `--sans`, `--text-xs … --text-2xl`, `--leading-*`.
   - Layout: `--space-1 … --space-7`, `--radius-sm/md/lg/pill`, `--shadow-sm`.

@@ -1,0 +1,44 @@
+{
+  "schema": 1,
+  "runtime": "self-hosted renderer assets; no remote font requests",
+  "fonts": [
+    {
+      "family": "Source Serif 4",
+      "license": "OFL-1.1",
+      "source_repository": "https://github.com/adobe-fonts/source-serif",
+      "release_tag": "4.005R",
+      "archive": {
+        "url": "https://github.com/adobe-fonts/source-serif/releases/download/4.005R/source-serif-4.005_WOFF2.zip",
+        "size": 11623196,
+        "sha256": "af10e80dcd2296748b04cb9917db9f7ba0ae65101165fd2f0c16b9812d9abd28"
+      },
+      "member": {
+        "path": "source-serif-4.005_WOFF2/VAR/SourceSerif4Variable-Roman.otf.woff2",
+        "shipped_as": "SourceSerif4Variable-Roman.otf.woff2",
+        "size": 426716,
+        "sha256": "f146ee102dddcc5bc7a2cf4af5bcf129832195941b92bd0a512626f390688c1e"
+      },
+      "license_file": "OFL-Source-Serif-4.txt",
+      "license_sha256": "75784a295293a8992f5a8d99210566e0064a012e6dab6731305e3787f15896c7"
+    },
+    {
+      "family": "Source Sans 3",
+      "license": "OFL-1.1",
+      "source_repository": "https://github.com/adobe-fonts/source-sans",
+      "release_tag": "3.052R",
+      "archive": {
+        "url": "https://github.com/adobe-fonts/source-sans/releases/download/3.052R/WOFF2-source-sans-3.052R.zip",
+        "size": 3850565,
+        "sha256": "d7f6724027fe5ca0bab44d6121284f1fa8f66dec5f2864aa969aed347041ac95"
+      },
+      "member": {
+        "path": "WOFF2/VF/SourceSans3VF-Upright.otf.woff2",
+        "shipped_as": "SourceSans3VF-Upright.otf.woff2",
+        "size": 164736,
+        "sha256": "f9e4eac0e8f8ffdae91cf6eff3962b96e81417cba5c728bc1c89efe9510e7653"
+      },
+      "license_file": "OFL-Source-Sans-3.txt",
+      "license_sha256": "89ad2c4f66dd29127527493e729c31e731f111cf10faf5774c3db9275ed0c22c"
+    }
+  ]
+}
