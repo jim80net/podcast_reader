@@ -7,12 +7,16 @@ test('fresh OS-dark launch starts Light while explicit System still follows the 
   await harness.window.emulateMedia({ colorScheme: 'dark' })
   await harness.window.evaluate(() => localStorage.removeItem('pr.theme'))
   await harness.window.addInitScript(() => {
-    const root = document.documentElement
     const changes: string[] = []
     ;(window as typeof window & { __themePaints?: string[] }).__themePaints = changes
-    new MutationObserver(() => changes.push(root.dataset['theme'] ?? '')).observe(root, {
+    new MutationObserver(() => {
+      const theme = document.documentElement?.dataset['theme']
+      if (theme !== undefined && changes.length === 0) changes.push(theme)
+    }).observe(document, {
       attributes: true,
-      attributeFilter: ['data-theme']
+      attributeFilter: ['data-theme'],
+      childList: true,
+      subtree: true
     })
   })
 
