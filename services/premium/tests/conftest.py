@@ -23,6 +23,7 @@ def settings(tmp_path: Path) -> Settings:
         environment="test",
         build_sha="test-sha",
         device_poll_interval_seconds=5,
+        stripe_price_id="price_test_premium",
     )
 
 

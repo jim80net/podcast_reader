@@ -33,6 +33,7 @@ from .models import (
     AdConfig,
     AuditLog,
     BrowserSession,
+    CheckoutAttempt,
     EntitlementEvent,
     EntitlementProjection,
     FeatureFlag,
@@ -215,6 +216,12 @@ def user_detail_page(
         )
         or 0
     )
+    checkout_attempts = database.scalars(
+        select(CheckoutAttempt)
+        .where(CheckoutAttempt.user_id == user.id)
+        .order_by(CheckoutAttempt.created_at.desc())
+        .limit(20)
+    ).all()
     return TEMPLATES.TemplateResponse(
         request,
         "user_detail.html",
@@ -227,6 +234,7 @@ def user_detail_page(
             "audits": audits,
             "browser_count": browser_count,
             "family_count": family_count,
+            "checkout_attempts": checkout_attempts,
         },
     )
 

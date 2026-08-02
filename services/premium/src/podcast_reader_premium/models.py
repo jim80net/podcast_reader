@@ -103,6 +103,58 @@ class AccessToken(Base):
     __table_args__ = (Index("ix_access_tokens_family_id", "family_id"),)
 
 
+class StripeCustomer(Base):
+    __tablename__ = "stripe_customers"
+
+    user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    customer_id: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    created_at: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
+class CheckoutAttempt(Base):
+    __tablename__ = "checkout_attempts"
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    checkout_session_id: Mapped[str | None] = mapped_column(String(128), unique=True)
+    status: Mapped[str] = mapped_column(String(24), nullable=False)
+    created_at: Mapped[int] = mapped_column(Integer, nullable=False)
+    updated_at: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('created', 'session_created', 'completed', 'expired', 'failed')",
+            name="ck_checkout_attempts_status",
+        ),
+        Index("ix_checkout_attempts_user_created", "user_id", "created_at"),
+    )
+
+
+class PaymentEvent(Base):
+    __tablename__ = "payment_events"
+
+    provider_event_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    event_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    object_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    payload_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    livemode: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    state: Mapped[str] = mapped_column(String(16), nullable=False)
+    received_at: Mapped[int] = mapped_column(Integer, nullable=False)
+    claimed_at: Mapped[int | None] = mapped_column(Integer)
+    processed_at: Mapped[int | None] = mapped_column(Integer)
+    result_code: Mapped[str | None] = mapped_column(String(64))
+
+    __table_args__ = (
+        CheckConstraint(
+            "state IN ('pending', 'processing', 'processed', 'rejected')",
+            name="ck_payment_events_state",
+        ),
+        Index("ix_payment_events_state_received", "state", "received_at"),
+    )
+
+
 class EntitlementEvent(Base):
     __tablename__ = "entitlement_events"
 
@@ -135,6 +187,7 @@ class EntitlementEvent(Base):
         CheckConstraint("revision >= 1", name="ck_entitlement_events_revision"),
         UniqueConstraint("user_id", "revision", name="uq_entitlement_events_user_revision"),
         Index("ix_entitlement_events_user_created", "user_id", "created_at"),
+        Index("uq_entitlement_events_source_reference", "source_reference", unique=True),
     )
 
 

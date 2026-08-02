@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from .config import Settings
 
-EXPECTED_SCHEMA_REVISION = "0002_entitlements_admin"
+EXPECTED_SCHEMA_REVISION = "0003_test_buy"
 
 
 def create_database(settings: Settings) -> Engine:

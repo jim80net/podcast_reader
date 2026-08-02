@@ -486,7 +486,7 @@ def test_house_ad_fields_are_text_https_only_and_audited(
 def test_migration_seeds_only_registered_flags_and_house_source(client: TestClient) -> None:
     assert client.get("/healthz").json() == {
         "status": "ok",
-        "schema": 2,
+        "schema": 3,
         "build_sha": "test-sha",
     }
     engine = _app(client).state.engine
@@ -497,6 +497,9 @@ def test_migration_seeds_only_registered_flags_and_house_source(client: TestClie
         "ad_config",
         "house_ads",
         "audit_log",
+        "stripe_customers",
+        "checkout_attempts",
+        "payment_events",
     }.issubset(inspect(engine).get_table_names())
     with Session(engine) as database:
         assert set(database.scalars(select(FeatureFlag.key))) == {
