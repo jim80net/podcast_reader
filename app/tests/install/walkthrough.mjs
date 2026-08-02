@@ -5,7 +5,7 @@
  * frozen engine, nothing mocked — through the first-run path and captures
  * screenshots as CI artifacts:
  *
- * Each surface is captured at 100% and 125% renderer scaling in both the
+ * Each surface is captured at 100% and 125% device scaling in both the
  * default Light palette and explicit Dark palette:
  *
  *   01-first-run-wizard-*     wizard (its appearance itself requires an
@@ -80,6 +80,8 @@ await mkdir(outDir, { recursive: true })
 const consoleLines = []
 let app
 let page
+let cdp
+let captureViewport
 
 function log(message) {
   console.log(`[walkthrough] ${message}`)
@@ -111,13 +113,23 @@ async function waitFor(predicate, timeoutMs, what) {
   await fail(`timed out after ${timeoutMs}ms waiting for ${what}`)
 }
 
+async function setCaptureScale(factor) {
+  if (cdp === undefined || captureViewport === undefined) {
+    throw new Error('capture metrics are unavailable')
+  }
+  await cdp.send('Emulation.setDeviceMetricsOverride', {
+    width: captureViewport.width,
+    height: captureViewport.height,
+    deviceScaleFactor: factor,
+    mobile: false,
+    screenWidth: captureViewport.width,
+    screenHeight: captureViewport.height
+  })
+}
+
 async function captureSurface(number, surface) {
   for (const scale of CAPTURE_SCALES) {
-    await app.evaluate(({ BrowserWindow }, factor) => {
-      const window = BrowserWindow.getAllWindows()[0]
-      if (window === undefined) throw new Error('installed app window is unavailable')
-      window.webContents.setZoomFactor(factor)
-    }, scale.factor)
+    await setCaptureScale(scale.factor)
     await waitFor(
       () =>
         page.evaluate(
@@ -125,7 +137,7 @@ async function captureSurface(number, surface) {
           scale.factor
         ),
       WIZARD_TIMEOUT_MS,
-      `${scale.label} renderer scaling`
+      `${scale.label} device scaling`
     )
 
     const geometry = await page.evaluate(() => {
@@ -150,7 +162,7 @@ async function captureSurface(number, surface) {
       geometry.themeControlRight === undefined ||
       geometry.themeControlWidth === undefined ||
       geometry.themeControlLeft < -1 ||
-      geometry.themeControlWidth < 1 ||
+      geometry.themeControlWidth < 80 ||
       geometry.themeControlRight > geometry.clientWidth + 1
     ) {
       await fail(
@@ -196,15 +208,8 @@ async function captureSurface(number, surface) {
     }
   }
 
-  // Leave interactions at the stable product default. The Windows proof run
-  // showed a pointer click immediately after the 125% batch being intercepted
-  // by an adjacent field; scaling remains active for every capture, while
-  // route transitions and submissions happen from a deterministic baseline.
-  await app.evaluate(({ BrowserWindow }) => {
-    const window = BrowserWindow.getAllWindows()[0]
-    if (window === undefined) throw new Error('installed app window is unavailable')
-    window.webContents.setZoomFactor(1)
-  })
+  // Restore the default interaction state between surfaces.
+  await setCaptureScale(1)
   await page.locator('.theme-select').selectOption('light')
   await waitFor(
     () =>
@@ -224,6 +229,8 @@ app = await _electron.launch({
   args: args.main ? [args.main] : []
 })
 page = await app.firstWindow()
+cdp = await page.context().newCDPSession(page)
+captureViewport = await page.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight }))
 page.on('console', (msg) => consoleLines.push(`[${msg.type()}] ${msg.text()}`))
 
 // --- 1. engine handshake: the supervised frozen engine reaches `ready` -----
