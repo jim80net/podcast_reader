@@ -2748,7 +2748,11 @@ class TestCookieRoutes:
         jar_file = engine.data_dir / "cookies" / "example.com.txt"
         for path in engine.data_dir.rglob("*"):
             if path.is_file() and path != jar_file:
-                assert "sweep-secret-value" not in path.read_text(errors="replace"), path
+                try:
+                    contents = path.read_text(errors="replace")
+                except FileNotFoundError:
+                    continue
+                assert "sweep-secret-value" not in contents, path
 
 
 class TestMediaRoutes:
