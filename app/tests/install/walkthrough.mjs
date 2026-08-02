@@ -5,11 +5,16 @@
  * frozen engine, nothing mocked — through the first-run path and captures
  * screenshots as CI artifacts:
  *
- *   01-first-run-wizard.png   wizard (its appearance itself requires an
+ * Each surface is captured at 100% and 125% device scaling in both the
+ * default Light palette and explicit Dark palette:
+ *
+ *   01-first-run-wizard-*     wizard (its appearance itself requires an
  *                             engine `ready` status — main.ts gates it)
- *   02-new-view-submitted.png New view right after submitting a YouTube URL
- *   03-new-view-job-done.png  a finished local-audio job card
- *   04-reader-transcript.png  Reader with the rendered transcript
+ *   02-empty-library-*        Library before the first transcript
+ *   03-new-view-submitted-*   New view right after submitting a YouTube URL
+ *   04-new-view-job-done-*    a finished local-audio job card
+ *   05-reader-transcript-*    Reader with the rendered transcript
+ *   06-settings-*             Settings, including the canonical theme field
  *
  * GitHub-hosted Windows runners are routinely blocked by YouTube, so the
  * submitted YouTube job is intentionally not the source of the Reader proof.
@@ -47,6 +52,12 @@ const READY_TIMEOUT_MS = 120_000
 const WIZARD_TIMEOUT_MS = 30_000
 const PACK_TIMEOUT_MS = 180_000
 const JOB_TIMEOUT_MS = 420_000
+const CAPTURE_SCALES = [
+  { label: '100pct', factor: 1 },
+  { label: '125pct', factor: 1.25 }
+]
+const CAPTURE_THEMES = ['light', 'dark']
+const captureRecords = []
 
 const { values: args } = parseArgs({
   options: {
@@ -70,6 +81,8 @@ await mkdir(outDir, { recursive: true })
 const consoleLines = []
 let app
 let page
+let cdp
+let captureViewport
 
 function log(message) {
   console.log(`[walkthrough] ${message}`)
@@ -101,12 +114,129 @@ async function waitFor(predicate, timeoutMs, what) {
   await fail(`timed out after ${timeoutMs}ms waiting for ${what}`)
 }
 
+async function setCaptureScale(factor) {
+  if (cdp === undefined || captureViewport === undefined) {
+    throw new Error('capture metrics are unavailable')
+  }
+  await cdp.send('Emulation.setDeviceMetricsOverride', {
+    width: captureViewport.width,
+    height: captureViewport.height,
+    deviceScaleFactor: factor,
+    mobile: false,
+    screenWidth: captureViewport.width,
+    screenHeight: captureViewport.height
+  })
+}
+
+async function captureSurface(number, surface) {
+  for (const scale of CAPTURE_SCALES) {
+    await setCaptureScale(scale.factor)
+    await waitFor(
+      () =>
+        page.evaluate(
+          (factor) => Math.abs(window.devicePixelRatio - factor) < 0.01,
+          scale.factor
+        ),
+      WIZARD_TIMEOUT_MS,
+      `${scale.label} device scaling`
+    )
+
+    const geometry = await page.evaluate(() => {
+      const themeControl = document.querySelector('.theme-control')?.getBoundingClientRect()
+      return {
+        clientWidth: document.documentElement.clientWidth,
+        scrollWidth: document.documentElement.scrollWidth,
+        viewportHeight: window.innerHeight,
+        themeControlLeft: themeControl?.left,
+        themeControlRight: themeControl?.right,
+        themeControlWidth: themeControl?.width
+      }
+    })
+    if (geometry.scrollWidth > geometry.clientWidth) {
+      await fail(
+        `${surface} overflows horizontally at ${scale.label}: ` +
+          `${geometry.scrollWidth}px > ${geometry.clientWidth}px`
+      )
+    }
+    if (
+      geometry.themeControlLeft === undefined ||
+      geometry.themeControlRight === undefined ||
+      geometry.themeControlWidth === undefined ||
+      geometry.themeControlLeft < -1 ||
+      geometry.themeControlWidth < 80 ||
+      geometry.themeControlRight > geometry.clientWidth + 1
+    ) {
+      await fail(
+        `theme control is clipped at ${scale.label}: ` +
+          `${JSON.stringify({
+            left: geometry.themeControlLeft,
+            right: geometry.themeControlRight,
+            width: geometry.themeControlWidth,
+            viewport: geometry.clientWidth
+          })}`
+      )
+    }
+    if (surface === 'first-run-wizard') {
+      const actions = await page.locator('.setup-actions').boundingBox()
+      if (actions === null || actions.y + actions.height > geometry.viewportHeight + 1) {
+        await fail(`setup actions are not reachable at ${scale.label}`)
+      }
+    }
+
+    for (const theme of CAPTURE_THEMES) {
+      await page.locator('.theme-select').selectOption(theme)
+      await waitFor(
+        () => page.evaluate((value) => document.documentElement.dataset.theme === value, theme),
+        WIZARD_TIMEOUT_MS,
+        `${theme} theme to apply`
+      )
+      const filename = `${number}-${surface}-${scale.label}-${theme}.png`
+      const fullPage = surface === 'new-view-submitted' || surface === 'new-view-job-done'
+      await page.screenshot({ path: join(outDir, filename), fullPage })
+      captureRecords.push({
+        filename,
+        surface,
+        scale: scale.label,
+        devicePixelRatio: scale.factor,
+        theme,
+        viewport: {
+          width: geometry.clientWidth,
+          height: geometry.viewportHeight
+        },
+        themeControl: {
+          left: geometry.themeControlLeft,
+          right: geometry.themeControlRight,
+          width: geometry.themeControlWidth
+        },
+        fullPage
+      })
+      log(`captured ${surface} at ${scale.label} in ${theme}`)
+    }
+  }
+
+  // Restore the default interaction state between surfaces.
+  await setCaptureScale(1)
+  await page.locator('.theme-select').selectOption('light')
+  await waitFor(
+    () =>
+      page.evaluate(
+        () =>
+          Math.abs(window.devicePixelRatio - 1) < 0.01 &&
+          document.documentElement.dataset.theme === 'light'
+      ),
+    WIZARD_TIMEOUT_MS,
+    'default interaction state to restore'
+  )
+}
+
 log(`launching ${args.main ? 'dev build' : 'installed app'}: ${args.exe}`)
 app = await _electron.launch({
   executablePath: args.exe,
   args: args.main ? [args.main] : []
 })
 page = await app.firstWindow()
+cdp = await page.context().newCDPSession(page)
+captureViewport = await page.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight }))
 page.on('console', (msg) => consoleLines.push(`[${msg.type()}] ${msg.text()}`))
 
 // --- 1. engine handshake: the supervised frozen engine reaches `ready` -----
@@ -135,8 +265,14 @@ await page
   .first()
   .waitFor({ timeout: WIZARD_TIMEOUT_MS })
   .catch(() => log('pack list did not render items; capturing wizard as-is'))
-await page.screenshot({ path: join(outDir, '01-first-run-wizard.png') })
-log('captured first-run wizard')
+const initialTheme = await page.evaluate(() => ({
+  stored: localStorage.getItem('pr.theme'),
+  resolved: document.documentElement.dataset.theme
+}))
+if (initialTheme.stored !== null || initialTheme.resolved !== 'light') {
+  await fail(`fresh install did not start in default Light: ${JSON.stringify(initialTheme)}`)
+}
+await captureSurface('01', 'first-run-wizard')
 
 // Captions need no packs: "Skip for now" marks first-run complete and lands
 // on the Library (the Finish button stays hidden until packs install).
@@ -146,6 +282,8 @@ await waitFor(
   WIZARD_TIMEOUT_MS,
   'wizard to complete'
 )
+await page.locator('.empty-state').waitFor({ timeout: WIZARD_TIMEOUT_MS })
+await captureSurface('02', 'empty-library')
 
 // --- 3. New view: submit the YouTube URL (keyless captions job) ------------
 await page.evaluate(() => {
@@ -156,8 +294,7 @@ await urlInput.waitFor({ timeout: WIZARD_TIMEOUT_MS })
 await urlInput.fill(YOUTUBE_URL)
 await page.getByRole('button', { name: 'Transcribe' }).click()
 await page.locator('.job-card').first().waitFor({ timeout: WIZARD_TIMEOUT_MS })
-await page.screenshot({ path: join(outDir, '02-new-view-submitted.png') })
-log('captured New view with submitted job')
+await captureSurface('03', 'new-view-submitted')
 
 // GitHub runner IPs are often blocked by YouTube. Keep the real captions
 // submission above as a product/UI proof, then use the installed app's pack
@@ -209,7 +346,7 @@ const readerHref = await waitFor(
   WIZARD_TIMEOUT_MS,
   'finished local-audio transcript to appear in the library'
 )
-await page.screenshot({ path: join(outDir, '03-new-view-job-done.png') })
+await captureSurface('04', 'new-view-job-done')
 log(`job done, transcript at ${readerHref}`)
 
 // --- 5. Reader: the transcript renders inside the sandboxed iframe ---------
@@ -225,9 +362,19 @@ await page
   .locator('p[data-start][data-end]')
   .first()
   .waitFor({ timeout: WIZARD_TIMEOUT_MS })
-await page.screenshot({ path: join(outDir, '04-reader-transcript.png') })
-log('captured Reader with rendered transcript')
+await captureSurface('05', 'reader-transcript')
 
+// --- 6. Settings: canonical theme field and flattened section rhythm -------
+await page.evaluate(() => {
+  location.hash = '#/settings'
+})
+await page.locator('.settings-appearance #settings-theme').waitFor({ timeout: WIZARD_TIMEOUT_MS })
+await captureSurface('06', 'settings')
+
+await writeFile(
+  join(outDir, 'capture-metadata.json'),
+  `${JSON.stringify(captureRecords, null, 2)}\n`
+)
 await writeFile(join(outDir, 'renderer-console.log'), consoleLines.join('\n'))
 await app.close()
 log('walkthrough complete')
