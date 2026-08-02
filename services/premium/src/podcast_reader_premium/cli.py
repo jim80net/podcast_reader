@@ -126,7 +126,8 @@ def main() -> None:
     subparsers.add_parser("migrate")
     subparsers.add_parser("bootstrap-admin")
     subparsers.add_parser("repair-entitlements")
-    subparsers.add_parser("serve")
+    serve_parser = subparsers.add_parser("serve")
+    serve_parser.add_argument("--port", type=int, default=8090)
     args = parser.parse_args()
     settings = _settings(args)
     if args.command == "migrate":
@@ -136,8 +137,10 @@ def main() -> None:
     elif args.command == "repair-entitlements":
         _repair_entitlements(settings)
     else:
+        if not 1 <= args.port <= 65535:
+            raise SystemExit("serve port must be between 1 and 65535")
         require_current_schema(create_database(settings))
-        uvicorn.run(create_app(settings), host="127.0.0.1", port=8787, workers=1)
+        uvicorn.run(create_app(settings), host="127.0.0.1", port=args.port, workers=1)
 
 
 if __name__ == "__main__":

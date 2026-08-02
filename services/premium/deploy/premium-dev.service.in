@@ -1,0 +1,26 @@
+[Unit]
+Description=Podcast Reader premium development service
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=@STRIPE_ENV@
+
+[Service]
+Type=simple
+WorkingDirectory=@SERVICE_ROOT@
+EnvironmentFile=@SERVICE_ENV@
+EnvironmentFile=@STRIPE_ENV@
+ExecStart=@PREMIUM_DEV@ --database @DATABASE@ --public-origin @PUBLIC_ORIGIN@ serve --port @LOOPBACK_PORT@
+Restart=on-failure
+RestartSec=5s
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=@DATA_DIR@ @STATE_DIR@
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+LockPersonality=yes
+
+[Install]
+WantedBy=default.target
