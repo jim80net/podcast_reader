@@ -81,7 +81,6 @@ export function mountLibrary(container: HTMLElement): ViewCleanup {
         el(
           'div',
           { class: 'empty-state' },
-          el('div', { class: 'empty-mark', text: content.mark, attrs: { 'aria-hidden': 'true' } }),
           el('p', { class: 'empty-title', text: content.title }),
           el('p', { class: 'empty-lead', text: content.lead }),
           el('a', {

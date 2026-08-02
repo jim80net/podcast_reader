@@ -21,6 +21,22 @@ export interface JobProgress {
   warnings: string[]
 }
 
+export interface JobWarningView {
+  message: string
+  technicalDetail: string | null
+}
+
+/** Keep implementation vocabulary out of the primary completion path. */
+export function userFacingJobWarning(warning: string): JobWarningView {
+  if (/ANTHROPIC_API_KEY|chapter.{0,24}(?:provider|API key)|no API key/i.test(warning)) {
+    return {
+      message: 'Chapters are off. Add a chapter provider in Settings to enable them.',
+      technicalDetail: warning
+    }
+  }
+  return { message: warning, technicalDetail: null }
+}
+
 export function deriveProgress(events: readonly PipelineEvent[]): JobProgress {
   const steps: StepView[] = []
   const byStep = new Map<StepName, StepView>()

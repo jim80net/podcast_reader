@@ -9,8 +9,10 @@ import type { EngineStatus } from '../../shared/ipc'
  */
 
 export interface EngineStatusView {
-  /** Short text for the always-visible engine pill. */
+  /** Short text for the diagnostic engine pill. */
   pill: string
+  /** Healthy readiness is deliberately quiet in the normal app shell. */
+  showPill: boolean
   /** Banner text, or null to hide the banner. */
   banner: string | null
   /** Whether to offer the manual "Restart engine" button (terminal failure). */
@@ -25,27 +27,30 @@ export function assertNever(value: never): never {
 export function engineStatusView(status: EngineStatus): EngineStatusView {
   switch (status.state) {
     case 'starting':
-      return { pill: 'engine starting…', banner: null, showRestart: false }
+      return { pill: 'Starting…', showPill: true, banner: null, showRestart: false }
     case 'ready':
       return {
-        pill: `engine v${status.version}${status.adopted ? ' (adopted)' : ''}`,
+        pill: `Ready${status.adopted ? ' (adopted)' : ''}`,
+        showPill: false,
         banner: null,
         showRestart: false
       }
     case 'restarting':
       return {
-        pill: 'engine restarting…',
+        pill: 'Reconnecting…',
+        showPill: true,
         banner: `Reconnecting to engine… (attempt ${status.attempt}/${status.maxAttempts})`,
         showRestart: false
       }
     case 'failed':
       return {
-        pill: 'engine failed',
+        pill: 'Engine unavailable',
+        showPill: true,
         banner: `Engine failed to start: ${status.message}`,
         showRestart: true
       }
     case 'stopped':
-      return { pill: 'engine stopped', banner: null, showRestart: false }
+      return { pill: 'Engine stopped', showPill: true, banner: null, showRestart: false }
     default:
       return assertNever(status)
   }

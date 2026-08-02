@@ -38,3 +38,22 @@ test('fresh OS-dark launch starts Light while explicit System still follows the 
   await control.selectOption('dark')
   await expect(harness.window.locator('html')).toHaveAttribute('data-theme', 'dark')
 })
+
+test('Settings and header theme controls stay bound to one preference', async ({ harness }) => {
+  await expectEngineState(harness.window, 'ready')
+  await harness.window.evaluate(() => {
+    window.location.hash = '#/settings'
+  })
+
+  const header = harness.window.locator('.theme-select')
+  const settings = harness.window.locator('#settings-theme')
+  await expect(settings).toHaveValue('light')
+
+  await settings.selectOption('dark')
+  await expect(header).toHaveValue('dark')
+  await expect(harness.window.locator('html')).toHaveAttribute('data-theme', 'dark')
+
+  await header.selectOption('system')
+  await expect(settings).toHaveValue('system')
+  expect(await harness.window.evaluate(() => localStorage.getItem('pr.theme'))).toBe('system')
+})

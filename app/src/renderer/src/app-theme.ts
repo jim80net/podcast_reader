@@ -12,6 +12,7 @@ export type ThemePref = 'system' | 'light' | 'dark'
 export type ResolvedTheme = 'light' | 'dark'
 
 export const THEME_KEY = 'pr.theme'
+export const THEME_PREF_CHANGE_EVENT = 'pr-theme-pref-change'
 
 export function getThemePref(store: Storage = localStorage): ThemePref {
   const raw = store.getItem(THEME_KEY)

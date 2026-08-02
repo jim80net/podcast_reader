@@ -32,7 +32,6 @@ import type { HardwareInfo, PackStatus, ProviderInfo } from '../../../shared/typ
 export function mountSetup(container: HTMLElement): ViewCleanup {
   const status = el('p', { class: 'view-status', text: 'Checking your hardware…' })
   const hardwareLine = el('p', { class: 'hardware-summary' })
-  const deviceLine = el('p', { class: 'device-note' })
   const list = el('div', { class: 'pack-list', attrs: { role: 'list' } })
   const actionError = el('p', { class: 'error-text', attrs: { role: 'alert' } })
   actionError.hidden = true
@@ -49,38 +48,33 @@ export function mountSetup(container: HTMLElement): ViewCleanup {
     class: 'button-secondary',
     attrs: { type: 'button', id: 'setup-skip' }
   })
-  // Presentation-only sectioning (native-app-first-impression): a welcoming
-  // hero, then a clearly-labelled hardware section and a components section.
+  // Compact trust-first introduction, then the core transcription choice.
   // The flow — hardware summary, recommended-pack selection, install with
   // progress, the first-run gate — is unchanged from below.
   const hero = el(
     'div',
     { class: 'setup-hero' },
-    el('div', { class: 'setup-mark', text: '▶', attrs: { 'aria-hidden': 'true' } }),
-    el('h2', { class: 'setup-title', text: 'Welcome to Podcast Reader' }),
+    el('h2', { class: 'setup-title', text: 'Private, on-device transcription' }),
     el('p', {
       class: 'setup-intro',
       text:
-        'Everything runs on your computer — your audio never leaves it. First, ' +
-        "let's download the speech model that fits your hardware. (Want chapter " +
-        'markers and clean, idea-based paragraphs? Add an AI model in Settings — optional.)'
+        'Your audio stays on this computer. Choose a speech model to make your first transcript.'
     })
   )
   const hardwareSection = el(
     'section',
     { class: 'setup-section' },
-    el('h3', { class: 'setup-section-title', text: 'Your hardware' }),
+    el('h3', { class: 'setup-section-title', text: 'This computer' }),
     status,
-    hardwareLine,
-    deviceLine
+    hardwareLine
   )
   const componentsSection = el(
     'section',
     { class: 'setup-section' },
-    el('h3', { class: 'setup-section-title', text: 'Components to install' }),
+    el('h3', { class: 'setup-section-title', text: 'Transcription model' }),
     el('p', {
       class: 'setup-section-note',
-      text: 'Recommended components are pre-selected. Sizes are shown so you can choose.'
+      text: 'The best fit is selected. Download size is shown before anything is installed.'
     }),
     list
   )
@@ -89,9 +83,9 @@ export function mountSetup(container: HTMLElement): ViewCleanup {
     hero,
     hardwareSection,
     componentsSection,
-    chapter.section,
     el('div', { class: 'form-actions setup-actions' }, installButton, finishButton, skipButton),
-    actionError
+    actionError,
+    chapter.section
   )
 
   let disposed = false
@@ -128,10 +122,10 @@ export function mountSetup(container: HTMLElement): ViewCleanup {
     status.classList.remove('error-text')
     hardwareLine.textContent = hardwareSummary(hardware)
     const device = deriveWhisperDevice(hardware, packs)
-    deviceLine.textContent =
+    hardwareLine.textContent +=
       device === 'cuda'
-        ? 'Transcription will use your NVIDIA GPU (device: cuda).'
-        : 'Transcription will run on the CPU (device: cpu).'
+        ? ' Transcription will use the NVIDIA GPU.'
+        : ' Transcription will use the CPU.'
     renderList()
     // Install and Finish are mutually exclusive by state: an install in
     // progress shows an "Installing…" affordance with Finish hidden; once
@@ -345,12 +339,12 @@ function buildChapterSection(isDisposed: () => boolean): ChapterSection {
     el(
       'div',
       { class: 'chapter-head' },
-      el('h3', { class: 'setup-section-title', text: 'Make it smarter with an AI model' }),
+      el('h3', { class: 'setup-section-title', text: 'Chapter summaries' }),
       el('span', { class: 'chapter-optional', text: 'Optional' })
     ),
     el('p', {
       class: 'setup-section-note',
-      text: 'Transcription already works on its own. Connect an AI language model and your transcripts gain:'
+      text: 'Optional. Connect a provider for chapter markers, summaries, and idea-based paragraphs.'
     }),
     el(
       'ul',

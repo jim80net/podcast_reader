@@ -147,11 +147,11 @@ test('real engine: dev-fallback spawn, handshake, key-set parity, clean quit', a
     })
 
     // Sentinel → discovery → authed health all happened iff we reach ready
-    // as a SPAWNED engine (the pill omits the "(adopted)" suffix).
+    // as a SPAWNED engine. Healthy readiness is intentionally silent.
     await expectEngineState(window, 'ready')
-    await expect(window.locator('.engine-pill')).not.toContainText('adopted')
+    await expect(window.locator('.engine-pill')).toBeHidden()
     await expect(window.locator('.empty-state')).toContainText(
-      'Transcribe your first episode'
+      'New transcript'
     )
 
     // The handshake files the app consumed, now checked against the mirrors.

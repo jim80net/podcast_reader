@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { deriveProgress, formatDate, sortJobs, sourceLabel } from './job-view'
+import { deriveProgress, formatDate, sortJobs, sourceLabel, userFacingJobWarning } from './job-view'
 import type { JobRecord, PipelineEvent } from '../../shared/types'
 
 function event(overrides: Partial<PipelineEvent>): PipelineEvent {
@@ -46,6 +46,22 @@ describe('deriveProgress', () => {
       event({ kind: 'job_failed', step: null, message: 'boom' })
     ]
     expect(deriveProgress(events)).toEqual({ steps: [], warnings: [] })
+  })
+})
+
+describe('userFacingJobWarning', () => {
+  it('translates missing chapter configuration while retaining diagnostic detail', () => {
+    expect(userFacingJobWarning('ANTHROPIC_API_KEY is not set; chapters skipped')).toEqual({
+      message: 'Chapters are off. Add a chapter provider in Settings to enable them.',
+      technicalDetail: 'ANTHROPIC_API_KEY is not set; chapters skipped'
+    })
+  })
+
+  it('leaves unrelated warnings unchanged', () => {
+    expect(userFacingJobWarning('Audio was clipped')).toEqual({
+      message: 'Audio was clipped',
+      technicalDetail: null
+    })
   })
 })
 

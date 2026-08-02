@@ -20,7 +20,7 @@ const WIZARD_SEED = {
 }
 
 const wizardHeading = (harness: Harness) =>
-  harness.window.locator('h2', { hasText: 'Welcome to Podcast Reader' })
+  harness.window.locator('h2', { hasText: 'Private, on-device transcription' })
 
 async function expectWizardOpen(harness: Harness): Promise<void> {
   await expectEngineState(harness.window, 'ready')
@@ -56,11 +56,11 @@ test.describe('setup wizard (first run)', () => {
     test.setTimeout(120_000)
     await expectWizardOpen(harness)
 
-    // Hardware summary + per-S4 device note from the mock's win32+NVIDIA block.
+    // Hardware and execution choice stay on one calm, user-facing line.
     await expect(harness.window.locator('.hardware-summary')).toHaveText(
-      'Windows — NVIDIA GPU: Mock GeForce RTX'
+      'Windows — NVIDIA GPU: Mock GeForce RTX Transcription will use the NVIDIA GPU.'
     )
-    await expect(harness.window.locator('.device-note')).toContainText('device: cuda')
+    await expect(harness.window.locator('.setup-actions')).toBeInViewport()
 
     // Recommended packs pre-checked with their download sizes; others not.
     await expect(harness.window.locator('#setup-pack-cuda-runtime')).toBeChecked()
