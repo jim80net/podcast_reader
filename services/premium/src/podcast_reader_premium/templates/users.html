@@ -33,4 +33,14 @@
   <span>Page {{ page }}</span>
   {% if has_next %}<a href="?q={{ q|urlencode }}&status={{ status }}&tier={{ tier }}&page={{ page + 1 }}">Next</a>{% endif %}
 </nav>
+<section><h2>Payment inbox</h2>
+  <table>
+    <thead><tr><th>Event</th><th>Checkout</th><th>State</th><th>Attempts</th><th>Result</th></tr></thead>
+    <tbody>
+    {% for event in payment_events %}
+      <tr><td>{{ event.provider_event_id }}</td><td>{{ event.object_id }}</td><td>{{ event.state }}</td><td>{{ event.attempts }}</td><td>{{ event.result_code or "—" }}</td></tr>
+    {% else %}<tr><td colspan="5">No payment events.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</section>
 {% endblock %}

@@ -7,6 +7,7 @@ from zipfile import ZipFile
 EXPECTED = {
     "podcast_reader_premium/static/admin.css",
     "podcast_reader_premium/templates/ads.html",
+    "podcast_reader_premium/templates/account.html",
     "podcast_reader_premium/templates/audit.html",
     "podcast_reader_premium/templates/base.html",
     "podcast_reader_premium/templates/device.html",

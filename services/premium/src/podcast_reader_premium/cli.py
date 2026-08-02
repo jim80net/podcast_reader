@@ -29,6 +29,11 @@ def _settings(args: argparse.Namespace) -> Settings:
         user_code_pepper=pepper.encode(),
         environment="dev",
         build_sha=os.environ.get("PREMIUM_BUILD_SHA", "development"),
+        stripe_secret_key=os.environ.get("STRIPE_SECRET_KEY"),
+        stripe_price_id=os.environ.get("STRIPE_PRICE_ID"),
+        stripe_webhook_secret=os.environ.get("STRIPE_WEBHOOK_SECRET"),
+        premium_currency=os.environ.get("PREMIUM_PRICE_CURRENCY", "usd"),
+        premium_unit_amount=int(os.environ.get("PREMIUM_PRICE_UNIT_AMOUNT", "999")),
     )
 
 

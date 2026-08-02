@@ -1,0 +1,10 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Your Podcast Reader account</title><link rel="stylesheet" href="/premium-static/admin.css"></head>
+<body><main class="login"><h1>Your Podcast Reader account</h1>
+{% if notice %}<div class="notice" role="status">{{ notice }}</div>{% endif %}
+<section class="card"><p>Signed in as {{ user.email }}.</p><p>Current online tier: <strong>{{ entitlement.tier }}</strong></p>
+{% if entitlement.tier == "premium" %}<p>Your test premium entitlement is active.</p>{% else %}
+<form method="post" action="/account/billing/checkout"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button type="submit">Buy premium (test)</button></form>
+<p>This opens Stripe-hosted test Checkout. No card fields enter Podcast Reader.</p>{% endif %}</section>
+</main></body></html>

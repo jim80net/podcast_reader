@@ -9,6 +9,12 @@
   <dt>Effective tier</dt><dd>{{ projection.effective_tier }}</dd><dt>Entitlement revision</dt><dd>{{ projection.revision }}</dd>
   <dt>Active browser sessions</dt><dd>{{ browser_count }}</dd><dt>Active token families</dt><dd>{{ family_count }}</dd>
 </dl>
+<section><h2>Test Checkout history</h2>
+  <table><thead><tr><th>Attempt</th><th>Stripe Session</th><th>Status</th></tr></thead><tbody>
+  {% for attempt in checkout_attempts %}<tr><td>{{ attempt.id }}</td><td>{{ attempt.checkout_session_id or "—" }}</td><td>{{ attempt.status }}</td></tr>
+  {% else %}<tr><td colspan="3">No test Checkout attempts.</td></tr>{% endfor %}
+  </tbody></table>
+</section>
 <section><h2>Entitlement override</h2>
   <form method="post" action="/admin/users/{{ user.id }}/override">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">

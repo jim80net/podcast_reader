@@ -33,10 +33,12 @@ from .models import (
     AdConfig,
     AuditLog,
     BrowserSession,
+    CheckoutAttempt,
     EntitlementEvent,
     EntitlementProjection,
     FeatureFlag,
     HouseAd,
+    PaymentEvent,
     TokenFamily,
     User,
 )
@@ -151,6 +153,11 @@ def users_page(
     if tier != "all":
         query = query.where(EntitlementProjection.effective_tier == tier)
     rows = database.execute(query.order_by(User.email).offset((page - 1) * 50).limit(51)).all()
+    payment_events = database.scalars(
+        select(PaymentEvent)
+        .order_by(PaymentEvent.received_at.desc(), PaymentEvent.provider_event_id.desc())
+        .limit(20)
+    ).all()
     return TEMPLATES.TemplateResponse(
         request,
         "users.html",
@@ -163,6 +170,7 @@ def users_page(
             "q": q,
             "status": status,
             "tier": tier,
+            "payment_events": payment_events,
         },
     )
 
@@ -215,6 +223,12 @@ def user_detail_page(
         )
         or 0
     )
+    checkout_attempts = database.scalars(
+        select(CheckoutAttempt)
+        .where(CheckoutAttempt.user_id == user.id)
+        .order_by(CheckoutAttempt.created_at.desc())
+        .limit(20)
+    ).all()
     return TEMPLATES.TemplateResponse(
         request,
         "user_detail.html",
@@ -227,6 +241,7 @@ def user_detail_page(
             "audits": audits,
             "browser_count": browser_count,
             "family_count": family_count,
+            "checkout_attempts": checkout_attempts,
         },
     )
 

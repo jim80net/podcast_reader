@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import logging
 import secrets
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 from contextlib import asynccontextmanager
@@ -20,6 +22,14 @@ from starlette.staticfiles import StaticFiles
 
 from .admin import CSRF_COOKIE, TEMPLATES
 from .admin import router as admin_router
+from .billing import (
+    BillingAdapter,
+    BillingConfigurationError,
+    BillingProviderError,
+    FakeBillingAdapter,
+    StripeBillingAdapter,
+    WebhookVerificationError,
+)
 from .config import Settings
 from .contracts import EntitlementV1
 from .db import begin_immediate, create_database, require_current_schema
@@ -36,6 +46,12 @@ from .models import (
     RefreshToken,
     TokenFamily,
     User,
+)
+from .payments import (
+    CheckoutRedirect,
+    PaymentWorker,
+    create_checkout_attempt,
+    ingest_verified_webhook,
 )
 from .security import (
     DUMMY_PASSWORD_HASH,
@@ -54,6 +70,7 @@ from .security import (
 
 SESSION_COOKIE = "__Host-pr_session"
 GENERIC_LOGIN_MESSAGE = "Email or password is incorrect"
+LOGGER = logging.getLogger(__name__)
 
 
 class ApiError(Exception):
@@ -238,22 +255,82 @@ def _revoke_token_family(database: Session, family: TokenFamily, timestamp: int)
     )
 
 
-def create_app(settings: Settings, *, engine: Engine | None = None) -> FastAPI:
+def create_app(
+    settings: Settings,
+    *,
+    engine: Engine | None = None,
+    billing: BillingAdapter | None = None,
+) -> FastAPI:
     database_engine = engine or create_database(settings)
     limiter = RateLimiter()
+    session_factory = sessionmaker(database_engine, expire_on_commit=False)
+    billing_adapter = billing
+    if billing_adapter is None:
+        if settings.environment == "test":
+            billing_adapter = FakeBillingAdapter(
+                price_id=settings.expected_stripe_price_id,
+                currency=settings.premium_currency,
+                unit_amount=settings.premium_unit_amount,
+            )
+        else:
+            billing_adapter = StripeBillingAdapter(settings)
+    payment_worker = PaymentWorker(session_factory, billing_adapter, settings)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-        require_current_schema(database_engine)
-        with Session(database_engine) as database:
-            require_entitlement_configuration(database)
-        yield
-        database_engine.dispose()
+        stop = asyncio.Event()
+        worker_task: asyncio.Task[None] | None = None
+
+        async def payment_loop() -> None:
+            retry_delay = 1
+            while True:
+                try:
+                    await asyncio.wait_for(stop.wait(), timeout=retry_delay)
+                    return
+                except TimeoutError:
+                    try:
+                        await asyncio.to_thread(payment_worker.run_once)
+                        retry_delay = 1
+                    except Exception as exc:
+                        LOGGER.exception(
+                            "payment_worker_iteration_failed event_id=%s cause=%s",
+                            getattr(exc, "event_id", "unknown"),
+                            type(exc.__cause__ or exc).__name__,
+                        )
+                        retry_delay = min(retry_delay * 2, 60)
+
+        try:
+            require_current_schema(database_engine)
+            with Session(database_engine) as database:
+                require_entitlement_configuration(database)
+            product = await asyncio.to_thread(billing_adapter.preflight)
+            if (
+                product.livemode
+                or product.price_id != settings.expected_stripe_price_id
+                or product.currency != settings.premium_currency
+                or product.unit_amount != settings.premium_unit_amount
+            ):
+                raise BillingConfigurationError(
+                    "billing preflight does not match configured product"
+                )
+            worker_task = (
+                asyncio.create_task(payment_loop()) if settings.environment != "test" else None
+            )
+            yield
+        finally:
+            stop.set()
+            try:
+                if worker_task is not None:
+                    await worker_task
+            finally:
+                database_engine.dispose()
 
     app = FastAPI(title="Podcast Reader premium dev service", version="1", lifespan=lifespan)
     app.state.settings = settings
     app.state.engine = database_engine
-    app.state.session_factory = sessionmaker(database_engine, expire_on_commit=False)
+    app.state.session_factory = session_factory
+    app.state.billing = billing_adapter
+    app.state.payment_worker = payment_worker
     app.mount(
         "/premium-static",
         StaticFiles(directory=Path(__file__).with_name("static")),
@@ -362,7 +439,7 @@ def create_app(settings: Settings, *, engine: Engine | None = None) -> FastAPI:
             )
         response.headers["X-Request-ID"] = request.state.request_id
         response.headers["Cache-Control"] = "no-store"
-        if request.url.path.startswith(("/admin", "/device")):
+        if request.url.path.startswith(("/admin", "/device", "/account")):
             response.headers["Content-Security-Policy"] = (
                 "default-src 'none'; style-src 'self'; script-src 'self'; img-src 'self'; "
                 "connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
@@ -392,7 +469,7 @@ def create_app(settings: Settings, *, engine: Engine | None = None) -> FastAPI:
 
     @app.get("/healthz")
     def health() -> dict[str, object]:
-        return {"status": "ok", "schema": 2, "build_sha": settings.build_sha}
+        return {"status": "ok", "schema": 3, "build_sha": settings.build_sha}
 
     @app.get("/admin/login", response_class=HTMLResponse)
     def admin_login_page(request: Request) -> HTMLResponse:
@@ -417,6 +494,111 @@ def create_app(settings: Settings, *, engine: Engine | None = None) -> FastAPI:
         response = RedirectResponse("/admin/", status_code=303)
         set_browser_cookies(response, session_raw, csrf_raw)
         return response
+
+    @app.get("/account", response_class=HTMLResponse)
+    def account_page(
+        request: Request,
+        user: User = Depends(_browser_user),
+        database: Session = Depends(_database_session),
+    ) -> HTMLResponse:
+        entitlement = evaluate_entitlements(database, user.id)
+        return TEMPLATES.TemplateResponse(
+            request,
+            "account.html",
+            {
+                "user": user,
+                "entitlement": entitlement,
+                "csrf_token": request.cookies.get(CSRF_COOKIE, ""),
+                "notice": None,
+            },
+        )
+
+    @app.get("/account/billing/success", response_class=HTMLResponse)
+    def billing_success_page(
+        request: Request,
+        user: User = Depends(_browser_user),
+        database: Session = Depends(_database_session),
+    ) -> HTMLResponse:
+        return TEMPLATES.TemplateResponse(
+            request,
+            "account.html",
+            {
+                "user": user,
+                "entitlement": evaluate_entitlements(database, user.id),
+                "csrf_token": request.cookies.get(CSRF_COOKIE, ""),
+                "notice": "Checkout returned. Your account reflects verified payment status.",
+            },
+        )
+
+    @app.get("/account/billing/cancel", response_class=HTMLResponse)
+    def billing_cancel_page(
+        request: Request,
+        user: User = Depends(_browser_user),
+        database: Session = Depends(_database_session),
+    ) -> HTMLResponse:
+        return TEMPLATES.TemplateResponse(
+            request,
+            "account.html",
+            {
+                "user": user,
+                "entitlement": evaluate_entitlements(database, user.id),
+                "csrf_token": request.cookies.get(CSRF_COOKIE, ""),
+                "notice": "Checkout closed. Your account reflects verified payment status.",
+            },
+        )
+
+    def start_checkout(database: Session, user: User) -> CheckoutRedirect:
+        try:
+            return create_checkout_attempt(database, billing_adapter, settings, user)
+        except BillingProviderError as exc:
+            raise ApiError(503, "billing_unavailable", "Test Checkout is unavailable") from exc
+
+    @app.post("/account/billing/checkout")
+    def account_checkout(
+        request: Request,
+        csrf_token: Annotated[str, Form(min_length=20, max_length=256)],
+        user: User = Depends(_browser_user),
+        database: Session = Depends(_database_session),
+    ) -> RedirectResponse:
+        _validate_browser_mutation(request, csrf_token)
+        checkout = start_checkout(database, user)
+        return RedirectResponse(checkout.url, status_code=303)
+
+    @app.post("/v1/billing/checkout-sessions", status_code=201)
+    def create_checkout_session(
+        user: User = Depends(_require_browser_mutation),
+        database: Session = Depends(_database_session),
+    ) -> dict[str, str]:
+        checkout = start_checkout(database, user)
+        return {
+            "attempt_id": checkout.attempt_id,
+            "checkout_url": checkout.url,
+        }
+
+    @app.post("/v1/webhooks/stripe", status_code=204)
+    async def stripe_webhook(
+        request: Request,
+        database: Session = Depends(_database_session),
+    ) -> Response:
+        signature = request.headers.get("Stripe-Signature", "")
+        if not signature or len(signature) > 512:
+            raise ApiError(400, "webhook_invalid", "Webhook signature is invalid")
+        payload = bytearray()
+        async for chunk in request.stream():
+            payload.extend(chunk)
+            if len(payload) > 64 * 1024:
+                raise ApiError(413, "request_too_large", "Webhook body is too large")
+        raw_payload = bytes(payload)
+        try:
+            verified = billing_adapter.verify_webhook(raw_payload, signature)
+            ingest_verified_webhook(database, verified, raw_payload)
+        except WebhookVerificationError as exc:
+            raise ApiError(400, "webhook_invalid", "Webhook signature is invalid") from exc
+        except ValueError as exc:
+            raise ApiError(
+                400, "webhook_conflict", "Webhook event conflicts with prior data"
+            ) from exc
+        return Response(status_code=204)
 
     @app.get("/device", response_class=HTMLResponse)
     def device_page(
