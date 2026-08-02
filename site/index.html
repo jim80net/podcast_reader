@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; style-src 'self'; img-src 'self'; font-src 'self'; base-uri 'none'; form-action 'none'"
+    >
+    <meta
+      name="description"
+      content="Podcast Reader turns podcasts, videos, and audio files into private, readable transcripts on your Windows computer."
+    >
+    <title>Podcast Reader — private, readable transcripts</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to main content</a>
+
+    <header class="site-header">
+      <div class="shell header-inner">
+        <a class="wordmark" href="#top" aria-label="Podcast Reader home">Podcast Reader</a>
+        <nav aria-label="Primary navigation">
+          <a href="#how-it-works">How it works</a>
+          <a href="#features">Features</a>
+          <a href="#requirements">Requirements</a>
+          <a href="#get-started">Get started</a>
+          <a href="https://github.com/jim80net/podcast_reader">GitHub</a>
+        </nav>
+      </div>
+    </header>
+
+    <main id="main">
+      <section class="hero shell" id="top" aria-labelledby="hero-title">
+        <div class="hero-copy">
+          <p class="eyebrow">Private transcription for Windows</p>
+          <h1 id="hero-title">Listen less.<br>Read the whole thing.</h1>
+          <p class="lede">
+            Turn a podcast, video, or audio file into a clean, searchable transcript.
+            Podcast Reader transcribes on your computer, keeps a local library, and
+            gives long-form audio a page made for reading.
+          </p>
+          <div class="actions">
+            <a class="button button-primary" href="https://github.com/jim80net/podcast_reader/blob/main/app/README.md#development">Build from source</a>
+            <a class="button button-secondary" href="https://github.com/jim80net/podcast_reader">View on GitHub</a>
+          </div>
+          <p class="release-status">
+            <strong>Windows installer in final prep.</strong> Signed public downloads
+            are not available yet. Developers can build the app from source today.
+          </p>
+        </div>
+        <figure class="app-shot hero-shot">
+          <img
+            src="assets/screenshots/02-empty-library-100pct-light.png"
+            width="1008"
+            height="655"
+            alt="Podcast Reader's empty Library view in the default Light theme, with transcript search and a New transcript button"
+          >
+          <figcaption>The real installed Windows app, shown in its default Light theme.</figcaption>
+        </figure>
+      </section>
+
+      <section class="privacy-band" aria-labelledby="privacy-title">
+        <div class="shell privacy-grid">
+          <div>
+            <p class="eyebrow eyebrow-light">The privacy boundary</p>
+            <h2 id="privacy-title">Your audio stays with you.</h2>
+          </div>
+          <div class="privacy-copy">
+            <p>
+              Speech-to-text runs on your computer. There is no Podcast Reader
+              account, and the project is open source.
+            </p>
+            <p>
+              Network boundaries are explicit: URL inputs are fetched from their
+              source, transcription models download during setup, and transcript
+              text is sent to a chapter provider only if you configure one. Local-file
+              transcription itself does not upload your audio to a transcription service.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section class="section shell" id="how-it-works" aria-labelledby="flow-title">
+        <div class="section-heading">
+          <p class="eyebrow">How it works</p>
+          <h2 id="flow-title">From audio to a page you can use</h2>
+        </div>
+        <ol class="steps">
+          <li>
+            <span class="step-number" aria-hidden="true">1</span>
+            <h3>Add a source</h3>
+            <p>Paste a supported URL, choose a local audio file, or drop a file into the app.</p>
+          </li>
+          <li>
+            <span class="step-number" aria-hidden="true">2</span>
+            <h3>Transcribe on this computer</h3>
+            <p>Choose a speech model that fits your hardware. CPU works; an NVIDIA GPU is optional for faster transcription.</p>
+          </li>
+          <li>
+            <span class="step-number" aria-hidden="true">3</span>
+            <h3>Read, find, and copy</h3>
+            <p>Open the finished transcript beside its audio, jump by timestamp, search for exact words, and copy what you need.</p>
+          </li>
+        </ol>
+        <figure class="app-shot wide-shot">
+          <img
+            src="assets/screenshots/01-first-run-wizard-100pct-light.png"
+            width="993"
+            height="655"
+            alt="Podcast Reader's first-run setup showing detected Windows hardware and transcription-model download sizes"
+            loading="lazy"
+          >
+          <figcaption>First run detects the computer and shows every download size before installation.</figcaption>
+        </figure>
+      </section>
+
+      <section class="section feature-section" id="features" aria-labelledby="features-title">
+        <div class="shell">
+          <div class="feature-lead">
+            <div>
+              <p class="eyebrow">Made for reading</p>
+              <h2 id="features-title">A transcript designed for reading</h2>
+            </div>
+            <p>
+              Podcast Reader turns timestamped speech into calm, readable pages.
+              When you configure an optional chapter provider, it can add chapter
+              summaries, key points, and pull quotes. Without one, the full transcript
+              and timestamp navigation still work.
+            </p>
+          </div>
+          <figure class="app-shot wide-shot transcript-shot">
+            <img
+              src="assets/screenshots/05-reader-transcript-100pct-light.png"
+              width="1008"
+              height="655"
+              alt="A light Podcast Reader transcript with audio controls, timestamp navigation, search, and copy controls"
+              loading="lazy"
+            >
+            <figcaption>Audio, timestamp navigation, search, and copy controls stay close to the text.</figcaption>
+          </figure>
+
+          <div class="feature-grid">
+            <article>
+              <p class="feature-kicker">Search</p>
+              <h3>Find the words, not just the passage</h3>
+              <p>
+                Search highlights the matched term inside the transcript and keeps
+                passage context around it. Unicode-aware matching works across scripts
+                and languages, and next/previous controls make long conversations quick to scan.
+              </p>
+            </article>
+            <article>
+              <p class="feature-kicker">Export</p>
+              <h3>Copy the part you need</h3>
+              <p>
+                Copy the whole transcript or the current chapter as plain text or
+                Markdown, with timestamps when useful. Export is generated in the page;
+                it does not call a network service.
+              </p>
+            </article>
+            <article>
+              <p class="feature-kicker">Speakers</p>
+              <h3>Keep speakers distinct</h3>
+              <p>
+                Install the optional speaker-diarization pack to label speaker changes.
+                The pack runs locally after installation and is never enabled by default.
+              </p>
+            </article>
+            <article>
+              <p class="feature-kicker">Private web access</p>
+              <h3>Read privately from another device</h3>
+              <p>
+                Enable Private web access to open the read-only library from a phone or
+                laptop already on your Tailscale network. Podcast Reader uses Tailscale
+                Serve—not Funnel—and keeps the engine bound to the desktop's loopback
+                interface. Tailscale is optional and is not bundled.
+              </p>
+            </article>
+          </div>
+
+          <div class="theme-pair">
+            <figure class="app-shot">
+              <img
+                src="assets/screenshots/05-reader-transcript-100pct-dark.png"
+                width="1008"
+                height="655"
+                alt="The same Podcast Reader transcript in the explicit Dark theme"
+                loading="lazy"
+              >
+              <figcaption>The transcript in Dark.</figcaption>
+            </figure>
+            <figure class="app-shot">
+              <img
+                src="assets/screenshots/06-settings-100pct-light.png"
+                width="993"
+                height="655"
+                alt="Podcast Reader Settings in Light theme, with Light selected in the appearance control"
+                loading="lazy"
+              >
+              <figcaption>Light is the default; Light, Dark, and System remain explicit choices.</figcaption>
+            </figure>
+          </div>
+        </div>
+      </section>
+
+      <section class="section shell" id="requirements" aria-labelledby="requirements-title">
+        <div class="requirements-layout">
+          <div class="section-heading requirements-heading">
+            <p class="eyebrow">Requirements</p>
+            <h2 id="requirements-title">What you need</h2>
+            <p>Start on a CPU. Add a GPU only if you want more speed.</p>
+          </div>
+          <dl class="requirements-list">
+            <div>
+              <dt>Platform</dt>
+              <dd>Windows is the supported installed-app target today. macOS packaging is planned, not released.</dd>
+            </div>
+            <div>
+              <dt>Hardware</dt>
+              <dd>CPU transcription works without a GPU. A supported NVIDIA GPU can accelerate larger models; the Windows CUDA runtime is a separate optional 1.2 GB download.</dd>
+            </div>
+            <div>
+              <dt>Speech model</dt>
+              <dd>Choose during setup. Current approximate downloads: tiny 78 MB, small 486 MB, medium 1.5 GB, or large-v3 3.1 GB. The app recommends small for CPU systems and large-v3 for NVIDIA GPU systems.</dd>
+            </div>
+            <div>
+              <dt>Speaker labels</dt>
+              <dd>The optional speaker-diarization worker is about 340 MB. Its public pack is not yet published, so the installed app currently marks it unavailable.</dd>
+            </div>
+          </dl>
+        </div>
+        <p class="requirements-note">
+          Model and component downloads happen at runtime and show their size before
+          installation. The Windows build bundles dynamically used, LGPL-configured
+          FFmpeg/FFprobe binaries; license notices and component provenance ship with the app.
+        </p>
+      </section>
+
+      <section class="cta-band" id="get-started" aria-labelledby="cta-title">
+        <div class="shell cta-inner">
+          <div>
+            <p class="eyebrow">Get started</p>
+            <h2 id="cta-title">Build it today.<br>Download it when signing is ready.</h2>
+          </div>
+          <div class="cta-copy">
+            <p>
+              The source is public and the Windows build path is documented now. A
+              signed public installer will appear here only after the release-signing
+              work is complete—no unsigned installer is presented as a release.
+            </p>
+            <div class="actions">
+              <a class="button button-primary" href="https://github.com/jim80net/podcast_reader/blob/main/app/README.md#development">Build Podcast Reader from source</a>
+              <a class="button button-secondary" href="https://github.com/jim80net/podcast_reader">Browse the repository</a>
+            </div>
+            <p class="supporting-links">
+              <a href="https://github.com/jim80net/podcast_reader/blob/main/app/README.md">Read the app build guide</a>
+              <span aria-hidden="true">·</span>
+              <a href="https://github.com/jim80net/podcast_reader/issues">Report an issue</a>
+            </p>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="shell footer-inner">
+        <div>
+          <p><strong>Podcast Reader</strong> — private, readable transcripts from your own computer.</p>
+          <p class="footer-promise">Open source · No analytics · No trackers · No external fonts or CDNs</p>
+        </div>
+        <nav aria-label="Footer navigation">
+          <a href="https://github.com/jim80net/podcast_reader">Source</a>
+          <a href="https://github.com/jim80net/podcast_reader/blob/main/LICENSE">License</a>
+          <a href="https://github.com/jim80net/podcast_reader/issues">Issues</a>
+        </nav>
+      </div>
+    </footer>
+  </body>
+</html>
