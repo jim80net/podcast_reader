@@ -41,8 +41,10 @@
           var resolved =
             pref === 'light' || pref === 'dark'
               ? pref
-              : window.matchMedia('(prefers-color-scheme: dark)').matches
-                ? 'dark'
+              : pref === 'system'
+                ? window.matchMedia('(prefers-color-scheme: dark)').matches
+                  ? 'dark'
+                  : 'light'
                 : 'light'
           document.documentElement.dataset.theme = resolved
         } catch (e) {

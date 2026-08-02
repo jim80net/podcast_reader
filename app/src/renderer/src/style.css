@@ -222,26 +222,27 @@ a {
   font-weight: 600;
 }
 
-/* Right-grouped with the engine pill: the first margin-left:auto in the header
-   row consumes the free space, so the toggle + pill sit together on the right. */
-.theme-toggle {
+/* Right-grouped with the engine pill. The explicit label avoids the former
+   OS-dependent emoji glyph and makes Light / Dark / System discoverable. */
+.theme-control {
   margin-left: auto;
-  font-size: var(--text-base);
-  line-height: 1;
-  padding: var(--space-1) var(--space-2);
-  background: transparent;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-pill);
-  color: var(--fg);
-  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--muted);
+  font-size: var(--text-xs);
+  font-weight: 600;
 }
 
-.theme-toggle:hover {
-  border-color: var(--accent);
+.theme-select {
+  padding: var(--space-1) var(--space-2);
+  color: var(--fg);
+  font-size: var(--text-sm);
+  font-weight: 500;
 }
 
 .engine-pill {
-  margin-left: auto;
+  margin-left: 0;
   font-family: var(--sans);
   font-size: var(--text-xs);
   letter-spacing: 0.02em;

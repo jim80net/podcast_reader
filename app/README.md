@@ -62,8 +62,9 @@ The renderer's single stylesheet (`src/renderer/src/style.css`) is a token-drive
 **editorial** design — a warm-paper light palette and a calm dark palette, serif
 display titles over a `system-ui` body, a consistent type/spacing scale, dividers
 over boxes, and a single warm red-brown accent (matching the recolored app icon).
-Both themes are first-class via `prefers-color-scheme`; every component reads the
-tokens, so a palette tweak lives in one place.
+Light is the intentional first-run default. A labelled header selector persists
+Light, Dark, or System; explicit System follows `prefers-color-scheme` live. Every
+component reads the same tokens, so a palette tweak lives in one place.
 
 - **Typography** — display/titles use a system serif stack
   (`--serif: Georgia, 'Iowan Old Style', 'Times New Roman', serif`; Georgia ships

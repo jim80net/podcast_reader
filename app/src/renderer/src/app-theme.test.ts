@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { getThemePref, nextThemePref, resolveTheme } from './app-theme'
+import { getThemePref, resolveTheme } from './app-theme'
 
 function memoryStorage(initial?: Record<string, string>): Storage {
   const map = new Map<string, string>(Object.entries(initial ?? {}))
@@ -22,14 +22,15 @@ const winWith = (systemDark: boolean): Window =>
   ({ matchMedia: () => ({ matches: systemDark }) }) as unknown as Window
 
 describe('getThemePref', () => {
-  it('defaults to system and ignores junk', () => {
-    expect(getThemePref(memoryStorage())).toBe('system')
-    expect(getThemePref(memoryStorage({ 'pr.theme': 'neon' }))).toBe('system')
+  it('defaults to intentional Light and ignores junk', () => {
+    expect(getThemePref(memoryStorage())).toBe('light')
+    expect(getThemePref(memoryStorage({ 'pr.theme': 'neon' }))).toBe('light')
   })
 
   it('reads a stored valid preference', () => {
     expect(getThemePref(memoryStorage({ 'pr.theme': 'light' }))).toBe('light')
     expect(getThemePref(memoryStorage({ 'pr.theme': 'dark' }))).toBe('dark')
+    expect(getThemePref(memoryStorage({ 'pr.theme': 'system' }))).toBe('system')
   })
 })
 
@@ -42,13 +43,5 @@ describe('resolveTheme', () => {
   it('consults the OS for system', () => {
     expect(resolveTheme('system', winWith(true))).toBe('dark')
     expect(resolveTheme('system', winWith(false))).toBe('light')
-  })
-})
-
-describe('nextThemePref', () => {
-  it('cycles System → Light → Dark → System', () => {
-    expect(nextThemePref('system')).toBe('light')
-    expect(nextThemePref('light')).toBe('dark')
-    expect(nextThemePref('dark')).toBe('system')
   })
 })
