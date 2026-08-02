@@ -1,0 +1,30 @@
+{
+  "schema": 1,
+  "ffmpeg": {
+    "provider": "BtbN/FFmpeg-Builds",
+    "release_tag": "autobuild-2026-08-02-13-17",
+    "upstream_commit": "a7e72069f1",
+    "version": "N-125907-ga7e72069f1",
+    "license": "LGPL-3.0-or-later",
+    "integration": "separate-process",
+    "required_configuration": [
+      "--enable-version3"
+    ],
+    "forbidden_configuration": [
+      "--enable-gpl",
+      "--enable-nonfree"
+    ],
+    "platforms": {
+      "linux": {
+        "asset": "ffmpeg-N-125907-ga7e72069f1-linux64-lgpl.tar.xz",
+        "sha256": "64b57335884a23b748997b124487b37f1f7a5099372206a1773f886d5b60a14d",
+        "size": 113654348
+      },
+      "win32": {
+        "asset": "ffmpeg-N-125907-ga7e72069f1-win64-lgpl.zip",
+        "sha256": "a74ad9068f12355118111a57111d548882c0a59f2520ad3e65188aa52a02ff9c",
+        "size": 147673407
+      }
+    }
+  }
+}
