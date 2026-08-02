@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "subject": "usr_premium_fixture",
+  "tier": "premium",
+  "entitlement": {
+    "source": "test_purchase",
+    "revision": 7
+  },
+  "capabilities": {
+    "ad_policy": "none",
+    "podcast_subscriptions": false,
+    "transcript_email": false,
+    "mobile_ad_free": true,
+    "topic_corpus": false
+  },
+  "flags_revision": 12,
+  "evaluated_at": "2026-08-02T00:00:00Z",
+  "refresh_after": "2026-08-02T00:05:00Z"
+}

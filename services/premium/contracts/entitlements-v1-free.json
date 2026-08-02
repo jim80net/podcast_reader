@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "subject": "usr_free_fixture",
+  "tier": "free",
+  "entitlement": {
+    "source": "none",
+    "revision": 0
+  },
+  "capabilities": {
+    "ad_policy": "none",
+    "podcast_subscriptions": false,
+    "transcript_email": false,
+    "mobile_ad_free": false,
+    "topic_corpus": false
+  },
+  "flags_revision": 0,
+  "evaluated_at": "2026-08-02T00:00:00Z",
+  "refresh_after": "2026-08-02T00:05:00Z"
+}

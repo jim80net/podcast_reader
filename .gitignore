@@ -54,6 +54,7 @@
 !extension/**/*.html
 !src/podcast_reader/web_assets/*.html
 !docs/walk-repros/*.json
+!services/premium/contracts/*.json
 
 # Python
 __pycache__/

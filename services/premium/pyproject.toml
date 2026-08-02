@@ -1,0 +1,44 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "podcast-reader-premium"
+version = "0.1.0"
+description = "Development-only accounts and entitlement service for Podcast Reader"
+requires-python = ">=3.12"
+dependencies = [
+  "alembic>=1.16,<2",
+  "argon2-cffi>=25.1,<26",
+  "fastapi>=0.116,<1",
+  "sqlalchemy>=2.0.41,<3",
+  "uvicorn>=0.35,<1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "httpx>=0.28,<1",
+  "mypy>=1.17,<2",
+  "pytest>=8.4,<9",
+  "ruff>=0.12,<1",
+]
+
+[project.scripts]
+premium-dev = "podcast_reader_premium.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/podcast_reader_premium"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "A", "SIM", "TCH"]
+ignore = ["B008", "TC001", "TC002", "TC003"]
+
+[tool.mypy]
+strict = true
