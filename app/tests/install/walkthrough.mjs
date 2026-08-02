@@ -163,13 +163,17 @@ async function captureSurface(number, surface) {
         WIZARD_TIMEOUT_MS,
         `${theme} theme to apply`
       )
-      if (surface === 'new-view-submitted') {
-        await page.locator('.job-card').first().scrollIntoViewIfNeeded()
-      } else if (surface === 'new-view-job-done') {
-        await page
-          .locator('.job-card')
-          .filter({ hasText: 'Installed app audio proof' })
-          .scrollIntoViewIfNeeded()
+      if (surface === 'new-view-submitted' || surface === 'new-view-job-done') {
+        const focused = await page.evaluate((currentSurface) => {
+          const cards = [...document.querySelectorAll('.job-card')]
+          const target =
+            currentSurface === 'new-view-job-done'
+              ? cards.find((card) => card.textContent?.includes('Installed app audio proof'))
+              : cards[0]
+          target?.scrollIntoView({ block: 'center' })
+          return target !== undefined
+        }, surface)
+        if (!focused) await fail(`${surface} has no job card to capture`)
       }
       const filename = `${number}-${surface}-${scale.label}-${theme}.png`
       await page.screenshot({ path: join(outDir, filename) })
