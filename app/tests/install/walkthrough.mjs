@@ -128,12 +128,17 @@ async function captureSurface(number, surface) {
       `${scale.label} renderer scaling`
     )
 
-    const geometry = await page.evaluate(() => ({
-      clientWidth: document.documentElement.clientWidth,
-      scrollWidth: document.documentElement.scrollWidth,
-      viewportHeight: window.innerHeight,
-      themeControlRight: document.querySelector('.theme-control')?.getBoundingClientRect().right
-    }))
+    const geometry = await page.evaluate(() => {
+      const themeControl = document.querySelector('.theme-control')?.getBoundingClientRect()
+      return {
+        clientWidth: document.documentElement.clientWidth,
+        scrollWidth: document.documentElement.scrollWidth,
+        viewportHeight: window.innerHeight,
+        themeControlLeft: themeControl?.left,
+        themeControlRight: themeControl?.right,
+        themeControlWidth: themeControl?.width
+      }
+    })
     if (geometry.scrollWidth > geometry.clientWidth) {
       await fail(
         `${surface} overflows horizontally at ${scale.label}: ` +
@@ -141,12 +146,21 @@ async function captureSurface(number, surface) {
       )
     }
     if (
+      geometry.themeControlLeft === undefined ||
       geometry.themeControlRight === undefined ||
+      geometry.themeControlWidth === undefined ||
+      geometry.themeControlLeft < -1 ||
+      geometry.themeControlWidth < 1 ||
       geometry.themeControlRight > geometry.clientWidth + 1
     ) {
       await fail(
         `theme control is clipped at ${scale.label}: ` +
-          `${String(geometry.themeControlRight)}px > ${geometry.clientWidth}px`
+          `${JSON.stringify({
+            left: geometry.themeControlLeft,
+            right: geometry.themeControlRight,
+            width: geometry.themeControlWidth,
+            viewport: geometry.clientWidth
+          })}`
       )
     }
     if (surface === 'first-run-wizard') {
@@ -176,7 +190,8 @@ async function captureSurface(number, surface) {
         if (!focused) await fail(`${surface} has no job card to capture`)
       }
       const filename = `${number}-${surface}-${scale.label}-${theme}.png`
-      await page.screenshot({ path: join(outDir, filename) })
+      const fullPage = surface === 'new-view-submitted' || surface === 'new-view-job-done'
+      await page.screenshot({ path: join(outDir, filename), fullPage })
       log(`captured ${surface} at ${scale.label} in ${theme}`)
     }
   }
