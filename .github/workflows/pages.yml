@@ -1,0 +1,110 @@
+name: Landing page
+
+on:
+  pull_request:
+    paths:
+      - "site/**"
+      - ".github/workflows/pages.yml"
+  push:
+    branches: [main]
+    paths:
+      - "site/**"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Validate static privacy boundary and local assets
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          test -f site/.nojekyll
+          test -f site/index.html
+          test -f site/styles.css
+
+          if grep -Eqi '<script|<form|googletag|doubleclick' site/index.html site/styles.css; then
+            echo 'The landing page contains a forbidden active or tracking surface.' >&2
+            exit 1
+          fi
+
+          if grep -Eqi "(src|href)=[\"'][[:space:]]*(https?:)?//" site/index.html | grep -Evi "href=[\"']https://github\\.com/jim80net/podcast_reader"; then
+            echo 'The landing page loads an off-origin asset.' >&2
+            exit 1
+          fi
+
+          python3 - <<'PY'
+          from html.parser import HTMLParser
+          from pathlib import Path
+          from urllib.parse import urlsplit
+
+          root = Path('site')
+          missing = []
+
+          class Links(HTMLParser):
+              def handle_starttag(self, tag, attrs):
+                  values = dict(attrs)
+                  for name in ('src', 'href'):
+                      value = values.get(name)
+                      if not value or value.startswith(('#', 'https://')):
+                          continue
+                      path = urlsplit(value).path
+                      target = root / path
+                      if not target.is_file():
+                          missing.append(f'{tag}[{name}] -> {value}')
+
+          parser = Links()
+          parser.feed((root / 'index.html').read_text(encoding='utf-8'))
+          if missing:
+              raise SystemExit('Missing local assets:\n' + '\n'.join(missing))
+          PY
+
+          sha256sum --check <<'SUMS'
+          b7c3f2818446bba71645633edfbee770392f357d3c19cbf88a851396e68a7677  site/assets/screenshots/01-first-run-wizard-100pct-light.png
+          b854293ce78c44eba94f6639e34ef9768a36347570890996367a7fd497377577  site/assets/screenshots/02-empty-library-100pct-light.png
+          6724e3649682aec09bbe5bfc4a9dd3aa2fc77ef74b144c7d5500d04555fd788d  site/assets/screenshots/05-reader-transcript-100pct-dark.png
+          7b8307ecf1f751440a0c97da9a431b4c533c179f8084f9e95735ddc3f2ebf5d8  site/assets/screenshots/05-reader-transcript-100pct-light.png
+          f90fd3a07e7291545beb770157eca9400fa8d3885c53ddfe52271875ab5bad38  site/assets/screenshots/06-settings-100pct-light.png
+          f9e4eac0e8f8ffdae91cf6eff3962b96e81417cba5c728bc1c89efe9510e7653  site/assets/fonts/SourceSans3VF-Upright.otf.woff2
+          f146ee102dddcc5bc7a2cf4af5bcf129832195941b92bd0a512626f390688c1e  site/assets/fonts/SourceSerif4Variable-Roman.otf.woff2
+          89ad2c4f66dd29127527493e729c31e731f111cf10faf5774c3db9275ed0c22c  site/assets/fonts/OFL-Source-Sans-3.txt
+          75784a295293a8992f5a8d99210566e0064a012e6dab6731305e3787f15896c7  site/assets/fonts/OFL-Source-Serif-4.txt
+          bff3ff468a3f4d706b9a4373f6f08182f7e871462797e93017ab81f605b07079  site/assets/fonts/provenance.json
+          SUMS
+
+      - name: Configure GitHub Pages
+        if: github.event_name != 'pull_request' && vars.PAGES_PUBLICATION_ENABLED == 'true'
+        uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
+
+      - name: Upload landing page
+        if: github.event_name != 'pull_request' && vars.PAGES_PUBLICATION_ENABLED == 'true'
+        uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3
+        with:
+          path: site
+
+  deploy:
+    if: github.event_name != 'pull_request' && vars.PAGES_PUBLICATION_ENABLED == 'true'
+    needs: validate
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
