@@ -25,6 +25,11 @@ jobs:
         run: uv sync --frozen --extra dev
       - name: Unit and contract tests
         run: uv run pytest -q
+      - name: Packaged admin assets
+        run: |
+          mkdir -p "${RUNNER_TEMP}/premium-wheel"
+          uv build --out-dir "${RUNNER_TEMP}/premium-wheel"
+          uv run python scripts/assert_packaged_ui.py "${RUNNER_TEMP}/premium-wheel"
       - name: Type check (strict)
         run: uv run mypy src/ tests/ scripts/
       - name: Lint and format check

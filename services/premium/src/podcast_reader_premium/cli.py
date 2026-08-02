@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from .app import create_app
 from .config import Settings
 from .db import create_database, require_current_schema
+from .entitlements import ensure_projection
 from .models import User
 from .security import hash_password, normalize_email, now_epoch, record_id
 
@@ -54,17 +55,18 @@ def _bootstrap_admin(settings: Settings) -> None:
     with Session(engine) as database:
         if database.scalar(select(User.id).where(User.email == email)) is not None:
             raise SystemExit("account already exists")
-        database.add(
-            User(
-                id=record_id("usr"),
-                email=email,
-                password_hash=hash_password(password),
-                role="admin",
-                status="active",
-                verification="unverified_test",
-                created_at=now_epoch(),
-            )
+        user = User(
+            id=record_id("usr"),
+            email=email,
+            password_hash=hash_password(password),
+            role="admin",
+            status="active",
+            verification="unverified_test",
+            created_at=now_epoch(),
         )
+        database.add(user)
+        database.flush()
+        ensure_projection(database, user.id, timestamp=user.created_at)
         database.commit()
     engine.dispose()
     print("development admin created")

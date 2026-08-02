@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Users · Premium admin{% endblock %}
+{% block content %}
+<h1>Users</h1>
+<form class="filters" method="get">
+  <label>Email (exact, or prefix ending in *) <input name="q" value="{{ q }}" maxlength="320"></label>
+  <label>Status
+    <select name="status">
+      {% for value in ["all", "active", "disabled"] %}<option value="{{ value }}"{% if status == value %} selected{% endif %}>{{ value }}</option>{% endfor %}
+    </select>
+  </label>
+  <label>Tier
+    <select name="tier">
+      {% for value in ["all", "free", "premium"] %}<option value="{{ value }}"{% if tier == value %} selected{% endif %}>{{ value }}</option>{% endfor %}
+    </select>
+  </label>
+  <button type="submit">Filter</button>
+</form>
+<table>
+  <thead><tr><th>Email</th><th>Role</th><th>Status</th><th>Provider</th><th>Override</th><th>Effective</th><th>Revision</th></tr></thead>
+  <tbody>
+  {% for user, projection in rows %}
+    <tr>
+      <td><a href="/admin/users/{{ user.id }}">{{ user.email }}</a></td>
+      <td>{{ user.role }}</td><td>{{ user.status }}</td><td>{{ projection.provider_tier }}</td>
+      <td>{{ projection.admin_override or "—" }}</td><td>{{ projection.effective_tier }}</td><td>{{ projection.revision }}</td>
+    </tr>
+  {% else %}<tr><td colspan="7">No matching users.</td></tr>{% endfor %}
+  </tbody>
+</table>
+<nav class="pager" aria-label="Pages">
+  {% if page > 1 %}<a href="?q={{ q|urlencode }}&status={{ status }}&tier={{ tier }}&page={{ page - 1 }}">Previous</a>{% endif %}
+  <span>Page {{ page }}</span>
+  {% if has_next %}<a href="?q={{ q|urlencode }}&status={{ status }}&tier={{ tier }}&page={{ page + 1 }}">Next</a>{% endif %}
+</nav>
+{% endblock %}

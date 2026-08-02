@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}{{ user.email }} · Premium admin{% endblock %}
+{% block content %}
+<p><a href="/admin/">← Users</a></p>
+<h1>{{ user.email }}</h1>
+<dl class="summary">
+  <dt>ID</dt><dd>{{ user.id }}</dd><dt>Role</dt><dd>{{ user.role }}</dd><dt>Status</dt><dd>{{ user.status }}</dd>
+  <dt>Provider tier</dt><dd>{{ projection.provider_tier }}</dd><dt>Admin override</dt><dd>{{ projection.admin_override or "—" }}</dd>
+  <dt>Effective tier</dt><dd>{{ projection.effective_tier }}</dd><dt>Entitlement revision</dt><dd>{{ projection.revision }}</dd>
+  <dt>Active browser sessions</dt><dd>{{ browser_count }}</dd><dt>Active token families</dt><dd>{{ family_count }}</dd>
+</dl>
+<section><h2>Entitlement override</h2>
+  <form method="post" action="/admin/users/{{ user.id }}/override">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>Action <select name="action"><option value="premium">Set premium</option><option value="free">Set free</option><option value="clear">Clear override</option></select></label>
+    <label>Reason <input name="reason" required minlength="3" maxlength="500"></label>
+    <button type="submit">Apply override</button>
+  </form>
+</section>
+<section><h2>Account access</h2>
+  <form method="post" action="/admin/users/{{ user.id }}/status">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="status" value="{% if user.status == 'active' %}disabled{% else %}active{% endif %}">
+    <label>Reason <input name="reason" required minlength="3" maxlength="500"></label>
+    <button type="submit">{% if user.status == 'active' %}Disable user{% else %}Enable user{% endif %}</button>
+  </form>
+  <form method="post" action="/admin/users/{{ user.id }}/sessions/revoke">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>Reason <input name="reason" required minlength="3" maxlength="500"></label>
+    <button type="submit">Revoke all sessions</button>
+  </form>
+</section>
+<section><h2>Entitlement ledger</h2><table><thead><tr><th>Revision</th><th>Event</th><th>Tier</th><th>Reason</th><th>Actor</th></tr></thead><tbody>
+{% for event in events %}<tr><td>{{ event.revision }}</td><td>{{ event.event_type }}</td><td>{{ event.tier or "—" }}</td><td>{{ event.reason }}</td><td>{{ event.actor_user_id or "system" }}</td></tr>
+{% else %}<tr><td colspan="5">No entitlement events.</td></tr>{% endfor %}
+</tbody></table></section>
+<section><h2>Audit history</h2><table><thead><tr><th>Action</th><th>Reason</th><th>Request</th><th>When</th></tr></thead><tbody>
+{% for item in audits %}<tr><td>{{ item.action }}</td><td>{{ item.reason }}</td><td>{{ item.request_id }}</td><td>{{ item.created_at }}</td></tr>
+{% else %}<tr><td colspan="4">No audit entries.</td></tr>{% endfor %}
+</tbody></table></section>
+{% endblock %}
