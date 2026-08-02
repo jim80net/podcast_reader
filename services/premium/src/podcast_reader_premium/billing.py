@@ -6,6 +6,7 @@ import json
 import time
 from dataclasses import dataclass
 from typing import Any, Protocol, cast
+from urllib.parse import urlsplit
 
 import stripe
 
@@ -43,6 +44,7 @@ class CheckoutSnapshot:
     id: str
     url: str | None
     livemode: bool
+    mode: str
     payment_status: str
     customer_id: str | None
     metadata: dict[str, str]
@@ -82,6 +84,36 @@ class BillingAdapter(Protocol):
 def _required(value: str | None, name: str) -> str:
     if not value:
         raise BillingConfigurationError(f"{name} is required for the test billing adapter")
+    return value
+
+
+def is_safe_checkout_url(url: str, *, allow_test_host: bool = False) -> bool:
+    try:
+        parsed = urlsplit(url)
+        port = parsed.port
+    except ValueError:
+        return False
+    host = parsed.hostname or ""
+    stripe_host = host == "stripe.com" or host.endswith(".stripe.com")
+    test_host = allow_test_host and host == "checkout.stripe.test"
+    return (
+        parsed.scheme == "https"
+        and port in {None, 443}
+        and parsed.username is None
+        and parsed.password is None
+        and (stripe_host or test_host)
+    )
+
+
+def _event_string(value: object, name: str) -> str:
+    if not isinstance(value, str) or not value:
+        raise WebhookVerificationError(f"Stripe webhook {name} is invalid")
+    return value
+
+
+def _event_livemode(value: object) -> bool:
+    if not isinstance(value, bool):
+        raise WebhookVerificationError("Stripe webhook livemode is invalid")
     return value
 
 
@@ -163,14 +195,12 @@ class StripeBillingAdapter:
         except (ValueError, stripe.SignatureVerificationError) as exc:
             raise WebhookVerificationError("Stripe webhook signature is invalid") from exc
         data_object = event.data.object
-        object_id = getattr(data_object, "id", None)
-        if not isinstance(object_id, str):
-            raise WebhookVerificationError("Stripe webhook object is invalid")
+        object_id = _event_string(getattr(data_object, "id", None), "object ID")
         return VerifiedWebhook(
-            id=str(event.id),
-            type=str(event.type),
+            id=_event_string(getattr(event, "id", None), "event ID"),
+            type=_event_string(getattr(event, "type", None), "event type"),
             object_id=object_id,
-            livemode=bool(event.livemode),
+            livemode=_event_livemode(getattr(event, "livemode", None)),
         )
 
     @staticmethod
@@ -189,6 +219,7 @@ class StripeBillingAdapter:
             id=str(session.id),
             url=str(session.url) if session.url else None,
             livemode=bool(session.livemode),
+            mode=str(session.mode or ""),
             payment_status=str(session.payment_status or ""),
             customer_id=str(customer_id) if customer_id else None,
             metadata=metadata,
@@ -214,6 +245,7 @@ class FakeBillingAdapter:
         self.product = ProductSnapshot(price_id, currency, unit_amount, False)
         self.webhook_secret = webhook_secret
         self.sessions: dict[str, CheckoutSnapshot] = {}
+        self.retrieve_calls: list[str] = []
 
     def preflight(self) -> ProductSnapshot:
         return self.product
@@ -234,6 +266,7 @@ class FakeBillingAdapter:
             id=session_id,
             url=f"https://checkout.stripe.test/{session_id}",
             livemode=False,
+            mode="payment",
             payment_status="unpaid",
             customer_id=customer_id,
             metadata={"attempt_id": attempt_id, "user_id": user_id},
@@ -246,6 +279,7 @@ class FakeBillingAdapter:
         return snapshot
 
     def retrieve_checkout(self, session_id: str) -> CheckoutSnapshot:
+        self.retrieve_calls.append(session_id)
         try:
             return self.sessions[session_id]
         except KeyError as exc:
@@ -279,11 +313,15 @@ class FakeBillingAdapter:
             raise WebhookVerificationError("fake webhook signature is invalid")
         try:
             event = json.loads(payload)
+            event_id = _event_string(event["id"], "event ID")
+            event_type = _event_string(event["type"], "event type")
+            object_id = _event_string(event["data"]["object"]["id"], "object ID")
+            livemode = _event_livemode(event["livemode"])
             return VerifiedWebhook(
-                id=str(event["id"]),
-                type=str(event["type"]),
-                object_id=str(event["data"]["object"]["id"]),
-                livemode=bool(event["livemode"]),
+                id=event_id,
+                type=event_type,
+                object_id=object_id,
+                livemode=livemode,
             )
         except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
             raise WebhookVerificationError("fake webhook payload is invalid") from exc

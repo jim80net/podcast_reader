@@ -44,6 +44,8 @@ def test_public_origin_must_be_canonical(tmp_path: Path, public_origin: str) -> 
         "device_max_polls",
         "premium_unit_amount",
         "payment_claim_ttl_seconds",
+        "payment_retry_base_seconds",
+        "payment_max_attempts",
     ],
 )
 def test_security_timing_fields_must_be_positive(tmp_path: Path, field: str) -> None:
@@ -51,7 +53,7 @@ def test_security_timing_fields_must_be_positive(tmp_path: Path, field: str) -> 
         _settings(tmp_path, **{field: 0})
 
 
-@pytest.mark.parametrize("currency", ["USD", "us", "dollar"])
+@pytest.mark.parametrize("currency", ["USD", "us", "dollar", "u$1", "éur"])
 def test_premium_currency_is_bounded_and_canonical(tmp_path: Path, currency: str) -> None:
     with pytest.raises(ValueError):
         _settings(tmp_path, premium_currency=currency)

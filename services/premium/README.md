@@ -47,8 +47,10 @@ webhooks are verified over their untouched raw bytes before a minimal event reco
 enters the durable inbox. The request never grants an entitlement; the single
 restart-safe worker retrieves the authoritative Checkout Session and validates its
 mode, payment, Price, quantity, Customer, amount, currency, and internal metadata.
-Duplicate events and stale claims are idempotent. Full Stripe payloads and payment
-details are never stored.
+Duplicate events and stale claims are idempotent. Provider failures use deferred
+retries so newer events can proceed; an exhausted event is parked with its bounded
+attempt count and result code visible to administrators. Full Stripe payloads and
+payment details are never stored.
 
 CI exercises the same flow through a deterministic signed fake adapter. The real
 sandbox acceptance requires the running dev service plus `stripe listen` forwarding

@@ -268,7 +268,7 @@ def create_app(
     if billing_adapter is None:
         if settings.environment == "test":
             billing_adapter = FakeBillingAdapter(
-                price_id=settings.stripe_price_id or "price_test_premium",
+                price_id=settings.expected_stripe_price_id,
                 currency=settings.premium_currency,
                 unit_amount=settings.premium_unit_amount,
             )
@@ -278,40 +278,52 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-        require_current_schema(database_engine)
-        with Session(database_engine) as database:
-            require_entitlement_configuration(database)
-        product = await asyncio.to_thread(billing_adapter.preflight)
-        if (
-            product.livemode
-            or product.price_id != settings.stripe_price_id
-            or product.currency != settings.premium_currency
-            or product.unit_amount != settings.premium_unit_amount
-        ):
-            raise BillingConfigurationError("billing preflight does not match configured product")
         stop = asyncio.Event()
+        worker_task: asyncio.Task[None] | None = None
 
         async def payment_loop() -> None:
+            retry_delay = 1
             while True:
                 try:
-                    await asyncio.wait_for(stop.wait(), timeout=1)
+                    await asyncio.wait_for(stop.wait(), timeout=retry_delay)
                     return
                 except TimeoutError:
                     try:
                         await asyncio.to_thread(payment_worker.run_once)
-                    except Exception:
-                        LOGGER.error("payment_worker_iteration_failed")
+                        retry_delay = 1
+                    except Exception as exc:
+                        LOGGER.exception(
+                            "payment_worker_iteration_failed event_id=%s cause=%s",
+                            getattr(exc, "event_id", "unknown"),
+                            type(exc.__cause__ or exc).__name__,
+                        )
+                        retry_delay = min(retry_delay * 2, 60)
 
-        worker_task = (
-            asyncio.create_task(payment_loop()) if settings.environment != "test" else None
-        )
         try:
+            require_current_schema(database_engine)
+            with Session(database_engine) as database:
+                require_entitlement_configuration(database)
+            product = await asyncio.to_thread(billing_adapter.preflight)
+            if (
+                product.livemode
+                or product.price_id != settings.expected_stripe_price_id
+                or product.currency != settings.premium_currency
+                or product.unit_amount != settings.premium_unit_amount
+            ):
+                raise BillingConfigurationError(
+                    "billing preflight does not match configured product"
+                )
+            worker_task = (
+                asyncio.create_task(payment_loop()) if settings.environment != "test" else None
+            )
             yield
         finally:
             stop.set()
-            if worker_task is not None:
-                await worker_task
-        database_engine.dispose()
+            try:
+                if worker_task is not None:
+                    await worker_task
+            finally:
+                database_engine.dispose()
 
     app = FastAPI(title="Podcast Reader premium dev service", version="1", lifespan=lifespan)
     app.state.settings = settings
@@ -514,7 +526,7 @@ def create_app(
                 "user": user,
                 "entitlement": evaluate_entitlements(database, user.id),
                 "csrf_token": request.cookies.get(CSRF_COOKIE, ""),
-                "notice": "Payment received; confirming entitlement.",
+                "notice": "Checkout returned. Your account reflects verified payment status.",
             },
         )
 
@@ -531,7 +543,7 @@ def create_app(
                 "user": user,
                 "entitlement": evaluate_entitlements(database, user.id),
                 "csrf_token": request.cookies.get(CSRF_COOKIE, ""),
-                "notice": "Checkout canceled. Your entitlement did not change.",
+                "notice": "Checkout closed. Your account reflects verified payment status.",
             },
         )
 

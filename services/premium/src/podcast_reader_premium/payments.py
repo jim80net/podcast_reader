@@ -2,9 +2,8 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
-from urllib.parse import urlsplit
 
-from sqlalchemy import select, update
+from sqlalchemy import or_, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from .billing import (
@@ -12,6 +11,7 @@ from .billing import (
     BillingProviderError,
     CheckoutSnapshot,
     VerifiedWebhook,
+    is_safe_checkout_url,
 )
 from .config import Settings
 from .db import begin_immediate
@@ -33,6 +33,12 @@ class CheckoutRedirect:
     attempt_id: str
     session_id: str
     url: str
+
+
+class PaymentWorkerIterationError(RuntimeError):
+    def __init__(self, event_id: str) -> None:
+        super().__init__(f"payment worker failed while processing {event_id}")
+        self.event_id = event_id
 
 
 def create_checkout_attempt(
@@ -63,7 +69,13 @@ def create_checkout_attempt(
             success_url=f"{settings.public_origin}/account/billing/success",
             cancel_url=f"{settings.public_origin}/account/billing/cancel",
         )
-        if checkout.livemode or checkout.url is None or urlsplit(checkout.url).scheme != "https":
+        if (
+            checkout.livemode
+            or checkout.url is None
+            or not is_safe_checkout_url(
+                checkout.url, allow_test_host=settings.environment == "test"
+            )
+        ):
             raise BillingProviderError("billing provider returned an unsafe Checkout Session")
     except BillingProviderError:
         begin_immediate(database)
@@ -124,6 +136,8 @@ def ingest_verified_webhook(
             state="pending",
             received_at=now_epoch(),
             claimed_at=None,
+            retry_at=None,
+            attempts=0,
             processed_at=None,
             result_code=None,
         )
@@ -147,28 +161,34 @@ class PaymentWorker:
         event_id = self._claim_one()
         if event_id is None:
             return False
+        try:
+            self._run_claimed(event_id)
+        except Exception as exc:
+            raise PaymentWorkerIterationError(event_id) from exc
+        return True
+
+    def _run_claimed(self, event_id: str) -> None:
         with self._factory() as database:
             event = database.get(PaymentEvent, event_id)
             if event is None:
-                return True
+                return
             livemode = event.livemode
             event_type = event.event_type
             object_id = event.object_id
         if livemode:
             self._reject_by_id(event_id, "livemode_rejected")
-            return True
+            return
         if event_type not in ALLOWED_EVENT_TYPES:
             self._reject_by_id(event_id, "event_type_rejected")
-            return True
+            return
         try:
             checkout = self._billing.retrieve_checkout(object_id)
         except BillingProviderError:
             with self._factory() as database:
                 self._retry(database, event_id)
-            return True
+            return
         with self._factory() as database:
             self._apply(database, event_id, checkout)
-        return True
 
     def _claim_one(self) -> str | None:
         timestamp = now_epoch()
@@ -181,12 +201,24 @@ class PaymentWorker:
                     PaymentEvent.claimed_at.is_not(None),
                     PaymentEvent.claimed_at <= timestamp - self._settings.payment_claim_ttl_seconds,
                 )
-                .values(state="pending", claimed_at=None, result_code="stale_claim_recovered")
+                .values(
+                    state="pending",
+                    claimed_at=None,
+                    retry_at=timestamp,
+                    result_code="stale_claim_recovered",
+                )
             )
             event = database.scalar(
                 select(PaymentEvent)
-                .where(PaymentEvent.state == "pending")
-                .order_by(PaymentEvent.received_at, PaymentEvent.provider_event_id)
+                .where(
+                    PaymentEvent.state == "pending",
+                    or_(PaymentEvent.retry_at.is_(None), PaymentEvent.retry_at <= timestamp),
+                )
+                .order_by(
+                    PaymentEvent.retry_at,
+                    PaymentEvent.received_at,
+                    PaymentEvent.provider_event_id,
+                )
                 .limit(1)
             )
             if event is None:
@@ -194,6 +226,8 @@ class PaymentWorker:
                 return None
             event.state = "processing"
             event.claimed_at = timestamp
+            event.retry_at = None
+            event.attempts += 1
             event.result_code = None
             event_id = event.provider_event_id
             database.commit()
@@ -262,18 +296,20 @@ class PaymentWorker:
         event: PaymentEvent,
         checkout: CheckoutSnapshot,
     ) -> tuple[str | None, CheckoutAttempt | None]:
-        if checkout.id != event.object_id or checkout.livemode:
+        if checkout.id != event.object_id or checkout.livemode or checkout.mode != "payment":
             return "checkout_mode_or_id_mismatch", None
         attempt_id = checkout.metadata.get("attempt_id")
         user_id = checkout.metadata.get("user_id")
         if not attempt_id or not user_id:
             return "checkout_metadata_missing", None
         attempt = database.get(CheckoutAttempt, attempt_id)
-        if (
-            attempt is None
-            or attempt.user_id != user_id
-            or attempt.checkout_session_id != checkout.id
-        ):
+        if attempt is None or attempt.user_id != user_id:
+            return "checkout_attempt_mismatch", None
+        if attempt.checkout_session_id is None and attempt.status == "created":
+            attempt.checkout_session_id = checkout.id
+            attempt.status = "session_created"
+            attempt.updated_at = now_epoch()
+        elif attempt.checkout_session_id != checkout.id:
             return "checkout_attempt_mismatch", None
         if event.event_type == "checkout.session.expired":
             return None, attempt
@@ -284,7 +320,7 @@ class PaymentWorker:
             or checkout.currency != self._settings.premium_currency
             or not checkout.lines_complete
             or len(checkout.lines) != 1
-            or checkout.lines[0].price_id != self._settings.stripe_price_id
+            or checkout.lines[0].price_id != self._settings.expected_stripe_price_id
             or checkout.lines[0].quantity != 1
         ):
             return "checkout_product_mismatch", None
@@ -318,12 +354,20 @@ class PaymentWorker:
             else:
                 database.rollback()
 
-    @staticmethod
-    def _retry(database: Session, event_id: str) -> None:
+    def _retry(self, database: Session, event_id: str) -> None:
         begin_immediate(database)
         event = database.get(PaymentEvent, event_id)
         if event is not None and event.state == "processing":
-            event.state = "pending"
             event.claimed_at = None
-            event.result_code = "provider_unavailable"
+            if event.attempts >= self._settings.payment_max_attempts:
+                event.state = "parked"
+                event.retry_at = None
+                event.processed_at = now_epoch()
+                event.result_code = "provider_retry_exhausted"
+            else:
+                event.state = "pending"
+                exponent = min(event.attempts - 1, 10)
+                delay = min(self._settings.payment_retry_base_seconds * (2**exponent), 3600)
+                event.retry_at = now_epoch() + delay
+                event.result_code = "provider_unavailable"
         database.commit()

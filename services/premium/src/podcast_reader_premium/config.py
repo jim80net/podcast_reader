@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
 
+DEFAULT_TEST_PRICE_ID = "price_test_premium"
+
 
 @dataclass(frozen=True)
 class Settings:
@@ -24,6 +26,8 @@ class Settings:
     premium_currency: str = "usd"
     premium_unit_amount: int = 999
     payment_claim_ttl_seconds: int = 5 * 60
+    payment_retry_base_seconds: int = 5
+    payment_max_attempts: int = 5
 
     def __post_init__(self) -> None:
         try:
@@ -61,15 +65,23 @@ class Settings:
             "device_max_polls": self.device_max_polls,
             "premium_unit_amount": self.premium_unit_amount,
             "payment_claim_ttl_seconds": self.payment_claim_ttl_seconds,
+            "payment_retry_base_seconds": self.payment_retry_base_seconds,
+            "payment_max_attempts": self.payment_max_attempts,
         }
         invalid = [name for name, value in positive_fields.items() if value <= 0]
         if invalid:
             raise ValueError(f"security timing fields must be positive: {', '.join(invalid)}")
         if (
-            self.premium_currency != self.premium_currency.lower()
+            not self.premium_currency.isascii()
+            or not self.premium_currency.isalpha()
+            or self.premium_currency != self.premium_currency.lower()
             or len(self.premium_currency) != 3
         ):
             raise ValueError("premium_currency must be a lowercase three-letter currency")
+
+    @property
+    def expected_stripe_price_id(self) -> str:
+        return self.stripe_price_id or DEFAULT_TEST_PRICE_ID
 
     @property
     def expected_host(self) -> str:

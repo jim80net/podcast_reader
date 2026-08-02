@@ -143,15 +143,18 @@ class PaymentEvent(Base):
     state: Mapped[str] = mapped_column(String(16), nullable=False)
     received_at: Mapped[int] = mapped_column(Integer, nullable=False)
     claimed_at: Mapped[int | None] = mapped_column(Integer)
+    retry_at: Mapped[int | None] = mapped_column(Integer)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     processed_at: Mapped[int | None] = mapped_column(Integer)
     result_code: Mapped[str | None] = mapped_column(String(64))
 
     __table_args__ = (
         CheckConstraint(
-            "state IN ('pending', 'processing', 'processed', 'rejected')",
+            "state IN ('pending', 'processing', 'processed', 'rejected', 'parked')",
             name="ck_payment_events_state",
         ),
-        Index("ix_payment_events_state_received", "state", "received_at"),
+        CheckConstraint("attempts >= 0", name="ck_payment_events_attempts"),
+        Index("ix_payment_events_state_retry", "state", "retry_at", "received_at"),
     )
 
 

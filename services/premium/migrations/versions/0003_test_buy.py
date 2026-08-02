@@ -56,15 +56,22 @@ def upgrade() -> None:
         sa.Column("state", sa.String(length=16), nullable=False),
         sa.Column("received_at", sa.Integer(), nullable=False),
         sa.Column("claimed_at", sa.Integer(), nullable=True),
+        sa.Column("retry_at", sa.Integer(), nullable=True),
+        sa.Column("attempts", sa.Integer(), nullable=False),
         sa.Column("processed_at", sa.Integer(), nullable=True),
         sa.Column("result_code", sa.String(length=64), nullable=True),
         sa.CheckConstraint(
-            "state IN ('pending', 'processing', 'processed', 'rejected')",
+            "state IN ('pending', 'processing', 'processed', 'rejected', 'parked')",
             name="ck_payment_events_state",
         ),
+        sa.CheckConstraint("attempts >= 0", name="ck_payment_events_attempts"),
         sa.PrimaryKeyConstraint("provider_event_id"),
     )
-    op.create_index("ix_payment_events_state_received", "payment_events", ["state", "received_at"])
+    op.create_index(
+        "ix_payment_events_state_retry",
+        "payment_events",
+        ["state", "retry_at", "received_at"],
+    )
     op.create_index(
         "uq_entitlement_events_source_reference",
         "entitlement_events",
@@ -75,7 +82,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_index("uq_entitlement_events_source_reference", table_name="entitlement_events")
-    op.drop_index("ix_payment_events_state_received", table_name="payment_events")
+    op.drop_index("ix_payment_events_state_retry", table_name="payment_events")
     op.drop_table("payment_events")
     op.drop_index("ix_checkout_attempts_user_created", table_name="checkout_attempts")
     op.drop_table("checkout_attempts")
