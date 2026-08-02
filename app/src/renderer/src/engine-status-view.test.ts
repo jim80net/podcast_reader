@@ -13,7 +13,8 @@ import type { EngineStatus } from '../../shared/ipc'
 describe('engineStatusView', () => {
   it('maps starting', () => {
     expect(engineStatusView({ state: 'starting' })).toEqual({
-      pill: 'engine starting…',
+      pill: 'Starting…',
+      showPill: true,
       banner: null,
       showRestart: false
     })
@@ -28,7 +29,7 @@ describe('engineStatusView', () => {
         version: '0.3.0',
         adopted: false
       } as EngineStatus)
-    ).toEqual({ pill: 'engine v0.3.0', banner: null, showRestart: false })
+    ).toEqual({ pill: 'Ready', showPill: false, banner: null, showRestart: false })
 
     expect(
       engineStatusView({
@@ -38,14 +39,15 @@ describe('engineStatusView', () => {
         version: '0.3.0',
         adopted: true
       } as EngineStatus)
-    ).toEqual({ pill: 'engine v0.3.0 (adopted)', banner: null, showRestart: false })
+    ).toEqual({ pill: 'Ready (adopted)', showPill: false, banner: null, showRestart: false })
   })
 
   it('maps restarting with the attempt counter', () => {
     expect(
       engineStatusView({ state: 'restarting', attempt: 2, maxAttempts: 3 })
     ).toEqual({
-      pill: 'engine restarting…',
+      pill: 'Reconnecting…',
+      showPill: true,
       banner: 'Reconnecting to engine… (attempt 2/3)',
       showRestart: false
     })
@@ -53,7 +55,8 @@ describe('engineStatusView', () => {
 
   it('maps failed and offers a manual restart', () => {
     expect(engineStatusView({ state: 'failed', message: 'boom' })).toEqual({
-      pill: 'engine failed',
+      pill: 'Engine unavailable',
+      showPill: true,
       banner: 'Engine failed to start: boom',
       showRestart: true
     })
@@ -61,7 +64,8 @@ describe('engineStatusView', () => {
 
   it('maps stopped', () => {
     expect(engineStatusView({ state: 'stopped' })).toEqual({
-      pill: 'engine stopped',
+      pill: 'Engine stopped',
+      showPill: true,
       banner: null,
       showRestart: false
     })

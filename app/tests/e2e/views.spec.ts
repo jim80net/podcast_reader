@@ -228,7 +228,13 @@ test('Library empty state shows a branded first-transcript CTA routing to New', 
   await expect(empty).toBeVisible()
   await expect(empty.locator('.empty-title')).toBeVisible()
   const cta = empty.locator('a.button-cta')
-  await expect(cta).toHaveText('Transcribe your first episode')
+  await expect(cta).toHaveText('New transcript')
+  await expect(harness.window.locator('.empty-mark')).toHaveCount(0)
+  const emptyStyle = await empty.evaluate((node) => {
+    const style = getComputedStyle(node)
+    return { textAlign: style.textAlign, borderTopStyle: style.borderTopStyle }
+  })
+  expect(emptyStyle).toEqual({ textAlign: 'left', borderTopStyle: 'solid' })
   await cta.click()
   await expect(harness.window).toHaveURL(/#\/new$/)
   await expect(harness.window.locator('#new-source')).toBeVisible()
@@ -251,7 +257,7 @@ test('New: pasted URL submits and shows live step progress, failure shows the hi
 
   const card = harness.window.locator('.job-card')
   await expect(card).toHaveCount(1)
-  await expect(card.locator('.badge')).toHaveText('queued')
+  await expect(card.locator('.job-state')).toHaveText('queued')
 
   const jobs = (await (await harness.mock.engine('/v1/jobs')).json()) as { id: string }[]
   expect(jobs).toHaveLength(1)
@@ -269,7 +275,7 @@ test('New: pasted URL submits and shows live step progress, failure shows the hi
       }
     ]
   })
-  await expect(card.locator('.badge')).toHaveText('running')
+  await expect(card.locator('.job-state')).toHaveText('running')
   await expect(card.locator('.job-row-key', { hasText: 'transcribe' })).toBeVisible()
 
   // Structured failure: {code, message, hint} rendered from the job record.
@@ -284,7 +290,7 @@ test('New: pasted URL submits and shows live step progress, failure shows the hi
       }
     ]
   })
-  await expect(card.locator('.badge')).toHaveText('failed')
+  await expect(card.locator('.job-state')).toHaveText('failed')
   await expect(card.locator('.job-error-message')).toContainText(
     'download_failed: Audio download failed'
   )
@@ -318,9 +324,26 @@ test('New: a finished job links to its transcript', async ({ harness }) => {
 
   await harness.mock.control('/job', {
     job: { id: jobId, state: 'done' },
-    events: [{ kind: 'job_done', step: null, message: 'done', data: { job_id: jobId } }]
+    events: [
+      {
+        kind: 'warning',
+        step: 'chapters',
+        message: 'ANTHROPIC_API_KEY is not set; chapters skipped',
+        data: { job_id: jobId }
+      },
+      { kind: 'job_done', step: null, message: 'done', data: { job_id: jobId } }
+    ]
   })
-  await expect(card.locator('.badge')).toHaveText('done')
+  await expect(card.locator('.job-state')).toHaveText('done')
+  const chapterWarning = card.locator('.warning-detail')
+  await expect(chapterWarning.locator('summary')).toHaveText(
+    '⚠ Chapters are off. Add a chapter provider in Settings to enable them.'
+  )
+  await expect(chapterWarning.locator('.warning-detail-body')).not.toBeVisible()
+  await chapterWarning.locator('summary').click()
+  await expect(chapterWarning.locator('.warning-detail-body')).toHaveText(
+    'ANTHROPIC_API_KEY is not set; chapters skipped'
+  )
   // The header is the library title and IS the link to the transcript.
   const title = card.locator('a.job-title')
   await expect(title).toHaveText('Done Episode')
@@ -352,7 +375,7 @@ test('New: a job can be rerun with a different chapter model', async ({ harness 
     ]
   })
   const card = harness.window.locator('.job-card')
-  await expect(card.locator('.badge')).toHaveText('failed')
+  await expect(card.locator('.job-state')).toHaveText('failed')
 
   // Open the rerun dialog, enable the chapter section, pick a provider, rerun.
   await card.getByRole('button', { name: 'Rerun with a different model…' }).click()
@@ -382,7 +405,7 @@ test('SSE drop recovers through hydration: state advances without a delivered ev
   await harness.window.locator('#new-source').fill('https://example.com/recover.mp3')
   await harness.window.locator('button[type="submit"]').click()
   const card = harness.window.locator('.job-card')
-  await expect(card.locator('.badge')).toHaveText('queued')
+  await expect(card.locator('.job-state')).toHaveText('queued')
   const jobs = (await (await harness.mock.engine('/v1/jobs')).json()) as { id: string }[]
   const jobId = jobs[0]?.id ?? ''
 
@@ -390,7 +413,7 @@ test('SSE drop recovers through hydration: state advances without a delivered ev
   // reconnect-triggered hydration can deliver this state change.
   await harness.mock.control('/drop-sse', {})
   await harness.mock.control('/job', { job: { id: jobId, state: 'done' } })
-  await expect(card.locator('.badge')).toHaveText('done', { timeout: 20_000 })
+  await expect(card.locator('.job-state')).toHaveText('done', { timeout: 20_000 })
 })
 
 test('Settings: round-trip save, engine-side key test, inline validation error', async ({

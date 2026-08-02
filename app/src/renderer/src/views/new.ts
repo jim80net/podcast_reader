@@ -1,6 +1,6 @@
 import { el } from '../dom'
 import { extractEngineDetail } from '../engine-error'
-import { deriveProgress, sortJobs, sourceLabel } from '../job-view'
+import { deriveProgress, sortJobs, sourceLabel, userFacingJobWarning } from '../job-view'
 import { LatestGate } from '../latest-gate'
 import { buildRerunOverrides } from '../rerun-plan'
 import { hrefFor } from '../router'
@@ -148,6 +148,19 @@ export function mountNew(container: HTMLElement, store: AppStore): ViewCleanup {
     renderActivity(jobs.filter((job) => job.state !== 'awaiting-confirmation'))
   }
 
+  function warningNode(warning: string): HTMLElement {
+    const view = userFacingJobWarning(warning)
+    if (view.technicalDetail === null) {
+      return el('span', { class: 'step-warning', text: `⚠ ${view.message}` })
+    }
+    return el(
+      'details',
+      { class: 'step-warning warning-detail' },
+      el('summary', { text: `⚠ ${view.message}` }),
+      el('span', { class: 'warning-detail-body', text: view.technicalDetail })
+    )
+  }
+
   function renderConfirmations(pending: JobRecord[]): void {
     confirmSection.replaceChildren()
     if (pending.length === 0) return
@@ -225,7 +238,12 @@ export function mountNew(container: HTMLElement, store: AppStore): ViewCleanup {
         'div',
         { class: 'job-head' },
         titleEl,
-        el('span', { class: 'badge', text: job.state, attrs: { 'data-state': job.state } })
+        el(
+          'span',
+          { class: 'job-state', attrs: { 'data-state': job.state } },
+          el('span', { class: 'job-state-dot', attrs: { 'aria-hidden': 'true' } }),
+          document.createTextNode(job.state)
+        )
       ),
       // The full source URL on the next row down.
       el('p', { class: 'job-source-full', text: job.source })
@@ -245,7 +263,7 @@ export function mountNew(container: HTMLElement, store: AppStore): ViewCleanup {
         el('span', { class: 'job-row-key', text: step.step }),
         el('span', { class: 'job-row-val', attrs: { 'data-status': step.status } }, ...[
           el('span', { text: step.detail }),
-          ...step.warnings.map((w) => el('span', { class: 'step-warning', text: `⚠ ${w}` }))
+          ...step.warnings.map(warningNode)
         ])
       )
     }
@@ -271,7 +289,7 @@ export function mountNew(container: HTMLElement, store: AppStore): ViewCleanup {
     if (table.childElementCount > 0) card.append(table)
 
     for (const warning of progress.warnings) {
-      card.append(el('p', { class: 'step-warning', text: `⚠ ${warning}` }))
+      card.append(warningNode(warning))
     }
     if (job.state === 'failed' && job.error !== null) {
       card.append(

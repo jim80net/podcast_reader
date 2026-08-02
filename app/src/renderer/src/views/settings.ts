@@ -3,6 +3,7 @@ import { mountPacksSection } from './packs-section'
 import { mountPairingSection } from './pairing-section'
 import { mountPrivateWebSection } from './private-web-section'
 import { planChapterSave } from '../chapter-onboarding'
+import { THEME_KEY, THEME_PREF_CHANGE_EVENT, getThemePref } from '../app-theme'
 import { el } from '../dom'
 import { extractEngineDetail, settingsErrorField } from '../engine-error'
 import { keyPlaceholder, modelPlaceholder, toSettingsUpdate } from '../settings-form'
@@ -38,6 +39,14 @@ export function mountSettings(container: HTMLElement): ViewCleanup {
   let pairingSection: PairingSection | null = null
   let privateWebSection: PrivateWebSection | null = null
   let cookiesSection: CookiesSection | null = null
+  let appearanceThemeSelect: HTMLSelectElement | null = null
+  const syncAppearanceTheme = (event: Event): void => {
+    const selected = (event as CustomEvent<string>).detail
+    if (appearanceThemeSelect !== null && ['light', 'dark', 'system'].includes(selected)) {
+      appearanceThemeSelect.value = selected
+    }
+  }
+  window.addEventListener(THEME_PREF_CHANGE_EVENT, syncAppearanceTheme)
 
   async function load(): Promise<void> {
     try {
@@ -65,6 +74,35 @@ export function mountSettings(container: HTMLElement): ViewCleanup {
     let knownProviders = providers
     let customProviders = settings.custom_providers.map((provider) => ({ ...provider }))
     const fieldErrors = new Map<string, HTMLElement>()
+
+    const themeSelect = el('select', { attrs: { id: 'settings-theme' } })
+    for (const [value, label] of [
+      ['light', 'Light'],
+      ['dark', 'Dark'],
+      ['system', 'System']
+    ] as const) {
+      themeSelect.append(el('option', { text: label, attrs: { value } }))
+    }
+    themeSelect.value = getThemePref()
+    appearanceThemeSelect = themeSelect
+    themeSelect.addEventListener('change', () => {
+      const selected = themeSelect.value
+      if (selected !== 'light' && selected !== 'dark' && selected !== 'system') return
+      localStorage.setItem(THEME_KEY, selected)
+      window.dispatchEvent(new CustomEvent(THEME_PREF_CHANGE_EVENT, { detail: selected }))
+    })
+    const appearance = el(
+      'section',
+      { class: 'settings-appearance' },
+      el('h3', { text: 'Appearance' }),
+      el(
+        'div',
+        { class: 'field' },
+        el('label', { text: 'Theme', attrs: { for: 'settings-theme' } }),
+        themeSelect,
+        el('p', { class: 'field-note', text: 'System follows your operating-system setting.' })
+      )
+    )
 
     function field(
       id: string,
@@ -624,7 +662,7 @@ export function mountSettings(container: HTMLElement): ViewCleanup {
         })
       )
     }
-    container.append(form)
+    container.append(appearance, form)
     syncProviderDependentUi()
 
     // Packs management below the form (task 6.3). The advisory follows the
@@ -702,6 +740,7 @@ export function mountSettings(container: HTMLElement): ViewCleanup {
 
   return () => {
     disposed = true
+    window.removeEventListener(THEME_PREF_CHANGE_EVENT, syncAppearanceTheme)
     unsubscribeStatus()
     packsSection?.cleanup()
     pairingSection?.cleanup()

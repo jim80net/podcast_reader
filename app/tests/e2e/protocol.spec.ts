@@ -50,7 +50,7 @@ test('valid protocol URL lands awaiting confirmation, runs only after Run', asyn
 
   await confirmCard.getByRole('button', { name: 'Run' }).click()
   await expect(harness.window.locator('.confirm-card')).toHaveCount(0)
-  await expect(harness.window.locator('.job-card .badge')).toHaveText('queued')
+  await expect(harness.window.locator('.job-card .job-state')).toHaveText('queued')
   const confirmed = await mockJobs(harness)
   expect(confirmed[0]?.state).toBe('queued')
 })

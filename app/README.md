@@ -66,6 +66,12 @@ Light is the intentional first-run default. A labelled header selector persists
 Light, Dark, or System; explicit System follows `prefers-color-scheme` live. Every
 component reads the same tokens, so a palette tweak lives in one place.
 
+Healthy engine readiness stays silent in the normal header; starting,
+reconnecting, and failure states remain visible and actionable. Empty Library,
+setup, job progress, and navigation use flat editorial treatments rather than
+ornamental marks, outlined status pills, or elevated dashboard cards. Settings
+provides the canonical Theme field and stays synchronized with the header control.
+
 - **Typography** — display/titles use a system serif stack
   (`--serif: Georgia, 'Iowan Old Style', 'Times New Roman', serif`; Georgia ships
   on Windows + macOS, serif fallback elsewhere). Body, labels, metadata, and form

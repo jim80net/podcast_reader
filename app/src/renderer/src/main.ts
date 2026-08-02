@@ -1,6 +1,7 @@
 import './style.css'
 
-import { THEME_KEY, applyThemePref, getThemePref } from './app-theme'
+import { THEME_KEY, THEME_PREF_CHANGE_EVENT, applyThemePref, getThemePref } from './app-theme'
+import type { ThemePref } from './app-theme'
 import { el } from './dom'
 import { engineStatusView } from './engine-status-view'
 import { createJobsHydrator } from './jobs-hydrator'
@@ -66,8 +67,14 @@ function applyAndBroadcast(): void {
 themeSelect.addEventListener('change', () => {
   const selected = themeSelect.value
   if (selected !== 'light' && selected !== 'dark' && selected !== 'system') return
+  window.dispatchEvent(new CustomEvent(THEME_PREF_CHANGE_EVENT, { detail: selected }))
+})
+window.addEventListener(THEME_PREF_CHANGE_EVENT, (event) => {
+  const selected = (event as CustomEvent<ThemePref>).detail
+  if (selected !== 'light' && selected !== 'dark' && selected !== 'system') return
   themePref = selected
-  localStorage.setItem(THEME_KEY, themePref)
+  localStorage.setItem(THEME_KEY, selected)
+  themeSelect.value = selected
   applyAndBroadcast()
 })
 applyAndBroadcast()
@@ -78,7 +85,7 @@ window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () 
 
 const enginePill = el('span', {
   class: 'engine-pill',
-  text: 'engine starting…',
+  text: 'Starting…',
   attrs: { 'data-state': 'starting', role: 'status' }
 })
 const engineBanner = el('div', { class: 'banner error-banner', attrs: { role: 'alert' } })
@@ -112,6 +119,7 @@ function renderEngineStatus(status: EngineStatus): void {
   // so a new EngineStatus member fails the build rather than rendering nothing.
   const view = engineStatusView(status)
   enginePill.textContent = view.pill
+  enginePill.hidden = !view.showPill
   engineBanner.replaceChildren()
   if (view.banner === null) {
     engineBanner.hidden = true

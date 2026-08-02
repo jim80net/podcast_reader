@@ -22,14 +22,14 @@ import {
 
 test('adopts the discovered engine and reaches ready without spawning', async ({ harness }) => {
   await expectEngineState(harness.window, 'ready')
-  await expect(harness.window.locator('.engine-pill')).toContainText('adopted')
+  await expect(harness.window.locator('.engine-pill')).toBeHidden()
   // The adopt path authenticated against health and the mock saw no spawn-side
   // traffic beyond it; the boot-race ("engine is not ready" while the renderer
   // mounts before readiness) stayed non-fatal: no failure banner, and the
   // Library view settles into its empty-state CTA.
   await expect(harness.window.locator('.error-banner')).toBeHidden()
   await expect(harness.window.locator('.empty-state')).toContainText(
-    'Transcribe your first episode'
+    'New transcript'
   )
   const log = await harness.mock.log()
   expect(log.some((entry) => entry.detail === 'GET /v1/health')).toBe(true)
