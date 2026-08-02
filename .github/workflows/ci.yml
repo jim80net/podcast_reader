@@ -9,6 +9,29 @@ on:
   workflow_dispatch:
 
 jobs:
+  premium-service:
+    # Isolated online-tier foundation. Its lockfile and test root are separate
+    # from the local transcript engine so the privacy boundary stays visible.
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/premium
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+      - name: Sync locked dependencies
+        run: uv sync --frozen --extra dev
+      - name: Unit and contract tests
+        run: uv run pytest -q
+      - name: Type check (strict)
+        run: uv run mypy src/ tests/ scripts/
+      - name: Lint and format check
+        run: |
+          uv run ruff check src/ tests/ migrations/ scripts/
+          uv run ruff format --check src/ tests/ migrations/ scripts/
+
   quality:
     runs-on: ubuntu-latest
     steps:
