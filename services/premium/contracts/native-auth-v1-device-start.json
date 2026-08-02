@@ -1,0 +1,7 @@
+{
+  "device_code": "fixture_device_code_abcdefghijklmnopqrstuvwxyz",
+  "user_code": "ABCD-EFGH",
+  "verification_uri": "https://premium.test/device",
+  "expires_in": 600,
+  "interval": 5
+}

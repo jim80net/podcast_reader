@@ -277,6 +277,38 @@ def test_refresh_rotation_and_reuse_revoke_the_family(
     )
 
 
+def test_refresh_token_revoke_is_idempotent_nonleaky_and_family_wide(
+    client: TestClient, browser_auth: dict[str, str]
+) -> None:
+    started = _approved_device(client, browser_auth)
+    issued = client.post(
+        "/v1/device-authorizations/token", json={"device_code": started["device_code"]}
+    ).json()
+    rotated = client.post(
+        "/v1/tokens/refresh", json={"refresh_token": issued["refresh_token"]}
+    ).json()
+
+    first = client.post("/v1/tokens/revoke", json={"refresh_token": rotated["refresh_token"]})
+    repeated = client.post("/v1/tokens/revoke", json={"refresh_token": rotated["refresh_token"]})
+    unknown = client.post(
+        "/v1/tokens/revoke", json={"refresh_token": "unknown_refresh_token_000000000000"}
+    )
+    assert [first.status_code, repeated.status_code, unknown.status_code] == [204, 204, 204]
+    assert first.content == repeated.content == unknown.content == b""
+
+    for access_token in (issued["access_token"], rotated["access_token"]):
+        response = client.get("/v1/me", headers={"Authorization": f"Bearer {access_token}"})
+        assert response.status_code == 401
+
+    app = cast("Any", client.app)
+    with Session(app.state.engine) as database:
+        family = database.scalar(select(TokenFamily))
+        access_tokens = database.scalars(select(AccessToken)).all()
+        assert family is not None and family.revoked_at is not None
+        assert len(access_tokens) == 2
+        assert all(token.revoked_at == family.revoked_at for token in access_tokens)
+
+
 def test_concurrent_device_exchange_mints_exactly_one_family(
     client: TestClient,
     browser_auth: dict[str, str],
