@@ -11,6 +11,7 @@ from sqlalchemy import delete, inspect, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from podcast_reader_premium.cli import _repair_entitlements
 from podcast_reader_premium.entitlements import (
     apply_entitlement_event,
     assert_projection_matches_ledger,
@@ -21,10 +22,12 @@ from podcast_reader_premium.entitlements import (
 from podcast_reader_premium.models import (
     AdConfig,
     AuditLog,
+    BrowserSession,
     EntitlementEvent,
     EntitlementProjection,
     FeatureFlag,
     HouseAd,
+    TokenFamily,
     User,
 )
 
@@ -259,6 +262,63 @@ def test_admin_requires_role_origin_csrf_and_protects_last_active_admin(
     assert revoke_last.status_code == 409
 
 
+def test_admin_authentication_failure_redirects_to_sign_in(client: TestClient) -> None:
+    response = client.get("/admin/", follow_redirects=False)
+    assert response.status_code == 303
+    assert response.headers["location"] == "/admin/login"
+
+
+def test_admin_prefix_search_treats_sql_wildcards_as_literals(
+    client: TestClient, account: dict[str, object]
+) -> None:
+    _make_admin(client, account)
+    for email in ("percent%literal@example.test", "percentXliteral@example.test"):
+        created = client.post(
+            "/v1/accounts", json={"email": email, "password": "correct horse battery"}
+        )
+        assert created.status_code == 201
+
+    page = client.get("/admin/", params={"q": "percent%*"})
+
+    assert page.status_code == 200
+    assert "percent%literal@example.test" in page.text
+    assert "percentXliteral@example.test" not in page.text
+
+
+def test_admin_active_counts_exclude_expired_credentials(
+    client: TestClient, account: dict[str, object]
+) -> None:
+    auth = _make_admin(client, account)
+    _issue_bearer(client, auth)
+    with Session(_app(client).state.engine) as database:
+        database.add(
+            BrowserSession(
+                token_digest="e" * 64,
+                user_id=cast("str", account["id"]),
+                csrf_digest="f" * 64,
+                expires_at=1,
+                revoked_at=None,
+                created_at=0,
+            )
+        )
+        database.add(
+            TokenFamily(
+                id="fam_expired",
+                user_id=cast("str", account["id"]),
+                client_kind="desktop",
+                expires_at=1,
+                revoked_at=None,
+                created_at=0,
+            )
+        )
+        database.commit()
+
+    page = client.get(f"/admin/users/{account['id']}")
+
+    assert "<dt>Active browser sessions</dt><dd>1</dd>" in page.text
+    assert "<dt>Active token families</dt><dd>1</dd>" in page.text
+
+
 def test_server_rendered_admin_login_and_device_approval(
     client: TestClient, account: dict[str, object]
 ) -> None:
@@ -292,6 +352,8 @@ def test_server_rendered_admin_login_and_device_approval(
     assert device_page.status_code == 200
     assert "Your app never receives your password" not in device_page.text
     assert started["user_code"] in device_page.text
+    forged = client.get("/device?approved=true")
+    assert "Device approved." not in forged.text
     csrf_token = client.cookies.get("__Host-pr_csrf")
     assert csrf_token
     approved = client.post(
@@ -301,6 +363,9 @@ def test_server_rendered_admin_login_and_device_approval(
         follow_redirects=False,
     )
     assert approved.status_code == 303
+    assert approved.headers["location"] == f"/device?user_code={started['user_code']}"
+    confirmed = client.get(approved.headers["location"])
+    assert "Device approved." in confirmed.text
     issued = client.post(
         "/v1/device-authorizations/token", json={"device_code": started["device_code"]}
     )
@@ -324,6 +389,21 @@ def test_house_ad_fields_are_text_https_only_and_audited(
         },
     )
     assert rejected.status_code == 422
+    malformed = _admin_post(
+        client,
+        "/admin/ads/house",
+        auth,
+        {
+            "title": "bad port",
+            "body": "must not persist",
+            "cta_url": "https://example.test:not-a-port/read",
+            "status": "active",
+            "reason": "malformed URL test",
+        },
+    )
+    assert malformed.status_code == 422
+    with Session(_app(client).state.engine) as database:
+        assert database.scalar(select(HouseAd)) is None
     invalid_schedule = _admin_post(
         client,
         "/admin/ads/house",
@@ -431,6 +511,39 @@ def test_entitlement_and_audit_ledgers_are_database_append_only(
             database.commit()
 
 
+@pytest.mark.parametrize(
+    ("event_type", "tier"),
+    [
+        ("provider_grant", "free"),
+        ("provider_revoke", "premium"),
+        ("override_set", None),
+        ("override_clear", "free"),
+    ],
+)
+def test_database_rejects_invalid_entitlement_event_tier_pairs(
+    client: TestClient,
+    account: dict[str, object],
+    event_type: str,
+    tier: str | None,
+) -> None:
+    with Session(_app(client).state.engine) as database:
+        database.add(
+            EntitlementEvent(
+                id=f"evt_invalid_{event_type}_{tier}",
+                user_id=cast("str", account["id"]),
+                event_type=event_type,
+                tier=tier,
+                source_reference=None,
+                actor_user_id=None,
+                reason="constraint proof",
+                revision=1,
+                created_at=0,
+            )
+        )
+        with pytest.raises(IntegrityError, match="ck_entitlement_events_type_tier"):
+            database.commit()
+
+
 def test_projection_source_for_provider_truth_is_test_purchase(
     client: TestClient, account: dict[str, object]
 ) -> None:
@@ -466,11 +579,39 @@ def test_entitlement_endpoint_fails_closed_when_projection_is_missing(
         assert projection is not None
         database.delete(projection)
         database.commit()
+    with Session(_app(client).state.engine) as database:
+        with pytest.raises(ValueError, match="projection is missing"):
+            assert_projection_matches_ledger(database, cast("str", account["id"]))
+        assert database.get(EntitlementProjection, account["id"]) is None
     response = client.get("/v1/me/entitlements", headers={"Authorization": f"Bearer {token}"})
     assert response.status_code == 500
     assert response.json()["code"] == "internal_error"
     with Session(_app(client).state.engine) as database:
         assert database.get(EntitlementProjection, account["id"]) is None
+
+
+def test_cli_repair_persists_missing_projection_and_audits(
+    client: TestClient, account: dict[str, object], capsys: pytest.CaptureFixture[str]
+) -> None:
+    app = _app(client)
+    with Session(app.state.engine) as database:
+        projection = database.get(EntitlementProjection, account["id"])
+        assert projection is not None
+        database.delete(projection)
+        database.commit()
+
+    _repair_entitlements(app.state.settings)
+
+    assert capsys.readouterr().out == "repaired 1 entitlement projection(s)\n"
+    with Session(app.state.engine) as database:
+        projection = database.get(EntitlementProjection, account["id"])
+        assert projection is not None
+        assert projection.effective_tier == "free"
+        audit = database.scalar(
+            select(AuditLog).where(AuditLog.action == "entitlement_projection.repair")
+        )
+        assert audit is not None
+        assert audit.target_id == account["id"]
 
 
 def test_startup_configuration_check_rejects_unknown_flags_and_non_house_ads(

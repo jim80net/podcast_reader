@@ -140,7 +140,10 @@ def users_page(
     normalized = q.strip().casefold()
     if normalized:
         if normalized.endswith("*"):
-            query = query.where(User.email.like(normalized[:-1] + "%"))
+            escaped_prefix = (
+                normalized[:-1].replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            )
+            query = query.where(User.email.like(escaped_prefix + "%", escape="\\"))
         else:
             query = query.where(User.email == normalized)
     if status != "all":
@@ -187,11 +190,16 @@ def user_detail_page(
         .order_by(AuditLog.created_at.desc())
         .limit(50)
     ).all()
+    timestamp = now_epoch()
     browser_count = (
         database.scalar(
             select(func.count())
             .select_from(BrowserSession)
-            .where(BrowserSession.user_id == user.id, BrowserSession.revoked_at.is_(None))
+            .where(
+                BrowserSession.user_id == user.id,
+                BrowserSession.revoked_at.is_(None),
+                BrowserSession.expires_at > timestamp,
+            )
         )
         or 0
     )
@@ -199,7 +207,11 @@ def user_detail_page(
         database.scalar(
             select(func.count())
             .select_from(TokenFamily)
-            .where(TokenFamily.user_id == user.id, TokenFamily.revoked_at.is_(None))
+            .where(
+                TokenFamily.user_id == user.id,
+                TokenFamily.revoked_at.is_(None),
+                TokenFamily.expires_at > timestamp,
+            )
         )
         or 0
     )
@@ -566,7 +578,11 @@ def _validated_ad(
     clean_body = body.strip()
     if not clean_title or len(clean_title) > 120 or not clean_body or len(clean_body) > 500:
         raise HTTPException(422, "Ad title or body is invalid")
-    parsed = urlsplit(cta_url)
+    try:
+        parsed = urlsplit(cta_url)
+        _ = parsed.port
+    except ValueError as exc:
+        raise HTTPException(422, "Ad CTA must be a valid HTTPS URL") from exc
     if (
         parsed.scheme != "https"
         or not parsed.hostname

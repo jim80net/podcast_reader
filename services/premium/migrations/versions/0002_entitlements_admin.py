@@ -36,6 +36,14 @@ def upgrade() -> None:
         sa.CheckConstraint(
             "tier IS NULL OR tier IN ('free', 'premium')", name="ck_entitlement_events_tier"
         ),
+        sa.CheckConstraint(
+            "(event_type = 'provider_grant' AND tier IS NOT NULL AND tier = 'premium') OR "
+            "(event_type = 'provider_revoke' AND (tier IS NULL OR tier = 'free')) OR "
+            "(event_type = 'override_set' AND tier IS NOT NULL "
+            "AND tier IN ('free', 'premium')) OR "
+            "(event_type = 'override_clear' AND tier IS NULL)",
+            name="ck_entitlement_events_type_tier",
+        ),
         sa.CheckConstraint("revision >= 1", name="ck_entitlement_events_revision"),
         sa.ForeignKeyConstraint(["actor_user_id"], ["users.id"], ondelete="SET NULL"),
         sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),

@@ -13,9 +13,9 @@ from sqlalchemy.orm import Session
 
 from .app import create_app
 from .config import Settings
-from .db import create_database, require_current_schema
-from .entitlements import ensure_projection
-from .models import User
+from .db import begin_immediate, create_database, require_current_schema
+from .entitlements import ensure_projection, rebuild_projection, record_audit, repair_projection
+from .models import EntitlementProjection, User
 from .security import hash_password, normalize_email, now_epoch, record_id
 
 
@@ -72,6 +72,47 @@ def _bootstrap_admin(settings: Settings) -> None:
     print("development admin created")
 
 
+def _repair_entitlements(settings: Settings) -> None:
+    engine = create_database(settings)
+    require_current_schema(engine)
+    repaired = 0
+    with Session(engine) as database:
+        begin_immediate(database)
+        for user_id in database.scalars(select(User.id).order_by(User.id)):
+            projection = database.get(EntitlementProjection, user_id)
+            before = (
+                {"missing": True}
+                if projection is None
+                else {
+                    "provider_tier": projection.provider_tier,
+                    "provider_source": projection.provider_source,
+                    "admin_override": projection.admin_override,
+                    "effective_tier": projection.effective_tier,
+                    "revision": projection.revision,
+                    "last_event_id": projection.last_event_id,
+                }
+            )
+            after = rebuild_projection(database, user_id)
+            timestamp = now_epoch()
+            if repair_projection(database, user_id, timestamp=timestamp):
+                repaired += 1
+                record_audit(
+                    database,
+                    actor_user_id=None,
+                    action="entitlement_projection.repair",
+                    target_kind="user",
+                    target_id=user_id,
+                    before=before,
+                    after=after,
+                    reason="host CLI ledger replay repair",
+                    request_id=record_id("cli"),
+                    timestamp=timestamp,
+                )
+        database.commit()
+    engine.dispose()
+    print(f"repaired {repaired} entitlement projection(s)")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Podcast Reader premium development service")
     parser.add_argument("--database", default="premium-dev.sqlite3")
@@ -79,6 +120,7 @@ def main() -> None:
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("migrate")
     subparsers.add_parser("bootstrap-admin")
+    subparsers.add_parser("repair-entitlements")
     subparsers.add_parser("serve")
     args = parser.parse_args()
     settings = _settings(args)
@@ -86,6 +128,8 @@ def main() -> None:
         _migrate(settings.database_path)
     elif args.command == "bootstrap-admin":
         _bootstrap_admin(settings)
+    elif args.command == "repair-entitlements":
+        _repair_entitlements(settings)
     else:
         require_current_schema(create_database(settings))
         uvicorn.run(create_app(settings), host="127.0.0.1", port=8787, workers=1)

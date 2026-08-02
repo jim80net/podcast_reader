@@ -124,6 +124,14 @@ class EntitlementEvent(Base):
         CheckConstraint(
             "tier IS NULL OR tier IN ('free', 'premium')", name="ck_entitlement_events_tier"
         ),
+        CheckConstraint(
+            "(event_type = 'provider_grant' AND tier IS NOT NULL AND tier = 'premium') OR "
+            "(event_type = 'provider_revoke' AND (tier IS NULL OR tier = 'free')) OR "
+            "(event_type = 'override_set' AND tier IS NOT NULL "
+            "AND tier IN ('free', 'premium')) OR "
+            "(event_type = 'override_clear' AND tier IS NULL)",
+            name="ck_entitlement_events_type_tier",
+        ),
         CheckConstraint("revision >= 1", name="ck_entitlement_events_revision"),
         UniqueConstraint("user_id", "revision", name="uq_entitlement_events_user_revision"),
         Index("ix_entitlement_events_user_created", "user_id", "created_at"),

@@ -1,3 +1,9 @@
+"""Entitlement ledger, projections, and explicit persisted repair support.
+
+Normal reads only assert projection integrity. The ``repair-entitlements`` CLI is
+the sole recovery path that persists a projection rebuilt from the append-only ledger.
+"""
+
 from __future__ import annotations
 
 import hashlib
@@ -169,11 +175,31 @@ def rebuild_projection(database: Session, user_id: str) -> dict[str, object]:
 
 
 def assert_projection_matches_ledger(database: Session, user_id: str) -> None:
-    projection = ensure_projection(database, user_id)
+    projection = database.get(EntitlementProjection, user_id)
+    if projection is None:
+        raise ValueError("entitlement projection is missing")
     rebuilt = rebuild_projection(database, user_id)
     for key, value in rebuilt.items():
         if getattr(projection, key) != value:
             raise ValueError(f"entitlement projection mismatch for {key}")
+
+
+def repair_projection(database: Session, user_id: str, *, timestamp: int) -> bool:
+    """Persist a ledger-derived projection; return whether stored state changed."""
+    rebuilt = rebuild_projection(database, user_id)
+    projection = database.get(EntitlementProjection, user_id)
+    changed = projection is None or any(
+        getattr(projection, key) != value for key, value in rebuilt.items()
+    )
+    if projection is None:
+        projection = EntitlementProjection(user_id=user_id, updated_at=timestamp, **rebuilt)
+        database.add(projection)
+    elif changed:
+        for key, value in rebuilt.items():
+            setattr(projection, key, value)
+        projection.updated_at = timestamp
+    database.flush()
+    return changed
 
 
 def next_config_revision(database: Session) -> int:

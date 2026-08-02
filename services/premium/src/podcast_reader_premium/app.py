@@ -332,6 +332,7 @@ def create_app(settings: Settings, *, engine: Engine | None = None) -> FastAPI:
             digest = user_code_digest(visible_code, settings.user_code_pepper)
         except ValueError as exc:
             raise ApiError(422, "invalid_user_code", "User code is invalid") from exc
+        begin_immediate(database)
         authorization = database.scalar(
             select(DeviceAuthorization).where(DeviceAuthorization.user_code_digest == digest)
         )
@@ -382,7 +383,9 @@ def create_app(settings: Settings, *, engine: Engine | None = None) -> FastAPI:
         return _error(request, ApiError(422, "invalid_request", "Request data is invalid"))
 
     @app.exception_handler(HTTPException)
-    async def http_error(request: Request, error: HTTPException) -> JSONResponse:
+    async def http_error(request: Request, error: HTTPException) -> Response:
+        if error.status_code == 401 and request.url.path.startswith("/admin"):
+            return RedirectResponse("/admin/login", status_code=303)
         code = "not_found" if error.status_code == 404 else "http_error"
         message = "Route not found" if error.status_code == 404 else "Request was rejected"
         return _error(request, ApiError(error.status_code, code, message))
@@ -419,11 +422,11 @@ def create_app(settings: Settings, *, engine: Engine | None = None) -> FastAPI:
     def device_page(
         request: Request,
         user_code_value: Annotated[str, Query(alias="user_code", max_length=16)] = "",
-        approved: Annotated[bool, Query()] = False,
         database: Session = Depends(_database_session),
         session_token: str | None = Cookie(default=None, alias=SESSION_COOKIE),
     ) -> HTMLResponse:
         user: User | None = None
+        approved = False
         csrf_raw = request.cookies.get(CSRF_COOKIE, "")
         if session_token:
             browser_session = database.get(BrowserSession, token_digest(session_token))
@@ -438,6 +441,20 @@ def create_app(settings: Settings, *, engine: Engine | None = None) -> FastAPI:
                 if candidate is not None and candidate.status == "active":
                     user = candidate
                     request.state.browser_session = browser_session
+        if user is not None and user_code_value:
+            try:
+                digest = user_code_digest(user_code_value, settings.user_code_pepper)
+            except ValueError:
+                pass
+            else:
+                authorization = database.scalar(
+                    select(DeviceAuthorization).where(
+                        DeviceAuthorization.user_code_digest == digest,
+                        DeviceAuthorization.approving_user_id == user.id,
+                        DeviceAuthorization.state.in_(("approved", "consumed")),
+                    )
+                )
+                approved = authorization is not None
         return TEMPLATES.TemplateResponse(
             request,
             "device.html",
@@ -477,7 +494,9 @@ def create_app(settings: Settings, *, engine: Engine | None = None) -> FastAPI:
     ) -> RedirectResponse:
         _validate_browser_mutation(request, csrf_token)
         approve_code(database, user, user_code_value)
-        return RedirectResponse("/device?approved=true", status_code=303)
+        return RedirectResponse(
+            "/device?" + urlencode({"user_code": user_code_value}), status_code=303
+        )
 
     @app.post("/v1/accounts", status_code=201)
     def create_account(
