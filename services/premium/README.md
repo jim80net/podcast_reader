@@ -15,6 +15,11 @@ one worker because login limiting is process-local. It does not configure or
 mutate Tailscale Serve. The existing desktop private-web Serve ownership remains
 an independent surface and is protected by the repository boundary test.
 
+In P1, `premium-dev migrate` is intentionally supported only from a
+`services/premium` source checkout: the existing-infrastructure dev deployment
+runs from this repository, and a packaged migration-resource contract is deferred
+until the deployment slice defines the service artifact.
+
 ```bash
 cd services/premium
 uv sync --extra dev

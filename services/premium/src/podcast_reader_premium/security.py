@@ -5,10 +5,11 @@ import hmac
 import secrets
 import time
 import unicodedata
-from collections import defaultdict, deque
+from collections import OrderedDict, deque
+from threading import Lock
 
 from argon2 import PasswordHasher
-from argon2.exceptions import InvalidHashError, VerifyMismatchError
+from argon2.exceptions import VerificationError
 from argon2.low_level import Type
 
 PASSWORD_HASHER = PasswordHasher(
@@ -50,6 +51,8 @@ def user_code() -> str:
 
 def user_code_digest(code: str, pepper: bytes) -> str:
     canonical = code.strip().upper().replace("-", "")
+    if len(canonical) != 8 or any(char not in USER_CODE_ALPHABET for char in canonical):
+        raise ValueError("invalid user code")
     return hmac.new(pepper, canonical.encode("ascii", "strict"), hashlib.sha256).hexdigest()
 
 
@@ -76,25 +79,43 @@ def hash_password(value: str) -> str:
 def verify_password(encoded: str, candidate: str) -> bool:
     try:
         return PASSWORD_HASHER.verify(encoded, candidate)
-    except (InvalidHashError, VerifyMismatchError):
+    except VerificationError:
         return False
 
 
 class RateLimiter:
     """Small single-process limiter for the explicitly single-worker dev service."""
 
-    def __init__(self, *, attempts: int = 8, window_seconds: int = 60) -> None:
+    def __init__(
+        self, *, attempts: int = 8, window_seconds: int = 60, max_keys: int = 4096
+    ) -> None:
+        if attempts <= 0 or window_seconds <= 0 or max_keys <= 0:
+            raise ValueError("rate limiter bounds must be positive")
         self.attempts = attempts
         self.window_seconds = window_seconds
-        self._events: dict[str, deque[int]] = defaultdict(deque)
+        self.max_keys = max_keys
+        self._events: OrderedDict[str, deque[int]] = OrderedDict()
+        self._lock = Lock()
 
     def allow(self, key: str, at: int | None = None) -> bool:
         timestamp = now_epoch() if at is None else at
-        events = self._events[key]
-        cutoff = timestamp - self.window_seconds
-        while events and events[0] <= cutoff:
-            events.popleft()
-        if len(events) >= self.attempts:
-            return False
-        events.append(timestamp)
-        return True
+        with self._lock:
+            events = self._events.get(key)
+            if events is not None:
+                cutoff = timestamp - self.window_seconds
+                while events and events[0] <= cutoff:
+                    events.popleft()
+                if not events:
+                    del self._events[key]
+                    events = None
+            if events is None:
+                if len(self._events) >= self.max_keys:
+                    self._events.popitem(last=False)
+                events = deque()
+                self._events[key] = events
+            else:
+                self._events.move_to_end(key)
+            if len(events) >= self.attempts:
+                return False
+            events.append(timestamp)
+            return True

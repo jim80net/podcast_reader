@@ -32,8 +32,15 @@ def _settings(args: argparse.Namespace) -> Settings:
 
 
 def _migrate(database: Path) -> None:
-    config = Config(str(Path(__file__).parents[2] / "alembic.ini"))
-    config.set_main_option("sqlalchemy.url", f"sqlite:///{database}")
+    service_root = Path(__file__).resolve().parents[2]
+    ini_path = service_root / "alembic.ini"
+    migrations_path = service_root / "migrations"
+    if not ini_path.is_file() or not migrations_path.is_dir():
+        raise SystemExit("P1 migration commands require a services/premium source checkout")
+    config = Config(str(ini_path))
+    config.set_main_option("script_location", str(migrations_path))
+    config.set_main_option("prepend_sys_path", str(service_root / "src"))
+    config.attributes["database_path"] = database
     command.upgrade(config, "head")
 
 

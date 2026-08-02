@@ -85,9 +85,11 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["family_id"], ["token_families.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
     )
+    op.create_index("ix_access_tokens_family_id", "access_tokens", ["family_id"])
 
 
 def downgrade() -> None:
+    op.drop_index("ix_access_tokens_family_id", table_name="access_tokens")
     op.drop_table("access_tokens")
     op.drop_table("refresh_tokens")
     op.drop_table("token_families")

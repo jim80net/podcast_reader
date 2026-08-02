@@ -90,3 +90,5 @@ class AccessToken(Base):
     expires_at: Mapped[int] = mapped_column(Integer, nullable=False)
     revoked_at: Mapped[int | None] = mapped_column(Integer)
     created_at: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    __table_args__ = (Index("ix_access_tokens_family_id", "family_id"),)

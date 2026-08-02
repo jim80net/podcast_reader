@@ -214,6 +214,15 @@ def _issue_tokens(
     }
 
 
+def _revoke_token_family(database: Session, family: TokenFamily, timestamp: int) -> None:
+    family.revoked_at = timestamp
+    database.execute(
+        update(AccessToken)
+        .where(AccessToken.family_id == family.id, AccessToken.revoked_at.is_(None))
+        .values(revoked_at=timestamp)
+    )
+
+
 def create_app(settings: Settings, *, engine: Engine | None = None) -> FastAPI:
     database_engine = engine or create_database(settings)
     limiter = RateLimiter()
@@ -394,7 +403,10 @@ def create_app(settings: Settings, *, engine: Engine | None = None) -> FastAPI:
         user: User = Depends(_require_browser_mutation),
         database: Session = Depends(_database_session),
     ) -> None:
-        digest = user_code_digest(payload.user_code, settings.user_code_pepper)
+        try:
+            digest = user_code_digest(payload.user_code, settings.user_code_pepper)
+        except ValueError as exc:
+            raise ApiError(422, "invalid_user_code", "User code is invalid") from exc
         authorization = database.scalar(
             select(DeviceAuthorization).where(DeviceAuthorization.user_code_digest == digest)
         )
@@ -440,12 +452,16 @@ def create_app(settings: Settings, *, engine: Engine | None = None) -> FastAPI:
             database.commit()
             raise ApiError(400, "slow_down", "Poll less frequently")
         authorization.last_polled_at = timestamp
+        if authorization.state == "denied":
+            database.commit()
+            raise ApiError(400, "access_denied", "Device authorization was denied")
         if authorization.state != "approved" or authorization.approving_user_id is None:
             database.commit()
             raise ApiError(400, "authorization_pending", "Authorization is still pending")
         user = database.get(User, authorization.approving_user_id)
-        if user is None:
+        if user is None or user.status != "active":
             authorization.state = "denied"
+            authorization.consumed_at = timestamp
             database.commit()
             raise ApiError(400, "access_denied", "Device authorization was denied")
         authorization.state = "consumed"
@@ -468,16 +484,13 @@ def create_app(settings: Settings, *, engine: Engine | None = None) -> FastAPI:
         if family is None or family.revoked_at is not None or family.expires_at <= timestamp:
             raise ApiError(401, "refresh_token_invalid", "The refresh token is invalid")
         if refresh.used_at is not None:
-            family.revoked_at = timestamp
-            database.execute(
-                update(AccessToken)
-                .where(AccessToken.family_id == family.id, AccessToken.revoked_at.is_(None))
-                .values(revoked_at=timestamp)
-            )
+            _revoke_token_family(database, family, timestamp)
             database.commit()
             raise ApiError(401, "refresh_token_reused", "The token family has been revoked")
         user = database.get(User, family.user_id)
-        if user is None:
+        if user is None or user.status != "active":
+            _revoke_token_family(database, family, timestamp)
+            database.commit()
             raise ApiError(401, "refresh_token_invalid", "The refresh token is invalid")
         refresh.used_at = timestamp
         tokens = _issue_tokens(

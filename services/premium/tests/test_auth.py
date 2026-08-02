@@ -91,6 +91,23 @@ def test_api_errors_use_the_bounded_envelope(client: TestClient) -> None:
     assert response.json()["code"] == "not_found"
 
 
+def test_malformed_stored_argon2_hash_remains_a_generic_login_failure(
+    client: TestClient, account: dict[str, object]
+) -> None:
+    app = cast("Any", client.app)
+    with Session(app.state.engine) as database:
+        user = database.scalar(select(User))
+        assert user is not None
+        user.password_hash = "$argon2id$malformed"
+        database.commit()
+    response = client.post(
+        "/v1/browser-sessions",
+        json={"email": account["email"], "password": "correct horse battery"},
+    )
+    assert response.status_code == 401
+    assert response.json()["code"] == "login_failed"
+
+
 def test_browser_cookie_csrf_origin_and_host_are_enforced(
     client: TestClient, account: dict[str, object]
 ) -> None:
@@ -167,6 +184,19 @@ def test_device_authorization_is_one_use_and_persists_only_digests(
         refresh_digests = set(database.scalars(select(RefreshToken.token_digest)))
         assert tokens["access_token"] not in access_digests
         assert tokens["refresh_token"] not in refresh_digests
+
+
+def test_non_ascii_device_code_is_a_bounded_client_error(
+    client: TestClient, browser_auth: dict[str, str]
+) -> None:
+    response = client.post(
+        "/v1/device-authorizations/approve",
+        json={"user_code": "åååå-åååå"},
+        headers=browser_auth,
+    )
+    assert response.status_code == 422
+    assert response.json()["code"] == "invalid_user_code"
+    assert set(response.json()) == {"code", "message", "request_id"}
 
 
 def test_fast_poll_slows_down(client: TestClient) -> None:
@@ -286,6 +316,7 @@ def test_disabled_user_is_rejected_by_browser_bearer_and_login(
     issued = client.post(
         "/v1/device-authorizations/token", json={"device_code": started["device_code"]}
     ).json()
+    pending_device = _approved_device(client, browser_auth, client_kind="android")
     app = cast("Any", client.app)
     with Session(app.state.engine) as database:
         user = database.scalar(select(User))
@@ -300,7 +331,20 @@ def test_disabled_user_is_rejected_by_browser_bearer_and_login(
         "/v1/browser-sessions",
         json={"email": account["email"], "password": "correct horse battery"},
     )
+    device_exchange = client.post(
+        "/v1/device-authorizations/token",
+        json={"device_code": pending_device["device_code"]},
+    )
+    refresh = client.post("/v1/tokens/refresh", json={"refresh_token": issued["refresh_token"]})
     assert browser.status_code == 401
     assert bearer.status_code == 401
     assert login.status_code == 401
     assert login.json()["message"] == "Email or password is incorrect"
+    assert device_exchange.status_code == 400
+    assert device_exchange.json()["code"] == "access_denied"
+    assert refresh.status_code == 401
+    assert refresh.json()["code"] == "refresh_token_invalid"
+    with Session(app.state.engine) as database:
+        family = database.scalar(select(TokenFamily))
+        assert family is not None
+        assert family.revoked_at is not None

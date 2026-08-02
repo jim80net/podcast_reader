@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from collections.abc import Iterator
-
 from sqlalchemy import Engine, create_engine, event, text
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.engine import URL
+from sqlalchemy.orm import Session
 
 from .config import Settings
 
@@ -11,7 +10,8 @@ EXPECTED_SCHEMA_REVISION = "0001_auth_foundation"
 
 
 def create_database(settings: Settings) -> Engine:
-    engine = create_engine(f"sqlite:///{settings.database_path}", future=True)
+    url = URL.create("sqlite", database=str(settings.database_path))
+    engine = create_engine(url, future=True)
 
     @event.listens_for(engine, "connect")
     def configure_sqlite(dbapi_connection: object, _connection_record: object) -> None:
@@ -41,9 +41,3 @@ def require_current_schema(engine: Engine) -> None:
 def begin_immediate(session: Session) -> None:
     """Acquire SQLite's write reservation before a read-modify-write section."""
     session.connection().exec_driver_sql("BEGIN IMMEDIATE")
-
-
-def session_dependency(engine: Engine) -> Iterator[Session]:
-    factory = sessionmaker(engine, expire_on_commit=False)
-    with factory() as session:
-        yield session

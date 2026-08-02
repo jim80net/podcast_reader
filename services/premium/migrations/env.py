@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from logging.config import fileConfig
+from pathlib import Path
 
 from alembic import context
-from sqlalchemy import engine_from_config, pool
+from sqlalchemy import create_engine, engine_from_config, pool
+from sqlalchemy.engine import URL
 
 from podcast_reader_premium.models import Base
 
@@ -22,11 +24,17 @@ def run_migrations_offline() -> None:
 
 
 def run_migrations_online() -> None:
-    connectable = engine_from_config(
-        config.get_section(config.config_ini_section, {}),
-        prefix="sqlalchemy.",
-        poolclass=pool.NullPool,
-    )
+    database_path = config.attributes.get("database_path")
+    if isinstance(database_path, Path):
+        connectable = create_engine(
+            URL.create("sqlite", database=str(database_path)), poolclass=pool.NullPool
+        )
+    else:
+        connectable = engine_from_config(
+            config.get_section(config.config_ini_section, {}),
+            prefix="sqlalchemy.",
+            poolclass=pool.NullPool,
+        )
     with connectable.connect() as connection:
         connection.exec_driver_sql("PRAGMA foreign_keys=ON")
         connection.commit()

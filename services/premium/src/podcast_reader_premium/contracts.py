@@ -1,16 +1,18 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from typing import Literal
+from typing import Annotated, Literal, Self
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+Revision = Annotated[int, Field(ge=0, le=9_223_372_036_854_775_807)]
 
 
 class EntitlementSource(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     source: Literal["none", "test_purchase", "admin"]
-    revision: int
+    revision: Revision
 
 
 class Capabilities(BaseModel):
@@ -31,9 +33,15 @@ class EntitlementV1(BaseModel):
     tier: Literal["free", "premium"]
     entitlement: EntitlementSource
     capabilities: Capabilities
-    flags_revision: int
+    flags_revision: Revision
     evaluated_at: datetime
     refresh_after: datetime
+
+    @model_validator(mode="after")
+    def validate_refresh_window(self) -> Self:
+        if self.refresh_after <= self.evaluated_at:
+            raise ValueError("refresh_after must be later than evaluated_at")
+        return self
 
 
 def default_free_entitlement(subject: str, at: datetime | None = None) -> EntitlementV1:

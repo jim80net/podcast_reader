@@ -17,7 +17,7 @@ from podcast_reader_premium.db import create_database
 @pytest.fixture
 def settings(tmp_path: Path) -> Settings:
     return Settings(
-        database_path=tmp_path / "premium.sqlite3",
+        database_path=tmp_path / "premium?test.sqlite3",
         public_origin="https://premium.test",
         user_code_pepper=b"test-pepper-is-at-least-thirty-two-bytes",
         environment="test",
@@ -27,10 +27,15 @@ def settings(tmp_path: Path) -> Settings:
 
 
 @pytest.fixture
-def client(settings: Settings) -> Iterator[TestClient]:
-    root = Path(__file__).parents[1]
+def client(
+    settings: Settings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Iterator[TestClient]:
+    root = Path(__file__).resolve().parents[1]
+    monkeypatch.chdir(tmp_path)
     config = Config(str(root / "alembic.ini"))
-    config.set_main_option("sqlalchemy.url", f"sqlite:///{settings.database_path}")
+    config.set_main_option("script_location", str(root / "migrations"))
+    config.set_main_option("prepend_sys_path", str(root / "src"))
+    config.attributes["database_path"] = settings.database_path
     command.upgrade(config, "head")
     engine = create_database(settings)
     with TestClient(create_app(settings, engine=engine), base_url=settings.public_origin) as value:
