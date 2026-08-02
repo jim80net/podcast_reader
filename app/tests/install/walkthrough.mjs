@@ -131,12 +131,22 @@ async function captureSurface(number, surface) {
     const geometry = await page.evaluate(() => ({
       clientWidth: document.documentElement.clientWidth,
       scrollWidth: document.documentElement.scrollWidth,
-      viewportHeight: window.innerHeight
+      viewportHeight: window.innerHeight,
+      themeControlRight: document.querySelector('.theme-control')?.getBoundingClientRect().right
     }))
     if (geometry.scrollWidth > geometry.clientWidth) {
       await fail(
         `${surface} overflows horizontally at ${scale.label}: ` +
           `${geometry.scrollWidth}px > ${geometry.clientWidth}px`
+      )
+    }
+    if (
+      geometry.themeControlRight === undefined ||
+      geometry.themeControlRight > geometry.clientWidth + 1
+    ) {
+      await fail(
+        `theme control is clipped at ${scale.label}: ` +
+          `${String(geometry.themeControlRight)}px > ${geometry.clientWidth}px`
       )
     }
     if (surface === 'first-run-wizard') {
@@ -153,6 +163,14 @@ async function captureSurface(number, surface) {
         WIZARD_TIMEOUT_MS,
         `${theme} theme to apply`
       )
+      if (surface === 'new-view-submitted') {
+        await page.locator('.job-card').first().scrollIntoViewIfNeeded()
+      } else if (surface === 'new-view-job-done') {
+        await page
+          .locator('.job-card')
+          .filter({ hasText: 'Installed app audio proof' })
+          .scrollIntoViewIfNeeded()
+      }
       const filename = `${number}-${surface}-${scale.label}-${theme}.png`
       await page.screenshot({ path: join(outDir, filename) })
       log(`captured ${surface} at ${scale.label} in ${theme}`)
