@@ -561,7 +561,7 @@ def test_test_app_uses_one_default_price_id_when_setting_is_absent(
         base_url=default_settings.public_origin,
     ) as default_client:
         assert default_client.get("/healthz").status_code == 200
-        assert default_client.app.state.payment_worker._settings.expected_stripe_price_id == (
+        assert _app(default_client).state.payment_worker._settings.expected_stripe_price_id == (
             fake.product.price_id
         )
 
