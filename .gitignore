@@ -37,6 +37,7 @@
 
 # Generated transcripts (regenerate with json_to_html.py)
 *.html
+!services/premium/src/podcast_reader_premium/templates/*.html
 
 # Test fixtures are committed source artifacts, not generated outputs
 !tests/fixtures/*.json

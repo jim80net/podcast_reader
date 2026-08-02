@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Premium admin{% endblock %}</title>
+  <link rel="stylesheet" href="/premium-static/admin.css">
+</head>
+<body>
+  <header>
+    <a class="brand" href="/admin/">Podcast Reader admin</a>
+    <nav aria-label="Admin sections">
+      <a href="/admin/">Users</a>
+      <a href="/admin/flags">Feature flags</a>
+      <a href="/admin/ads">House ads</a>
+      <a href="/admin/audit">Audit</a>
+    </nav>
+    <span class="identity">{{ admin.email }}</span>
+  </header>
+  <main>{% block content %}{% endblock %}</main>
+</body>
+</html>

@@ -1,0 +1,10 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{{ title }}</title><link rel="stylesheet" href="/premium-static/admin.css"></head>
+<body><main class="login"><h1>{{ title }}</h1><p>Development accounts are unverified test accounts.</p>
+<form class="card" method="post" action="{{ action }}">
+  {% if user_code %}<input type="hidden" name="user_code" value="{{ user_code }}">{% endif %}
+  <label>Email <input name="email" type="email" required maxlength="320" autocomplete="username"></label>
+  <label>Password <input name="password" type="password" required maxlength="1024" autocomplete="current-password"></label>
+  <button type="submit">Sign in</button>
+</form></main></body></html>

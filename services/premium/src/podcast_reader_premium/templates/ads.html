@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}House ads · Premium admin{% endblock %}
+{% block content %}
+<h1>House ads</h1>
+<p>This service can represent house inventory only. There is no third-party network, script, pixel, image URL, or targeting field.</p>
+<form class="card" method="post" action="/admin/ads/config">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <h2>Master configuration</h2>
+  <label><input type="checkbox" name="enabled" value="on"{% if config and config.enabled %} checked{% endif %}> Enable for signed-in free users</label>
+  <fieldset><legend>Allowed slots</legend>{% for slot in slots %}<label><input type="checkbox" name="slots" value="{{ slot }}"{% if slot in enabled_slots %} checked{% endif %}> {{ slot }}</label>{% endfor %}</fieldset>
+  <label>Reason <input name="reason" required minlength="3" maxlength="500"></label><button type="submit">Update configuration</button>
+</form>
+<section><h2>Create house ad</h2>
+<form class="card" method="post" action="/admin/ads/house">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <label>Title <input name="title" required maxlength="120"></label><label>Body <textarea name="body" required maxlength="500"></textarea></label>
+  <label>HTTPS CTA URL <input name="cta_url" type="url" required maxlength="2048"></label><label>Status <select name="status"><option>draft</option><option>active</option></select></label>
+  <label>Starts (UTC) <input name="starts_at" type="datetime-local"></label><label>Ends (UTC) <input name="ends_at" type="datetime-local"></label>
+  <label>Reason <input name="reason" required minlength="3" maxlength="500"></label><button type="submit">Create ad</button>
+</form></section>
+<section><h2>Inventory</h2>{% for ad in ads %}
+<form class="card" method="post" action="/admin/ads/house/{{ ad.id }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><h3>{{ ad.id }}</h3><p>Revision {{ ad.revision }}</p>
+  <label>Title <input name="title" value="{{ ad.title }}" required maxlength="120"></label><label>Body <textarea name="body" required maxlength="500">{{ ad.body }}</textarea></label>
+  <label>HTTPS CTA URL <input name="cta_url" type="url" value="{{ ad.cta_url }}" required maxlength="2048"></label><label>Status <select name="status"><option{% if ad.status == "draft" %} selected{% endif %}>draft</option><option{% if ad.status == "active" %} selected{% endif %}>active</option></select></label>
+  <label>Starts (UTC) <input name="starts_at" type="datetime-local" value="{{ datetime_local(ad.starts_at) }}"></label><label>Ends (UTC) <input name="ends_at" type="datetime-local" value="{{ datetime_local(ad.ends_at) }}"></label>
+  <label>Reason <input name="reason" required minlength="3" maxlength="500"></label><button type="submit">Update ad</button>
+</form>
+<form method="post" action="/admin/ads/house/{{ ad.id }}/delete"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><label>Deletion reason <input name="reason" required minlength="3" maxlength="500"></label><button type="submit">Delete ad</button></form>
+{% else %}<p>No house ads.</p>{% endfor %}</section>
+{% endblock %}

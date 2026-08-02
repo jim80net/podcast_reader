@@ -5,19 +5,30 @@ import secrets
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
-from typing import cast
+from pathlib import Path
+from typing import Annotated, cast
+from urllib.parse import urlencode
 
-from fastapi import Cookie, Depends, FastAPI, Header, Request, Response
+from fastapi import Cookie, Depends, FastAPI, Form, Header, Query, Request, Response
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import Engine, select, update
 from sqlalchemy.orm import Session, sessionmaker
 from starlette.exceptions import HTTPException
+from starlette.staticfiles import StaticFiles
 
+from .admin import CSRF_COOKIE, TEMPLATES
+from .admin import router as admin_router
 from .config import Settings
-from .contracts import EntitlementV1, default_free_entitlement
+from .contracts import EntitlementV1
 from .db import begin_immediate, create_database, require_current_schema
+from .entitlements import (
+    ensure_projection,
+    entitlement_etag,
+    evaluate_entitlements,
+    require_entitlement_configuration,
+)
 from .models import (
     AccessToken,
     BrowserSession,
@@ -125,6 +136,11 @@ def _require_browser_mutation(
     user: User = Depends(_browser_user),
     csrf_token: str | None = Header(default=None, alias="X-CSRF-Token"),
 ) -> User:
+    _validate_browser_mutation(request, csrf_token or "")
+    return user
+
+
+def _validate_browser_mutation(request: Request, csrf_token: str) -> None:
     settings: Settings = request.app.state.settings
     origin = request.headers.get("origin")
     host = request.headers.get("host", "").lower()
@@ -133,10 +149,9 @@ def _require_browser_mutation(
     if not secrets.compare_digest(host, settings.expected_host):
         raise ApiError(403, "host_rejected", "Request host was rejected")
     browser_session: BrowserSession = request.state.browser_session
-    supplied = csrf_digest(csrf_token or "")
+    supplied = csrf_digest(csrf_token)
     if not secrets.compare_digest(supplied, browser_session.csrf_digest):
         raise ApiError(403, "csrf_rejected", "CSRF token was rejected")
-    return user
 
 
 def _bearer_user(
@@ -230,6 +245,8 @@ def create_app(settings: Settings, *, engine: Engine | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         require_current_schema(database_engine)
+        with Session(database_engine) as database:
+            require_entitlement_configuration(database)
         yield
         database_engine.dispose()
 
@@ -237,6 +254,100 @@ def create_app(settings: Settings, *, engine: Engine | None = None) -> FastAPI:
     app.state.settings = settings
     app.state.engine = database_engine
     app.state.session_factory = sessionmaker(database_engine, expire_on_commit=False)
+    app.mount(
+        "/premium-static",
+        StaticFiles(directory=Path(__file__).with_name("static")),
+        name="premium-static",
+    )
+    app.include_router(admin_router)
+
+    def authenticate_credentials(
+        email_value: str,
+        password: str,
+        request: Request,
+        database: Session,
+    ) -> User:
+        try:
+            email = normalize_email(email_value)
+        except ValueError:
+            email = "invalid"
+        source = request.client.host if request.client else "unknown"
+        limiter_key = hashlib.sha256(f"{source}\0{email}".encode()).hexdigest()
+        if not limiter.allow(limiter_key):
+            raise ApiError(429, "rate_limited", "Too many sign-in attempts")
+        user = database.scalar(select(User).where(User.email == email))
+        encoded = user.password_hash if user is not None else DUMMY_PASSWORD_HASH
+        password_valid = verify_password(encoded, password)
+        if user is None or user.status != "active" or not password_valid:
+            raise ApiError(401, "login_failed", GENERIC_LOGIN_MESSAGE)
+        return user
+
+    def start_browser_session(user: User, database: Session) -> tuple[str, str]:
+        timestamp = now_epoch()
+        session_raw = opaque_token()
+        csrf_raw = opaque_token()
+        database.add(
+            BrowserSession(
+                token_digest=token_digest(session_raw),
+                user_id=user.id,
+                csrf_digest=csrf_digest(csrf_raw),
+                expires_at=timestamp + settings.session_ttl_seconds,
+                revoked_at=None,
+                created_at=timestamp,
+            )
+        )
+        database.commit()
+        return session_raw, csrf_raw
+
+    def set_browser_cookies(response: Response, session_raw: str, csrf_raw: str) -> None:
+        response.set_cookie(
+            SESSION_COOKIE,
+            session_raw,
+            max_age=settings.session_ttl_seconds,
+            secure=True,
+            httponly=True,
+            samesite="lax",
+            path="/",
+        )
+        response.set_cookie(
+            CSRF_COOKIE,
+            csrf_raw,
+            max_age=settings.session_ttl_seconds,
+            secure=True,
+            httponly=False,
+            samesite="lax",
+            path="/",
+        )
+
+    def validate_login_origin(request: Request) -> None:
+        if not secrets.compare_digest(request.headers.get("origin", ""), settings.public_origin):
+            raise ApiError(403, "origin_rejected", "Request origin was rejected")
+        if not secrets.compare_digest(
+            request.headers.get("host", "").lower(), settings.expected_host
+        ):
+            raise ApiError(403, "host_rejected", "Request host was rejected")
+
+    def approve_code(database: Session, user: User, visible_code: str) -> None:
+        try:
+            digest = user_code_digest(visible_code, settings.user_code_pepper)
+        except ValueError as exc:
+            raise ApiError(422, "invalid_user_code", "User code is invalid") from exc
+        begin_immediate(database)
+        authorization = database.scalar(
+            select(DeviceAuthorization).where(DeviceAuthorization.user_code_digest == digest)
+        )
+        timestamp = now_epoch()
+        if (
+            authorization is None
+            or authorization.state != "pending"
+            or authorization.expires_at <= timestamp
+        ):
+            raise ApiError(
+                404, "device_authorization_not_found", "Device code is invalid or expired"
+            )
+        authorization.state = "approved"
+        authorization.approving_user_id = user.id
+        database.commit()
 
     @app.middleware("http")
     async def request_context(
@@ -251,6 +362,14 @@ def create_app(settings: Settings, *, engine: Engine | None = None) -> FastAPI:
             )
         response.headers["X-Request-ID"] = request.state.request_id
         response.headers["Cache-Control"] = "no-store"
+        if request.url.path.startswith(("/admin", "/device")):
+            response.headers["Content-Security-Policy"] = (
+                "default-src 'none'; style-src 'self'; script-src 'self'; img-src 'self'; "
+                "connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+            )
+            response.headers["Strict-Transport-Security"] = "max-age=31536000"
+            response.headers["X-Content-Type-Options"] = "nosniff"
+            response.headers["Referrer-Policy"] = "no-referrer"
         return response
 
     @app.exception_handler(ApiError)
@@ -264,14 +383,125 @@ def create_app(settings: Settings, *, engine: Engine | None = None) -> FastAPI:
         return _error(request, ApiError(422, "invalid_request", "Request data is invalid"))
 
     @app.exception_handler(HTTPException)
-    async def http_error(request: Request, error: HTTPException) -> JSONResponse:
+    async def http_error(request: Request, error: HTTPException) -> Response:
+        if error.status_code == 401 and request.url.path.startswith("/admin"):
+            return RedirectResponse("/admin/login", status_code=303)
         code = "not_found" if error.status_code == 404 else "http_error"
         message = "Route not found" if error.status_code == 404 else "Request was rejected"
         return _error(request, ApiError(error.status_code, code, message))
 
     @app.get("/healthz")
     def health() -> dict[str, object]:
-        return {"status": "ok", "schema": 1, "build_sha": settings.build_sha}
+        return {"status": "ok", "schema": 2, "build_sha": settings.build_sha}
+
+    @app.get("/admin/login", response_class=HTMLResponse)
+    def admin_login_page(request: Request) -> HTMLResponse:
+        return TEMPLATES.TemplateResponse(
+            request,
+            "login.html",
+            {"title": "Administrator sign in", "action": "/admin/login", "user_code": ""},
+        )
+
+    @app.post("/admin/login")
+    def admin_login(
+        request: Request,
+        email: Annotated[str, Form(max_length=320)],
+        password: Annotated[str, Form(min_length=1, max_length=1024)],
+        database: Session = Depends(_database_session),
+    ) -> RedirectResponse:
+        validate_login_origin(request)
+        user = authenticate_credentials(email, password, request, database)
+        if user.role != "admin":
+            raise ApiError(401, "login_failed", GENERIC_LOGIN_MESSAGE)
+        session_raw, csrf_raw = start_browser_session(user, database)
+        response = RedirectResponse("/admin/", status_code=303)
+        set_browser_cookies(response, session_raw, csrf_raw)
+        return response
+
+    @app.get("/device", response_class=HTMLResponse)
+    def device_page(
+        request: Request,
+        user_code_value: Annotated[str, Query(alias="user_code", max_length=16)] = "",
+        database: Session = Depends(_database_session),
+        session_token: str | None = Cookie(default=None, alias=SESSION_COOKIE),
+    ) -> HTMLResponse:
+        user: User | None = None
+        approved = False
+        csrf_raw = request.cookies.get(CSRF_COOKIE, "")
+        if session_token:
+            browser_session = database.get(BrowserSession, token_digest(session_token))
+            timestamp = now_epoch()
+            if (
+                browser_session is not None
+                and browser_session.revoked_at is None
+                and browser_session.expires_at > timestamp
+                and secrets.compare_digest(csrf_digest(csrf_raw), browser_session.csrf_digest)
+            ):
+                candidate = database.get(User, browser_session.user_id)
+                if candidate is not None and candidate.status == "active":
+                    user = candidate
+                    request.state.browser_session = browser_session
+        if user is not None and user_code_value:
+            try:
+                digest = user_code_digest(user_code_value, settings.user_code_pepper)
+            except ValueError:
+                pass
+            else:
+                authorization = database.scalar(
+                    select(DeviceAuthorization).where(
+                        DeviceAuthorization.user_code_digest == digest,
+                        DeviceAuthorization.approving_user_id == user.id,
+                        DeviceAuthorization.state.in_(("approved", "consumed")),
+                    )
+                )
+                approved = authorization is not None and (
+                    authorization.state == "consumed"
+                    or (
+                        authorization.state == "approved" and authorization.expires_at > now_epoch()
+                    )
+                )
+        return TEMPLATES.TemplateResponse(
+            request,
+            "device.html",
+            {
+                "user": user,
+                "user_code": user_code_value,
+                "csrf_token": csrf_raw,
+                "approved": approved,
+            },
+        )
+
+    @app.post("/device/login")
+    def device_login(
+        request: Request,
+        email: Annotated[str, Form(max_length=320)],
+        password: Annotated[str, Form(min_length=1, max_length=1024)],
+        user_code_value: Annotated[str, Form(alias="user_code", max_length=16)] = "",
+        database: Session = Depends(_database_session),
+    ) -> RedirectResponse:
+        validate_login_origin(request)
+        user = authenticate_credentials(email, password, request, database)
+        session_raw, csrf_raw = start_browser_session(user, database)
+        response = RedirectResponse(
+            "/device?" + urlencode({"user_code": user_code_value}),
+            status_code=303,
+        )
+        set_browser_cookies(response, session_raw, csrf_raw)
+        return response
+
+    @app.post("/device/approve")
+    def device_approve_page(
+        request: Request,
+        user_code_value: Annotated[str, Form(alias="user_code", min_length=8, max_length=16)],
+        csrf_token: Annotated[str, Form(min_length=20, max_length=256)],
+        user: User = Depends(_browser_user),
+        database: Session = Depends(_database_session),
+    ) -> RedirectResponse:
+        _validate_browser_mutation(request, csrf_token)
+        approve_code(database, user, user_code_value)
+        return RedirectResponse(
+            "/device?" + urlencode({"user_code": user_code_value}), status_code=303
+        )
 
     @app.post("/v1/accounts", status_code=201)
     def create_account(
@@ -297,6 +527,8 @@ def create_app(settings: Settings, *, engine: Engine | None = None) -> FastAPI:
             created_at=timestamp,
         )
         database.add(user)
+        database.flush()
+        ensure_projection(database, user.id, timestamp=timestamp)
         database.commit()
         return {"id": user.id, "email": user.email, "verification": user.verification}
 
@@ -307,43 +539,9 @@ def create_app(settings: Settings, *, engine: Engine | None = None) -> FastAPI:
         response: Response,
         database: Session = Depends(_database_session),
     ) -> dict[str, object]:
-        try:
-            email = normalize_email(payload.email)
-        except ValueError:
-            email = "invalid"
-        source = request.client.host if request.client else "unknown"
-        limiter_key = hashlib.sha256(f"{source}\0{email}".encode()).hexdigest()
-        if not limiter.allow(limiter_key):
-            raise ApiError(429, "rate_limited", "Too many sign-in attempts")
-        user = database.scalar(select(User).where(User.email == email))
-        encoded = user.password_hash if user is not None else DUMMY_PASSWORD_HASH
-        password_valid = verify_password(encoded, payload.password)
-        valid = user is not None and user.status == "active" and password_valid
-        if not valid or user is None:
-            raise ApiError(401, "login_failed", GENERIC_LOGIN_MESSAGE)
-        timestamp = now_epoch()
-        session_raw = opaque_token()
-        csrf_raw = opaque_token()
-        database.add(
-            BrowserSession(
-                token_digest=token_digest(session_raw),
-                user_id=user.id,
-                csrf_digest=csrf_digest(csrf_raw),
-                expires_at=timestamp + settings.session_ttl_seconds,
-                revoked_at=None,
-                created_at=timestamp,
-            )
-        )
-        database.commit()
-        response.set_cookie(
-            SESSION_COOKIE,
-            session_raw,
-            max_age=settings.session_ttl_seconds,
-            secure=True,
-            httponly=True,
-            samesite="lax",
-            path="/",
-        )
+        user = authenticate_credentials(payload.email, payload.password, request, database)
+        session_raw, csrf_raw = start_browser_session(user, database)
+        set_browser_cookies(response, session_raw, csrf_raw)
         return {
             "csrf_token": csrf_raw,
             "account": {"id": user.id, "email": user.email, "verification": user.verification},
@@ -362,6 +560,7 @@ def create_app(settings: Settings, *, engine: Engine | None = None) -> FastAPI:
         browser_session.revoked_at = now_epoch()
         database.commit()
         response.delete_cookie(SESSION_COOKIE, secure=True, httponly=True, samesite="lax", path="/")
+        response.delete_cookie(CSRF_COOKIE, secure=True, httponly=False, samesite="lax", path="/")
 
     @app.post("/v1/device-authorizations", status_code=201)
     def create_device_authorization(
@@ -403,25 +602,7 @@ def create_app(settings: Settings, *, engine: Engine | None = None) -> FastAPI:
         user: User = Depends(_require_browser_mutation),
         database: Session = Depends(_database_session),
     ) -> None:
-        try:
-            digest = user_code_digest(payload.user_code, settings.user_code_pepper)
-        except ValueError as exc:
-            raise ApiError(422, "invalid_user_code", "User code is invalid") from exc
-        authorization = database.scalar(
-            select(DeviceAuthorization).where(DeviceAuthorization.user_code_digest == digest)
-        )
-        timestamp = now_epoch()
-        if (
-            authorization is None
-            or authorization.state != "pending"
-            or authorization.expires_at <= timestamp
-        ):
-            raise ApiError(
-                404, "device_authorization_not_found", "Device code is invalid or expired"
-            )
-        authorization.state = "approved"
-        authorization.approving_user_id = user.id
-        database.commit()
+        approve_code(database, user, payload.user_code)
 
     @app.post("/v1/device-authorizations/token")
     def poll_device_authorization(
@@ -510,7 +691,13 @@ def create_app(settings: Settings, *, engine: Engine | None = None) -> FastAPI:
         return {"id": user.id, "email": user.email, "verification": user.verification}
 
     @app.get("/v1/me/entitlements", response_model=EntitlementV1)
-    def current_entitlements(user: User = Depends(_bearer_user)) -> EntitlementV1:
-        return default_free_entitlement(user.id, datetime.now(UTC))
+    def current_entitlements(
+        response: Response,
+        user: User = Depends(_bearer_user),
+        database: Session = Depends(_database_session),
+    ) -> EntitlementV1:
+        value = evaluate_entitlements(database, user.id, at=datetime.now(UTC))
+        response.headers["ETag"] = entitlement_etag(value)
+        return value
 
     return app

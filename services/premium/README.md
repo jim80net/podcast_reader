@@ -5,10 +5,12 @@ import the transcript engine and its API has no transcript, audio, source URL,
 or library-content fields. The desktop application's local-only path does not
 contact this service.
 
-Slice 1 provides development accounts, hardened browser sessions, native device
-authorization, rotating tokens, and the frozen entitlement v1 fixtures. Test
-purchases, entitlement projection, admin pages, feature flags, and ads arrive in
-later independently gated slices.
+Slices 1 and 2 provide development accounts, hardened browser sessions, native
+device authorization, rotating tokens, the frozen entitlement v1 fixtures, an
+append-only entitlement ledger with a rebuildable projection, registered feature
+flags, house-only ad configuration, and a server-rendered audited admin panel.
+Test purchases and provider webhook processing arrive in a later independently
+gated slice.
 
 The service is deliberately development-only, listens on loopback, and supports
 one worker because login limiting is process-local. It does not configure or
@@ -28,6 +30,16 @@ uv run premium-dev migrate
 uv run premium-dev bootstrap-admin
 uv run premium-dev serve
 ```
+
+The device approval page is `/device`. Administrators sign in at `/admin/login`.
+Admin mutations require the session-bound synchronizer token plus exact Origin and
+Host checks. Feature keys are code-registered, premium capabilities cannot be
+granted to free accounts by flag configuration, and the ad schema can represent
+only plain-text house inventory with HTTPS calls to action.
+
+`GET /v1/me/entitlements` is the canonical bearer-authenticated client projection.
+Its committed schema-version-1 fixtures under `contracts/` are frozen; any contract
+change requires a schema-version bump and an independent design gate.
 
 The service refuses to start before Alembic is at exactly the expected schema
 revision. Dev-instance activation and any reverse-proxy wiring are separate XO

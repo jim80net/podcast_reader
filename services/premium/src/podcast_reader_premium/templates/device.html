@@ -1,0 +1,10 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Connect Podcast Reader</title><link rel="stylesheet" href="/premium-static/admin.css"></head>
+<body><main class="login"><h1>Connect Podcast Reader</h1>
+{% if approved %}<div class="notice" role="status">Device approved. You may return to Podcast Reader.</div>
+{% elif user %}<p>Signed in as {{ user.email }}. Approve only a code shown by your Podcast Reader app.</p>
+<form class="card" method="post" action="/device/approve"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><label>Device code <input name="user_code" value="{{ user_code }}" required minlength="8" maxlength="16" autocomplete="one-time-code"></label><button type="submit">Approve {{ user_code }}</button></form>
+{% else %}<p>Sign in to approve the device code. Your app never receives your password.</p>
+<form class="card" method="post" action="/device/login"><input type="hidden" name="user_code" value="{{ user_code }}"><label>Email <input name="email" type="email" required maxlength="320" autocomplete="username"></label><label>Password <input name="password" type="password" required maxlength="1024" autocomplete="current-password"></label><button type="submit">Sign in</button></form>
+{% endif %}</main></body></html>

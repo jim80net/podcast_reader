@@ -15,6 +15,7 @@ import podcast_reader_premium.db as db_module
 from podcast_reader_premium.models import (
     AccessToken,
     BrowserSession,
+    DeviceAuthorization,
     RefreshToken,
     TokenFamily,
     User,
@@ -188,6 +189,42 @@ def test_device_authorization_is_one_use_and_persists_only_digests(
         refresh_digests = set(database.scalars(select(RefreshToken.token_digest)))
         assert tokens["access_token"] not in access_digests
         assert tokens["refresh_token"] not in refresh_digests
+
+
+def test_concurrent_device_approval_accepts_exactly_one_request(
+    client: TestClient,
+    browser_auth: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    started = client.post("/v1/device-authorizations", json={"client": "desktop"}).json()
+    first_acquired, release_first, second_entered = _gate_first_immediate_transaction(monkeypatch)
+
+    def approve() -> Response:
+        return cast(
+            "Response",
+            client.post(
+                "/v1/device-authorizations/approve",
+                json={"user_code": started["user_code"]},
+                headers=browser_auth,
+            ),
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first = executor.submit(approve)
+        assert first_acquired.wait(timeout=5)
+        second = executor.submit(approve)
+        assert second_entered.wait(timeout=5)
+        assert not second.done()
+        release_first.set()
+        responses = [first.result(timeout=5), second.result(timeout=5)]
+
+    assert sorted(response.status_code for response in responses) == [204, 404]
+    app = cast("Any", client.app)
+    with Session(app.state.engine) as database:
+        authorization = database.scalar(select(DeviceAuthorization))
+        assert authorization is not None
+        assert authorization.state == "approved"
+        assert authorization.approving_user_id is not None
 
 
 def test_non_ascii_device_code_is_a_bounded_client_error(

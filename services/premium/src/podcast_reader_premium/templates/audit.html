@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}Audit · Premium admin{% endblock %}
+{% block content %}
+<h1>Append-only audit</h1>
+<form class="filters" method="get"><label>Exact action <input name="action" value="{{ action_filter }}" maxlength="64"></label><label>Actor ID <input name="actor" value="{{ actor_filter }}" maxlength="64"></label><label>Target ID <input name="target" value="{{ target_filter }}" maxlength="64"></label><label>Since UTC epoch <input name="since" type="number" min="0" value="{{ since_filter }}"></label><label>Until UTC epoch <input name="until" type="number" min="0" value="{{ until_filter }}"></label><button type="submit">Filter</button></form>
+<table><thead><tr><th>Action</th><th>Actor</th><th>Target</th><th>Reason</th><th>Bounded delta</th><th>Request</th><th>When</th></tr></thead><tbody>
+{% for item in rows %}<tr><td>{{ item.action }}</td><td>{{ item.actor_user_id or "system" }}</td><td>{{ item.target_kind }}:{{ item.target_id }}</td><td>{{ item.reason }}</td><td><code>{{ item.delta_json }}</code></td><td>{{ item.request_id }}</td><td>{{ item.created_at }}</td></tr>
+{% else %}<tr><td colspan="7">No audit entries.</td></tr>{% endfor %}</tbody></table>
+<nav class="pager" aria-label="Pages">{% if page > 1 %}<a href="?action={{ action_filter|urlencode }}&actor={{ actor_filter|urlencode }}&target={{ target_filter|urlencode }}&since={{ since_filter }}&until={{ until_filter }}&page={{ page - 1 }}">Previous</a>{% endif %}<span>Page {{ page }}</span>{% if has_next %}<a href="?action={{ action_filter|urlencode }}&actor={{ actor_filter|urlencode }}&target={{ target_filter|urlencode }}&since={{ since_filter }}&until={{ until_filter }}&page={{ page + 1 }}">Next</a>{% endif %}</nav>
+{% endblock %}
