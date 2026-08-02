@@ -143,6 +143,15 @@ The backup command uses SQLite's online-backup API, opens the result read-only,
 requires `PRAGMA integrity_check = ok`, and compares every application-table row
 count. Both backup and JSON manifest are mode `0600`.
 
+Create the initial administrator from a real terminal on the host. The CLI prompts
+for the email and masks both password entries; the password must not be placed in an
+environment variable, command argument, shell history, or deployment log:
+
+```bash
+"$RELEASE/.venv/bin/premium-dev" --database "$DATABASE" \
+  --public-origin "$PUBLIC_ORIGIN" bootstrap-admin
+```
+
 Stripe credentials are the activation boundary. After the XO resolves the sandbox
 key and Price and obtains the CLI `whsec_…`, install them through masked prompts;
 the command rejects live keys and unsafe/malformed values:
