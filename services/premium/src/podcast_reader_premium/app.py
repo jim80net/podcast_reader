@@ -22,6 +22,7 @@ from starlette.staticfiles import StaticFiles
 
 from .admin import CSRF_COOKIE, TEMPLATES
 from .admin import router as admin_router
+from .ads import inventory_for_slot
 from .billing import (
     BillingAdapter,
     BillingConfigurationError,
@@ -32,6 +33,8 @@ from .billing import (
 )
 from .config import Settings
 from .contracts import (
+    AdInventoryV1,
+    AdSlot,
     DeviceAuthorizationStartV1,
     EntitlementV1,
     TokenResponseV1,
@@ -39,6 +42,7 @@ from .contracts import (
 )
 from .db import begin_immediate, create_database, require_current_schema
 from .entitlements import (
+    AD_SLOTS,
     ensure_projection,
     entitlement_etag,
     evaluate_entitlements,
@@ -902,6 +906,23 @@ def create_app(
     ) -> EntitlementV1:
         value = evaluate_entitlements(database, user.id, at=datetime.now(UTC))
         response.headers["ETag"] = entitlement_etag(value)
+        return value
+
+    @app.get(
+        "/v1/ads/inventory/{slot}",
+        response_model=AdInventoryV1,
+        responses={204: {"description": "No eligible house inventory"}},
+    )
+    def current_ad_inventory(
+        slot: str,
+        user: User = Depends(_bearer_user),
+        database: Session = Depends(_database_session),
+    ) -> AdInventoryV1 | Response:
+        if slot not in AD_SLOTS:
+            raise ApiError(404, "invalid_slot", "Ad slot was not found")
+        value = inventory_for_slot(database, user.id, cast("AdSlot", slot))
+        if value is None:
+            return Response(status_code=204)
         return value
 
     return app

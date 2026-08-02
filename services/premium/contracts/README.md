@@ -14,3 +14,6 @@ Any incompatible field, enum, or semantic change requires a new
 `schema_version` and an independent design gate. Additive server behavior must
 remain parseable as one of these strict v1 documents until consumers explicitly
 adopt a later contract.
+
+`v1/ads/` freezes the house-only inventory response, empty-204 meaning, hostile
+text handling, malformed fail-closed input, and forward-additive consumer case.

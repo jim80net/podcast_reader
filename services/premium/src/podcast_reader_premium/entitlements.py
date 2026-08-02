@@ -30,6 +30,7 @@ FLAG_DEFAULTS: dict[str, str] = {
     "transcript_email": "off",
 }
 FLAG_AUDIENCES = frozenset({"off", "all", "free", "premium"})
+AD_SYSTEM_AUDIENCES = frozenset({"off", "free"})
 AD_SLOTS = frozenset({"library", "reader", "mobile_home"})
 
 
@@ -42,7 +43,8 @@ def require_entitlement_configuration(database: Session) -> None:
             config = json.loads(flag.config_json)
         except (TypeError, ValueError) as exc:
             raise RuntimeError("feature flag config is invalid") from exc
-        if flag.audience not in FLAG_AUDIENCES or config != {}:
+        valid_audiences = AD_SYSTEM_AUDIENCES if flag.key == "ad_system" else FLAG_AUDIENCES
+        if flag.audience not in valid_audiences or config != {}:
             raise RuntimeError("feature flag state is invalid")
     ad_config = database.get(AdConfig, 1)
     if ad_config is None or ad_config.source != "house":

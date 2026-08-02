@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "slot": "mobile_home",
+  "inventory_revision": 21,
+  "expires_at": "2026-08-03T00:05:00Z",
+  "items": [
+    {
+      "id": "ad_fixture_forward",
+      "revision": 1,
+      "kind": "text",
+      "title": "Forward-compatible fixture",
+      "body": "Consumers may ignore additive members but never unknown consumed values.",
+      "cta_url": "https://example.com/forward",
+      "future_item_member": "ignored-by-tolerant-consumers"
+    }
+  ],
+  "future_top_level_member": {
+    "ignored": true
+  }
+}
