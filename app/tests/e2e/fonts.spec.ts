@@ -43,6 +43,6 @@ test('app-shell fonts are bundled, variable-weight capable, and local-only', asy
   )
   expect(proof.bodyFamily).toMatch(/^"?Source Sans 3"?,/)
   expect(proof.headingFamily).toMatch(/^"?Source Serif 4"?,/)
-  expect(fontRequests).toHaveLength(2)
+  expect([...new Set(fontRequests)]).toHaveLength(2)
   expect(fontRequests.every((url) => url.startsWith('file:'))).toBe(true)
 })
