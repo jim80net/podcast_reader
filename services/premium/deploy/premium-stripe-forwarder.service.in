@@ -8,7 +8,7 @@ ConditionPathExists=@STRIPE_ENV@
 [Service]
 Type=simple
 EnvironmentFile=@STRIPE_ENV@
-ExecStart=@STRIPE@ listen --events checkout.session.completed,checkout.session.expired --forward-to http://127.0.0.1:@LOOPBACK_PORT@/v1/webhooks/stripe
+ExecStart=@STRIPE@ listen --skip-update --events checkout.session.completed,checkout.session.expired --forward-to http://127.0.0.1:@LOOPBACK_PORT@/v1/webhooks/stripe
 Restart=on-failure
 RestartSec=5s
 UMask=0077
