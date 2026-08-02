@@ -38,6 +38,11 @@ def require_current_schema(engine: Engine) -> None:
         )
 
 
+def begin_immediate(session: Session) -> None:
+    """Acquire SQLite's write reservation before a read-modify-write section."""
+    session.connection().exec_driver_sql("BEGIN IMMEDIATE")
+
+
 def session_dependency(engine: Engine) -> Iterator[Session]:
     factory = sessionmaker(engine, expire_on_commit=False)
     with factory() as session:

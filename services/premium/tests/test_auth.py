@@ -1,12 +1,64 @@
 from __future__ import annotations
 
+from concurrent.futures import Future, ThreadPoolExecutor
+from threading import Event, Lock
 from typing import Any, cast
 
+import pytest
 from fastapi.testclient import TestClient
+from httpx import Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from podcast_reader_premium.models import AccessToken, BrowserSession, RefreshToken, User
+import podcast_reader_premium.app as app_module
+import podcast_reader_premium.db as db_module
+from podcast_reader_premium.models import (
+    AccessToken,
+    BrowserSession,
+    RefreshToken,
+    TokenFamily,
+    User,
+)
+
+
+def _approved_device(
+    client: TestClient, browser_auth: dict[str, str], client_kind: str = "desktop"
+) -> dict[str, object]:
+    started = client.post("/v1/device-authorizations", json={"client": client_kind}).json()
+    response = client.post(
+        "/v1/device-authorizations/approve",
+        json={"user_code": started["user_code"]},
+        headers=browser_auth,
+    )
+    assert response.status_code == 204
+    return cast("dict[str, object]", started)
+
+
+def _gate_first_immediate_transaction(
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[Event, Event, Event]:
+    original = db_module.begin_immediate
+    first_acquired = Event()
+    release_first = Event()
+    second_entered = Event()
+    calls = 0
+    calls_lock = Lock()
+
+    def controlled_begin(database: Session) -> None:
+        nonlocal calls
+        with calls_lock:
+            calls += 1
+            call_number = calls
+        if call_number == 1:
+            original(database)
+            first_acquired.set()
+            assert release_first.wait(timeout=5)
+        else:
+            second_entered.set()
+            original(database)
+
+    monkeypatch.setattr(app_module, "begin_immediate", controlled_begin)
+    return first_acquired, release_first, second_entered
 
 
 def test_account_normalization_argon2_and_generic_login_errors(
@@ -152,3 +204,103 @@ def test_refresh_rotation_and_reuse_revoke_the_family(
         ).status_code
         == 401
     )
+
+
+def test_concurrent_device_exchange_mints_exactly_one_family(
+    client: TestClient,
+    browser_auth: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    started = _approved_device(client, browser_auth)
+    first_acquired, release_first, second_entered = _gate_first_immediate_transaction(monkeypatch)
+
+    def exchange() -> Response:
+        return cast(
+            "Response",
+            client.post(
+                "/v1/device-authorizations/token",
+                json={"device_code": started["device_code"]},
+            ),
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first: Future[Response] = executor.submit(exchange)
+        assert first_acquired.wait(timeout=5)
+        second: Future[Response] = executor.submit(exchange)
+        assert second_entered.wait(timeout=5)
+        assert not second.done()
+        release_first.set()
+        responses = [first.result(timeout=5), second.result(timeout=5)]
+
+    assert sorted(response.status_code for response in responses) == [200, 400]
+    assert {response.json().get("code") for response in responses} == {None, "expired_token"}
+    app = cast("Any", client.app)
+    with Session(app.state.engine) as database:
+        assert len(database.scalars(select(TokenFamily)).all()) == 1
+
+
+def test_concurrent_refresh_replay_revokes_the_family(
+    client: TestClient,
+    browser_auth: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    started = _approved_device(client, browser_auth)
+    issued = client.post(
+        "/v1/device-authorizations/token", json={"device_code": started["device_code"]}
+    ).json()
+    first_acquired, release_first, second_entered = _gate_first_immediate_transaction(monkeypatch)
+
+    def refresh() -> Response:
+        return cast(
+            "Response",
+            client.post("/v1/tokens/refresh", json={"refresh_token": issued["refresh_token"]}),
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first: Future[Response] = executor.submit(refresh)
+        assert first_acquired.wait(timeout=5)
+        second: Future[Response] = executor.submit(refresh)
+        assert second_entered.wait(timeout=5)
+        assert not second.done()
+        release_first.set()
+        responses = [first.result(timeout=5), second.result(timeout=5)]
+
+    assert sorted(response.status_code for response in responses) == [200, 401]
+    assert {response.json().get("code") for response in responses} == {
+        None,
+        "refresh_token_reused",
+    }
+    app = cast("Any", client.app)
+    with Session(app.state.engine) as database:
+        family = database.scalar(select(TokenFamily))
+        assert family is not None
+        assert family.revoked_at is not None
+
+
+def test_disabled_user_is_rejected_by_browser_bearer_and_login(
+    client: TestClient,
+    account: dict[str, object],
+    browser_auth: dict[str, str],
+) -> None:
+    started = _approved_device(client, browser_auth)
+    issued = client.post(
+        "/v1/device-authorizations/token", json={"device_code": started["device_code"]}
+    ).json()
+    app = cast("Any", client.app)
+    with Session(app.state.engine) as database:
+        user = database.scalar(select(User))
+        assert user is not None
+        assert user.status == "active"
+        user.status = "disabled"
+        database.commit()
+
+    browser = client.delete("/v1/browser-sessions/current", headers=browser_auth)
+    bearer = client.get("/v1/me", headers={"Authorization": f"Bearer {issued['access_token']}"})
+    login = client.post(
+        "/v1/browser-sessions",
+        json={"email": account["email"], "password": "correct horse battery"},
+    )
+    assert browser.status_code == 401
+    assert bearer.status_code == 401
+    assert login.status_code == 401
+    assert login.json()["message"] == "Email or password is incorrect"

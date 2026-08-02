@@ -21,8 +21,10 @@ def upgrade() -> None:
         sa.Column("email", sa.String(320), nullable=False, unique=True),
         sa.Column("password_hash", sa.String(512), nullable=False),
         sa.Column("role", sa.String(16), nullable=False),
+        sa.Column("status", sa.String(16), nullable=False, server_default="active"),
         sa.Column("verification", sa.String(32), nullable=False),
         sa.Column("created_at", sa.Integer(), nullable=False),
+        sa.CheckConstraint("status IN ('active', 'disabled')", name="ck_users_status"),
     )
     op.create_table(
         "browser_sessions",

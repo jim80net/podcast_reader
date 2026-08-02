@@ -17,7 +17,7 @@ from starlette.exceptions import HTTPException
 
 from .config import Settings
 from .contracts import EntitlementV1, default_free_entitlement
-from .db import create_database, require_current_schema
+from .db import begin_immediate, create_database, require_current_schema
 from .models import (
     AccessToken,
     BrowserSession,
@@ -113,7 +113,7 @@ def _browser_user(
     ):
         raise ApiError(401, "browser_session_required", "Sign in to continue")
     user = database.get(User, browser_session.user_id)
-    if user is None:
+    if user is None or user.status != "active":
         raise ApiError(401, "browser_session_required", "Sign in to continue")
     request.state.browser_session = browser_session
     request.state.browser_session_digest = browser_session.token_digest
@@ -157,7 +157,7 @@ def _bearer_user(
     if family is None or family.revoked_at is not None or family.expires_at <= timestamp:
         raise ApiError(401, "access_token_invalid", "The access token is invalid")
     user = database.get(User, access.user_id)
-    if user is None:
+    if user is None or user.status != "active":
         raise ApiError(401, "access_token_invalid", "The access token is invalid")
     return user
 
@@ -283,6 +283,7 @@ def create_app(settings: Settings, *, engine: Engine | None = None) -> FastAPI:
             email=email,
             password_hash=encoded,
             role="user",
+            status="active",
             verification="unverified_test",
             created_at=timestamp,
         )
@@ -307,7 +308,8 @@ def create_app(settings: Settings, *, engine: Engine | None = None) -> FastAPI:
             raise ApiError(429, "rate_limited", "Too many sign-in attempts")
         user = database.scalar(select(User).where(User.email == email))
         encoded = user.password_hash if user is not None else DUMMY_PASSWORD_HASH
-        valid = verify_password(encoded, payload.password)
+        password_valid = verify_password(encoded, payload.password)
+        valid = user is not None and user.status == "active" and password_valid
         if not valid or user is None:
             raise ApiError(401, "login_failed", GENERIC_LOGIN_MESSAGE)
         timestamp = now_epoch()
@@ -413,6 +415,7 @@ def create_app(settings: Settings, *, engine: Engine | None = None) -> FastAPI:
     def poll_device_authorization(
         payload: DevicePollInput, database: Session = Depends(_database_session)
     ) -> dict[str, object]:
+        begin_immediate(database)
         authorization = database.scalar(
             select(DeviceAuthorization).where(
                 DeviceAuthorization.device_code_digest == token_digest(payload.device_code)
@@ -455,6 +458,7 @@ def create_app(settings: Settings, *, engine: Engine | None = None) -> FastAPI:
     def refresh_access_token(
         payload: RefreshInput, database: Session = Depends(_database_session)
     ) -> dict[str, object]:
+        begin_immediate(database)
         digest = token_digest(payload.refresh_token)
         refresh = database.get(RefreshToken, digest)
         timestamp = now_epoch()

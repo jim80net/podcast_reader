@@ -53,6 +53,7 @@ def _bootstrap_admin(settings: Settings) -> None:
                 email=email,
                 password_hash=hash_password(password),
                 role="admin",
+                status="active",
                 verification="unverified_test",
                 created_at=now_epoch(),
             )
