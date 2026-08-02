@@ -1,0 +1,9 @@
+.gradle/
+.idea/
+local.properties
+**/build/
+captures/
+*.iml
+
+# Root ignores generated JSON; these are reviewed contract source fixtures.
+!app/src/test/resources/contracts/**/*.json
