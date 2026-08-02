@@ -1,6 +1,7 @@
 import { expect, test } from './fixtures'
 
 test('app-shell fonts are bundled, variable-weight capable, and local-only', async ({ harness }) => {
+  await expect(harness.window.locator('.view h2')).toBeVisible()
   const proof = await harness.window.evaluate(async () => {
     const requested = [
       ['Source Sans 3', 400],
@@ -21,7 +22,7 @@ test('app-shell fonts are bundled, variable-weight capable, and local-only', asy
         loaded: document.fonts.check(`${weight} 16px "${family}"`)
       })),
       bodyFamily: getComputedStyle(document.body).fontFamily,
-      headingFamily: getComputedStyle(document.querySelector('h1')!).fontFamily,
+      headingFamily: getComputedStyle(document.querySelector('.view h2')!).fontFamily,
       fontResources: performance
         .getEntriesByType('resource')
         .map((entry) => entry.name)
