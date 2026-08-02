@@ -23,6 +23,7 @@ from podcast_reader_premium.models import (
     AdConfig,
     AuditLog,
     BrowserSession,
+    DeviceAuthorization,
     EntitlementEvent,
     EntitlementProjection,
     FeatureFlag,
@@ -370,6 +371,34 @@ def test_server_rendered_admin_login_and_device_approval(
         "/v1/device-authorizations/token", json={"device_code": started["device_code"]}
     )
     assert issued.status_code == 200
+    with Session(_app(client).state.engine) as database:
+        consumed = database.scalar(
+            select(DeviceAuthorization).where(
+                DeviceAuthorization.approving_user_id == account["id"],
+                DeviceAuthorization.state == "consumed",
+            )
+        )
+        assert consumed is not None
+        consumed.expires_at = 1
+        database.commit()
+    assert "Device approved." in client.get(approved.headers["location"]).text
+
+    expiring = client.post("/v1/device-authorizations", json={"client": "android"}).json()
+    approved_unconsumed = client.post(
+        "/device/approve",
+        data={"user_code": expiring["user_code"], "csrf_token": csrf_token},
+        headers={"Origin": "https://premium.test"},
+        follow_redirects=False,
+    )
+    with Session(_app(client).state.engine) as database:
+        authorization = database.scalar(
+            select(DeviceAuthorization).where(DeviceAuthorization.state == "approved")
+        )
+        assert authorization is not None
+        authorization.expires_at = 1
+        database.commit()
+    expired_page = client.get(approved_unconsumed.headers["location"])
+    assert "Device approved." not in expired_page.text
 
 
 def test_house_ad_fields_are_text_https_only_and_audited(

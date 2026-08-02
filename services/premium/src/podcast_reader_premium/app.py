@@ -454,7 +454,12 @@ def create_app(settings: Settings, *, engine: Engine | None = None) -> FastAPI:
                         DeviceAuthorization.state.in_(("approved", "consumed")),
                     )
                 )
-                approved = authorization is not None
+                approved = authorization is not None and (
+                    authorization.state == "consumed"
+                    or (
+                        authorization.state == "approved" and authorization.expires_at > now_epoch()
+                    )
+                )
         return TEMPLATES.TemplateResponse(
             request,
             "device.html",
