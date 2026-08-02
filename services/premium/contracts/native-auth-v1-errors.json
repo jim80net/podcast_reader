@@ -1,0 +1,27 @@
+[
+  {
+    "code": "authorization_pending",
+    "message": "Authorization is still pending",
+    "request_id": "req_fixture"
+  },
+  {
+    "code": "slow_down",
+    "message": "Poll less frequently",
+    "request_id": "req_fixture"
+  },
+  {
+    "code": "expired_token",
+    "message": "Device authorization is invalid or expired",
+    "request_id": "req_fixture"
+  },
+  {
+    "code": "access_denied",
+    "message": "Device authorization was denied",
+    "request_id": "req_fixture"
+  },
+  {
+    "code": "refresh_token_reused",
+    "message": "The token family has been revoked",
+    "request_id": "req_fixture"
+  }
+]

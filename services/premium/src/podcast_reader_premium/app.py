@@ -31,7 +31,12 @@ from .billing import (
     WebhookVerificationError,
 )
 from .config import Settings
-from .contracts import EntitlementV1
+from .contracts import (
+    DeviceAuthorizationStartV1,
+    EntitlementV1,
+    TokenResponseV1,
+    TokenRevokeRequestV1,
+)
 from .db import begin_immediate, create_database, require_current_schema
 from .entitlements import (
     ensure_projection,
@@ -744,7 +749,11 @@ def create_app(
         response.delete_cookie(SESSION_COOKIE, secure=True, httponly=True, samesite="lax", path="/")
         response.delete_cookie(CSRF_COOKIE, secure=True, httponly=False, samesite="lax", path="/")
 
-    @app.post("/v1/device-authorizations", status_code=201)
+    @app.post(
+        "/v1/device-authorizations",
+        status_code=201,
+        response_model=DeviceAuthorizationStartV1,
+    )
     def create_device_authorization(
         payload: DeviceInput, database: Session = Depends(_database_session)
     ) -> dict[str, object]:
@@ -786,7 +795,7 @@ def create_app(
     ) -> None:
         approve_code(database, user, payload.user_code)
 
-    @app.post("/v1/device-authorizations/token")
+    @app.post("/v1/device-authorizations/token", response_model=TokenResponseV1)
     def poll_device_authorization(
         payload: DevicePollInput, database: Session = Depends(_database_session)
     ) -> dict[str, object]:
@@ -833,7 +842,7 @@ def create_app(
         database.commit()
         return tokens
 
-    @app.post("/v1/tokens/refresh")
+    @app.post("/v1/tokens/refresh", response_model=TokenResponseV1)
     def refresh_access_token(
         payload: RefreshInput, database: Session = Depends(_database_session)
     ) -> dict[str, object]:
@@ -867,6 +876,19 @@ def create_app(
         refresh.replacement_digest = token_digest(str(tokens["refresh_token"]))
         database.commit()
         return tokens
+
+    @app.post("/v1/tokens/revoke", status_code=204)
+    def revoke_token_family(
+        payload: TokenRevokeRequestV1,
+        database: Session = Depends(_database_session),
+    ) -> None:
+        begin_immediate(database)
+        refresh = database.get(RefreshToken, token_digest(payload.refresh_token))
+        if refresh is not None:
+            family = database.get(TokenFamily, refresh.family_id)
+            if family is not None and family.revoked_at is None:
+                _revoke_token_family(database, family, now_epoch())
+        database.commit()
 
     @app.get("/v1/me")
     def current_user(user: User = Depends(_bearer_user)) -> dict[str, object]:

@@ -6,6 +6,50 @@ from typing import Annotated, Literal, Self
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 Revision = Annotated[int, Field(ge=0, le=9_223_372_036_854_775_807)]
+OpaqueToken = Annotated[str, Field(min_length=20, max_length=256)]
+USER_CODE_PATTERN = (
+    r"^[23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{4}-"
+    r"[23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{4}$"
+)
+
+
+class DeviceAuthorizationStartV1(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    device_code: OpaqueToken
+    user_code: Annotated[str, Field(pattern=USER_CODE_PATTERN)]
+    verification_uri: Annotated[str, Field(pattern=r"^https://", max_length=2048)]
+    expires_in: Annotated[int, Field(gt=0)]
+    interval: Annotated[int, Field(gt=0)]
+
+
+class TokenResponseV1(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    access_token: OpaqueToken
+    token_type: Literal["Bearer"]
+    expires_in: Annotated[int, Field(gt=0)]
+    refresh_token: OpaqueToken
+
+
+class TokenRevokeRequestV1(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    refresh_token: OpaqueToken
+
+
+class NativeAuthErrorV1(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    code: Literal[
+        "authorization_pending",
+        "slow_down",
+        "expired_token",
+        "access_denied",
+        "refresh_token_reused",
+    ]
+    message: Annotated[str, Field(min_length=1, max_length=200)]
+    request_id: Annotated[str, Field(min_length=1, max_length=64)]
 
 
 class EntitlementSource(BaseModel):
