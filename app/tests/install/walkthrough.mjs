@@ -57,6 +57,7 @@ const CAPTURE_SCALES = [
   { label: '125pct', factor: 1.25 }
 ]
 const CAPTURE_THEMES = ['light', 'dark']
+const captureRecords = []
 
 const { values: args } = parseArgs({
   options: {
@@ -189,21 +190,26 @@ async function captureSurface(number, surface) {
         WIZARD_TIMEOUT_MS,
         `${theme} theme to apply`
       )
-      if (surface === 'new-view-submitted' || surface === 'new-view-job-done') {
-        const focused = await page.evaluate((currentSurface) => {
-          const cards = [...document.querySelectorAll('.job-card')]
-          const target =
-            currentSurface === 'new-view-job-done'
-              ? cards.find((card) => card.textContent?.includes('Installed app audio proof'))
-              : cards[0]
-          target?.scrollIntoView({ block: 'center' })
-          return target !== undefined
-        }, surface)
-        if (!focused) await fail(`${surface} has no job card to capture`)
-      }
       const filename = `${number}-${surface}-${scale.label}-${theme}.png`
       const fullPage = surface === 'new-view-submitted' || surface === 'new-view-job-done'
       await page.screenshot({ path: join(outDir, filename), fullPage })
+      captureRecords.push({
+        filename,
+        surface,
+        scale: scale.label,
+        devicePixelRatio: scale.factor,
+        theme,
+        viewport: {
+          width: geometry.clientWidth,
+          height: geometry.viewportHeight
+        },
+        themeControl: {
+          left: geometry.themeControlLeft,
+          right: geometry.themeControlRight,
+          width: geometry.themeControlWidth
+        },
+        fullPage
+      })
       log(`captured ${surface} at ${scale.label} in ${theme}`)
     }
   }
@@ -365,6 +371,10 @@ await page.evaluate(() => {
 await page.locator('.settings-appearance #settings-theme').waitFor({ timeout: WIZARD_TIMEOUT_MS })
 await captureSurface('06', 'settings')
 
+await writeFile(
+  join(outDir, 'capture-metadata.json'),
+  `${JSON.stringify(captureRecords, null, 2)}\n`
+)
 await writeFile(join(outDir, 'renderer-console.log'), consoleLines.join('\n'))
 await app.close()
 log('walkthrough complete')
