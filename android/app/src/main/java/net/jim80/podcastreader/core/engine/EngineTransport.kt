@@ -7,8 +7,7 @@ import okhttp3.CookieJar
 import okhttp3.OkHttpClient
 import okhttp3.Request
 
-@JvmInline
-value class EngineBearer private constructor(internal val value: String) {
+class EngineBearer private constructor(internal val value: String) {
     override fun toString(): String = "EngineBearer(redacted)"
 
     companion object {
