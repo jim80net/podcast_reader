@@ -91,6 +91,15 @@ describe('premium desktop boundary', () => {
     expect((fetchFn.mock.calls[0]?.[1]?.headers as Record<string, string>).Authorization).toBe('Bearer access_secret')
   })
 
+  it('requests only a fixed ad slot with the premium bearer and treats 204 as empty', async () => {
+    const fetchFn = vi.fn(async (_url: string | URL | Request, _init?: RequestInit) => new Response(null, { status: 204 }))
+    const transport = new PremiumTransport(PremiumOrigin.fromTrustedConfiguration('https://premium.example'), fetchFn as typeof fetch)
+    await expect(transport.inventory('library', 'access_token_abcdefghijklmnopqrstuvwxyz')).resolves.toBeNull()
+    expect(fetchFn.mock.calls[0]?.[0]).toBe('https://premium.example/v1/ads/inventory/library')
+    expect(fetchFn.mock.calls[0]?.[1]).toMatchObject({ redirect: 'error', credentials: 'omit', referrerPolicy: 'no-referrer' })
+    expect((fetchFn.mock.calls[0]?.[1]?.headers as Record<string, string>).Authorization).toBe('Bearer access_token_abcdefghijklmnopqrstuvwxyz')
+  })
+
   it('rejects oversized streamed responses before parsing', async () => {
     const body = new ReadableStream({ start(controller) { controller.enqueue(new Uint8Array(65 * 1024)); controller.close() } })
     const transport = new PremiumTransport(PremiumOrigin.fromTrustedConfiguration('https://premium.example'), vi.fn(async () => new Response(body)) as typeof fetch)

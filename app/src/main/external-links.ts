@@ -30,6 +30,15 @@ export function isExternalWebUrl(url: string): boolean {
   return parsed.protocol === 'http:' || parsed.protocol === 'https:'
 }
 
+/** Exact, credential-free HTTPS destination accepted for a user-clicked house-ad CTA. */
+export function isExactHttpsExternalUrl(url: string): boolean {
+  if (url.length < 1 || url.length > 2048) return false
+  try {
+    const parsed = new URL(url)
+    return parsed.protocol === 'https:' && parsed.username === '' && parsed.password === '' && parsed.hash === '' && parsed.href === url
+  } catch { return false }
+}
+
 /** A valid https Referer to stand in for the file:// embedding page. */
 export const YOUTUBE_REFERER = 'https://www.youtube.com/'
 

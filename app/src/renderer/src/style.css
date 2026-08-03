@@ -861,6 +861,61 @@ a.job-title:hover {
 
 /* ---- Reader ----------------------------------------------------------- */
 
+.house-ad-slot:empty {
+  display: none;
+}
+
+.house-ad-slot {
+  margin: 0 0 var(--space-4);
+}
+
+.house-ad-card {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: var(--space-1) var(--space-4);
+  align-items: center;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.house-ad-label {
+  grid-column: 1;
+  color: var(--muted);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.house-ad-title,
+.house-ad-body {
+  grid-column: 1;
+  margin: 0;
+}
+
+.house-ad-title {
+  font-size: var(--text-base);
+}
+
+.house-ad-body {
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+
+.house-ad-cta {
+  grid-column: 2;
+  grid-row: 1 / span 3;
+  white-space: nowrap;
+}
+
+@media (max-width: 720px) {
+  .house-ad-card { grid-template-columns: 1fr; }
+  .house-ad-cta { grid-column: 1; grid-row: auto; justify-self: start; }
+}
+
 .reader-toolbar {
   margin: 0 0 var(--space-3);
   min-height: 1.5rem;
