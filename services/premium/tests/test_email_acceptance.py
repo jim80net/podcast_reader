@@ -117,11 +117,14 @@ def _premium_bearer(
         database.commit()
 
     started = client.post("/v1/device-authorizations", json={"client": "desktop"}).json()
-    assert client.post(
-        "/v1/device-authorizations/approve",
-        json={"user_code": started["user_code"]},
-        headers=browser_auth,
-    ).status_code == 204
+    assert (
+        client.post(
+            "/v1/device-authorizations/approve",
+            json={"user_code": started["user_code"]},
+            headers=browser_auth,
+        ).status_code
+        == 204
+    )
     issued = client.post(
         "/v1/device-authorizations/token", json={"device_code": started["device_code"]}
     )
@@ -260,12 +263,9 @@ def test_subscription_and_manual_delivery_cross_real_outbox_relay_and_maildir(
         messages = sorted(_app(client).state.settings.email_maildir_path.glob("new/*.eml"))
         assert len(messages) == 2
         parsed = [
-            BytesParser(policy=policy.default).parsebytes(path.read_bytes())
-            for path in messages
+            BytesParser(policy=policy.default).parsebytes(path.read_bytes()) for path in messages
         ]
-        assert {message["To"] for message in parsed} == {
-            "dev-mailbox@podcast-reader.invalid"
-        }
+        assert {message["To"] for message in parsed} == {"dev-mailbox@podcast-reader.invalid"}
         bodies = [message.get_body() for message in parsed]
         assert all(body is not None and TRANSCRIPT in body.get_content() for body in bodies)
         assert {item["consent_kind"] for item in outbox.list_status()} == {
