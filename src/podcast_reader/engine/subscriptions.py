@@ -32,6 +32,7 @@ from podcast_reader.engine.subscription_store import (
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from podcast_reader.engine.email_outbox import EmailOutboxManager
     from podcast_reader.engine.jobs import JobStore
 
 POLL_INTERVAL_SECONDS = 30 * 60
@@ -96,12 +97,14 @@ class SubscriptionManager:
         clock: Clock = _utc_now,
         job_store: JobStore | None = None,
         library_has_source: Callable[[str], bool] | None = None,
+        email_outbox: EmailOutboxManager | None = None,
     ) -> None:
         self.store = store
         self._fetcher = fetcher or SafeFeedFetcher()
         self._clock = clock
         self._job_store = job_store
         self._library_has_source = library_has_source or (lambda _source: False)
+        self._email_outbox = email_outbox
         self._capability: OnlineCapabilitySnapshot | None = None
         self._capability_lock = threading.Lock()
         self._in_flight: set[str] = set()
@@ -399,12 +402,18 @@ class SubscriptionManager:
                     "completed" if self._library_has_source(episode["enclosure_url"]) else "failed"
                 )
             if terminal_state is not None:
-                self.store.mark_episode_terminal(
-                    episode["subscription_id"],
-                    episode["episode_key"],
-                    state=terminal_state,
-                    updated_at=_iso(self._clock()),
-                )
+                updated_at = _iso(self._clock())
+                if terminal_state == "completed" and self._email_outbox is not None:
+                    self._email_outbox.record_subscription_completion(
+                        episode, updated_at=updated_at
+                    )
+                else:
+                    self.store.mark_episode_terminal(
+                        episode["subscription_id"],
+                        episode["episode_key"],
+                        state=terminal_state,
+                        updated_at=updated_at,
+                    )
 
     class _Claim:
         def __init__(self, manager: SubscriptionManager, subscription_id: str) -> None:

@@ -90,7 +90,10 @@ def test_version_one_migration_normalizes_legacy_published_timestamps(tmp_path: 
 
     migrated = SubscriptionStore(tmp_path)
     try:
-        assert migrated.raw_connection_for_tests().execute("PRAGMA user_version").fetchone()[0] == 2
+        assert (
+            migrated.raw_connection_for_tests().execute("PRAGMA user_version").fetchone()[0]
+            == SCHEMA_VERSION
+        )
         episodes = migrated.discovered_episodes("sub_legacy", limit=2)
         assert [episode["episode_key"] for episode in episodes] == ["earlier", "later"]
         assert [episode["published_at"] for episode in episodes] == [
@@ -107,7 +110,12 @@ def test_online_backup_is_restore_proved_with_exact_row_counts(tmp_path: Path) -
         proof = store.backup_and_verify(tmp_path / "backups" / "subscriptions.sqlite3")
         assert proof == {
             "integrity_check": "ok",
-            "row_counts": {"subscriptions": 0, "episodes": 0},
+            "row_counts": {
+                "subscriptions": 0,
+                "episodes": 0,
+                "subscription_email_preferences": 0,
+                "email_outbox": 0,
+            },
             "schema_version": SCHEMA_VERSION,
         }
         output = tmp_path / "backups" / "subscriptions.sqlite3"

@@ -38,6 +38,12 @@ from podcast_reader.engine.cookies import (
     store_jar,
     validate_jar,
 )
+from podcast_reader.engine.email_outbox import (
+    EmailCapabilitySnapshot,
+    EmailFeatureUnavailableError,
+    EmailOutboxError,
+    EmailOutboxManager,
+)
 from podcast_reader.engine.embed import build_embed_page, is_valid_video_id
 from podcast_reader.engine.jobs import JobStateError
 from podcast_reader.engine.library import get_entry, list_entries
@@ -417,6 +423,52 @@ class OnlineCapabilityBody(BaseModel):
     expires_at: str = Field(min_length=20, max_length=64)
 
 
+class EmailCapabilityBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: int = Field(strict=True)
+    subject: str = Field(pattern=r"usr_[A-Za-z0-9_-]{1,128}")
+    entitlement_revision: int = Field(strict=True, ge=0)
+    flags_revision: int = Field(strict=True, ge=0)
+    transcript_email: bool = Field(strict=True)
+    expires_at: str = Field(min_length=20, max_length=64)
+
+
+class EmailPreferenceBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: int = Field(strict=True)
+    subject: str = Field(pattern=r"usr_[A-Za-z0-9_-]{1,128}")
+    enabled: bool = Field(strict=True)
+
+
+class ManualEmailBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: int = Field(strict=True)
+    action_id: str = Field(pattern=r"act_[A-Za-z0-9_-]{24}")
+    source_id: str = Field(pattern=r"[0-9a-f]{64}")
+
+
+class EmailCompletionBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: int = Field(strict=True)
+    client_delivery_id: str = Field(pattern=r"eml_[A-Za-z0-9_-]{24}")
+    claim_generation: int = Field(strict=True, ge=1)
+    delivery_id: str = Field(pattern=r"del_[A-Za-z0-9_-]{24}")
+    delivered_at: str = Field(min_length=20, max_length=64)
+
+
+class EmailReleaseBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: int = Field(strict=True)
+    client_delivery_id: str = Field(pattern=r"eml_[A-Za-z0-9_-]{24}")
+    claim_generation: int = Field(strict=True, ge=1)
+    error_code: str = Field(min_length=1, max_length=64)
+
+
 #: Cap on the unauthenticated claim body (per V4): a legitimate claim is a
 #: tiny JSON object, so anything declaring more — or declaring nothing
 #: (chunked) — is rejected before the body is read.
@@ -436,6 +488,7 @@ def create_app(
     media_manager: MediaManager | None = None,
     web_session_signer: WebSessionSigner | None = None,
     subscription_manager: SubscriptionManager | None = None,
+    email_outbox_manager: EmailOutboxManager | None = None,
 ) -> FastAPI:
     """Build the engine's FastAPI app bound to *store* and *data_dir*.
 
@@ -463,6 +516,9 @@ def create_app(
 
     *subscription_manager* owns the separate subscription database, memory-only
     online capability, and scheduler. Without one, its routes answer 503.
+
+    *email_outbox_manager* owns the separate memory-only email capability and
+    the content-free local delivery outbox. Without one, its routes answer 503.
     """
     app = FastAPI(title="podcast-reader engine", version=engine_version())
     expected_token = load_engine_state(data_dir)["token"].encode()
@@ -812,6 +868,115 @@ def create_app(
         except (ValidationError, ValueError):
             manager.clear_capability()
             raise HTTPException(status_code=400, detail="invalid online capability") from None
+
+    def _email_outbox() -> EmailOutboxManager:
+        if email_outbox_manager is None:
+            raise HTTPException(status_code=503, detail="email outbox manager not configured")
+        return email_outbox_manager
+
+    @app.put("/v1/email/online-capability", status_code=status.HTTP_204_NO_CONTENT)
+    async def update_email_capability(request: Request) -> None:
+        manager = _email_outbox()
+        try:
+            raw = await request.body()
+            if len(raw) > 4096:
+                raise ValueError("email capability body is too large")
+            body = EmailCapabilityBody.model_validate_json(raw)
+            manager.update_capability(EmailCapabilitySnapshot(**body.model_dump()))
+        except (ValidationError, ValueError):
+            manager.clear_capability()
+            raise HTTPException(status_code=400, detail="invalid email capability") from None
+
+    @app.put("/v1/subscriptions/{subscription_id}/email-preference")
+    def update_email_preference(
+        subscription_id: str, body: EmailPreferenceBody
+    ) -> dict[str, object]:
+        if body.schema_version != 1:
+            raise HTTPException(status_code=400, detail="invalid email preference schema")
+        try:
+            return _email_outbox().set_subscription_preference(
+                subscription_id, subject=body.subject, enabled=body.enabled
+            )
+        except EmailFeatureUnavailableError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="subscription not found") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/v1/subscriptions/{subscription_id}/email-preference")
+    def email_preference(subscription_id: str, subject: str) -> dict[str, object]:
+        try:
+            return _email_outbox().preference_status(subscription_id, subject)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="invalid email preference subject") from exc
+
+    @app.post("/v1/email-outbox/manual", status_code=status.HTTP_201_CREATED)
+    def create_manual_email(body: ManualEmailBody) -> dict[str, object]:
+        if body.schema_version != 1:
+            raise HTTPException(status_code=400, detail="invalid manual email schema")
+        try:
+            return _email_outbox().create_manual(action_id=body.action_id, source_id=body.source_id)
+        except EmailFeatureUnavailableError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="transcript not found") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/v1/email-outbox")
+    def list_email_outbox() -> list[dict[str, object]]:
+        return _email_outbox().list_status()
+
+    @app.post("/v1/email-outbox/claim", response_model=None)
+    def claim_email_outbox() -> dict[str, object] | Response:
+        try:
+            claim = _email_outbox().claim()
+        except EmailFeatureUnavailableError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except EmailOutboxError as exc:
+            raise HTTPException(status_code=409, detail=exc.code) from exc
+        return Response(status_code=204) if claim is None else dict(claim)
+
+    @app.post("/v1/email-outbox/complete")
+    def complete_email_outbox(body: EmailCompletionBody) -> dict[str, object]:
+        if body.schema_version != 1:
+            raise HTTPException(status_code=400, detail="invalid email completion schema")
+        try:
+            return _email_outbox().complete(
+                client_delivery_id=body.client_delivery_id,
+                claim_generation=body.claim_generation,
+                delivery_id=body.delivery_id,
+                delivered_at=body.delivered_at,
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="email outbox item not found") from exc
+        except (RuntimeError, ValueError) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.post("/v1/email-outbox/release")
+    def release_email_outbox(body: EmailReleaseBody) -> dict[str, object]:
+        if body.schema_version != 1:
+            raise HTTPException(status_code=400, detail="invalid email release schema")
+        try:
+            return _email_outbox().release(
+                client_delivery_id=body.client_delivery_id,
+                claim_generation=body.claim_generation,
+                error_code=body.error_code,
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="email outbox item not found") from exc
+        except (RuntimeError, ValueError) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.delete("/v1/email-outbox/{client_delivery_id}")
+    def cancel_email_outbox(client_delivery_id: str) -> dict[str, object]:
+        try:
+            return _email_outbox().cancel(client_delivery_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="email outbox item not found") from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     @app.post("/v1/jobs", status_code=status.HTTP_201_CREATED)
     def submit_job(body: JobSubmission) -> JobRecord:

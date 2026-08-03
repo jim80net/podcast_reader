@@ -51,7 +51,7 @@ jobs:
           uv build --wheel --out-dir wheel-smoke-dist
           uv venv wheel-smoke-venv
           uv pip install --python wheel-smoke-venv/bin/python wheel-smoke-dist/*.whl
-          wheel-smoke-venv/bin/python -c "from importlib.resources import files; web = files('podcast_reader.web_assets'); engine = files('podcast_reader.engine'); assert all(web.joinpath(name).is_file() for name in ('shell.html', 'app.js', 'app.css')); assert engine.joinpath('contracts/v1/subscriptions/online-capability.json').is_file()"
+          wheel-smoke-venv/bin/python -c "from importlib.resources import files; web = files('podcast_reader.web_assets'); engine = files('podcast_reader.engine'); assert all(web.joinpath(name).is_file() for name in ('shell.html', 'app.js', 'app.css')); assert engine.joinpath('contracts/v1/subscriptions/online-capability.json').is_file(); assert engine.joinpath('contracts/v1/email/online-capability.json').is_file(); assert engine.joinpath('contracts/v1/email/claim.json').is_file()"
       - name: Unit tests
         run: uv run pytest -m "not integration" -q
       - name: Byte-exact transcript CSP policy
