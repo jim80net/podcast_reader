@@ -12,3 +12,8 @@ members without granting behavior for unknown consumed values.
 
 Incompatible fields, enums, or semantics require a new `schema_version` and an
 independent design gate. Consumers must not edit or fork these backend-owned files.
+
+`consumer-handoff.json` is the Android handoff freeze. It pins the supported route,
+authentication and response statuses, slot inventory, and SHA-256 of every consumer
+fixture. Consumers verify those hashes against this directory and update only through
+an independently gated backend contract change.
