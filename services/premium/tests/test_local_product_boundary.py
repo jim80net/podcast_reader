@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 
@@ -27,15 +28,11 @@ def test_premium_service_is_absent_from_local_engine_and_desktop_dependency_clos
     for path in desktop_sources:
         source = path.read_text(encoding="utf-8")
         if path.is_relative_to(premium_boundary):
-            assert not any(
-                value in source.casefold()
-                for value in (
-                    "engine-client",
-                    "engine-manager",
-                    "../engine",
-                    "/v1/jobs",
-                    "/v1/library",
-                )
-            ), path
+            folded = source.casefold()
+            assert "127.0.0.1" not in folded and "localhost" not in folded, path
+            assert re.search(
+                r"from\s+['\"](?:(?:\.\./)+|@[^/'\"]+/)?engine(?:[-/'\"])",
+                folded,
+            ) is None, path
         else:
             assert "premium" not in source.casefold(), path

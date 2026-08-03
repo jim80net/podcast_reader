@@ -20,7 +20,9 @@ export class PremiumOrigin {
 
   resolve(path: string): string {
     if (!path.startsWith('/v1/')) throw new Error('invalid premium route')
-    return `${this.value}${path}`
+    const resolved = new URL(path, this.value)
+    if (resolved.origin !== this.value || resolved.pathname !== path || resolved.search !== '' || resolved.hash !== '') throw new Error('invalid premium route')
+    return resolved.href
   }
 
   owns(url: string): boolean {
