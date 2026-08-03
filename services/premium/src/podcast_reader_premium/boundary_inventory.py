@@ -18,6 +18,11 @@ from .boundary_policy import POLICY_DIRECTORY, PolicyError, load_json
 INVENTORY_PATH = POLICY_DIRECTORY / "surface-inventory-v1.json"
 HTTP_METHODS = frozenset({"delete", "get", "patch", "post", "put"})
 NETWORK_PATTERNS: Mapping[str, tuple[re.Pattern[str], ...]] = {
+    "android": (
+        re.compile(r"\bOkHttpClient\.Builder\s*\("),
+        re.compile(r"\bRequest\.Builder\s*\("),
+        re.compile(r"\bIntent\s*\(\s*Intent\.ACTION_VIEW\b"),
+    ),
     "backend": (
         re.compile(r"\bhttpx\.Client\s*\("),
         re.compile(r"\bhttp\.client\.HTTPSConnection\b"),
@@ -35,12 +40,15 @@ NETWORK_PATTERNS: Mapping[str, tuple[re.Pattern[str], ...]] = {
     "private-web": (re.compile(r"\bfetch\s*\("),),
 }
 NETWORK_ROOTS: Mapping[str, tuple[Path, ...]] = {
+    "android": (Path("android/app/src/main/java"),),
     "backend": (Path("src/podcast_reader"), Path("services/premium/src")),
     "desktop": (Path("app/src/main"),),
     "extension": (Path("extension/src"),),
     "private-web": (Path("src/podcast_reader/web_assets"),),
 }
-NETWORK_SOURCE_SUFFIXES = frozenset({".cjs", ".js", ".jsx", ".mjs", ".py", ".ts", ".tsx"})
+NETWORK_SOURCE_SUFFIXES = frozenset(
+    {".cjs", ".js", ".jsx", ".kt", ".mjs", ".py", ".ts", ".tsx"}
+)
 
 
 def _fail(path: str, message: str) -> NoReturn:
@@ -187,6 +195,33 @@ def _binding_map(value: object, path: str) -> dict[str, str]:
     return bindings
 
 
+def _multi_binding_map(value: object, path: str) -> dict[str, list[str]]:
+    bindings: dict[str, list[str]] = {}
+    for index, raw in enumerate(_objects(value, path)):
+        item = _exact(raw, f"{path}[{index}]", {"item", "operation_ids"})
+        observed = item["item"]
+        if not isinstance(observed, str) or not observed:
+            _fail(f"{path}[{index}].item", "must be a non-empty string")
+        operation_ids = _strings(item["operation_ids"], f"{path}[{index}].operation_ids")
+        if not operation_ids:
+            _fail(f"{path}[{index}].operation_ids", "must not be empty")
+        if observed in bindings:
+            _fail(path, f"duplicate binding for {observed}")
+        bindings[observed] = operation_ids
+    if list(bindings) != sorted(bindings):
+        _fail(path, "bindings must be sorted by item")
+    return bindings
+
+
+def discover_android_runtime_dependencies(lock_source: str) -> set[str]:
+    dependencies: set[str] = set()
+    for line in lock_source.splitlines():
+        coordinate, separator, configurations = line.partition("=")
+        if separator and "releaseRuntimeClasspath" in configurations.split(","):
+            dependencies.add(coordinate)
+    return dependencies
+
+
 def _check_snapshot(path: str, actual: set[str], bindings: Mapping[str, str]) -> None:
     expected = set(bindings)
     if actual != expected:
@@ -237,7 +272,7 @@ def _claim_ids(projections: Mapping[str, object]) -> set[str]:
 def load_projections(repo_root: Path) -> dict[str, object]:
     return {
         surface: load_json(repo_root / POLICY_DIRECTORY / f"projection-{surface}-v1.json")
-        for surface in ("backend", "desktop", "extension", "private-web")
+        for surface in ("android", "backend", "desktop", "extension", "private-web")
     }
 
 
@@ -251,6 +286,7 @@ def validate_surface_inventory(
             "schema_version",
             "contract",
             "policy_revision",
+            "android",
             "backend",
             "desktop",
             "extension",
@@ -268,6 +304,61 @@ def validate_surface_inventory(
     if revisions != {inventory["policy_revision"]}:
         _fail("$.policy_revision", "inventory and projections must have one matching revision")
     operations = _operation_ids(projections)
+
+    android = _exact(
+        inventory["android"],
+        "$.android",
+        {
+            "dependency_lock",
+            "production_dependencies",
+            "network_owners",
+            "admitting_issue",
+        },
+    )
+    admitting_issue = android["admitting_issue"]
+    if not isinstance(admitting_issue, str) or not admitting_issue.startswith(
+        "https://github.com/jim80net/podcast_reader/issues/"
+    ):
+        _fail("$.android.admitting_issue", "must name the admitting issue")
+    dependencies = _strings(
+        android["production_dependencies"], "$.android.production_dependencies"
+    )
+    _check_snapshot(
+        "$.android.production_dependencies",
+        discover_android_runtime_dependencies(
+            _source(repo_root, android["dependency_lock"])
+        ),
+        {dependency: "android.dependency-allowlist" for dependency in dependencies},
+    )
+    android_network = _multi_binding_map(
+        android["network_owners"], "$.android.network_owners"
+    )
+    _check_snapshot(
+        "$.android.network_owners",
+        discover_network_owner_files(repo_root, "android"),
+        {owner: operation_ids[0] for owner, operation_ids in android_network.items()},
+    )
+    android_operations = {
+        operation.get("id")
+        for operation in _objects(
+            projections["android"]["operations"], "projection.android.operations"
+        )
+        if isinstance(operation.get("id"), str)
+    }
+    unknown_android_operations = sorted(
+        {
+            operation_id
+            for operation_ids in android_network.values()
+            for operation_id in operation_ids
+            if operation_id not in android_operations
+        }
+    )
+    if unknown_android_operations:
+        _fail(
+            "$.android.network_owners",
+            "bindings name operations absent from the Android projection: "
+            f"{unknown_android_operations}",
+        )
 
     backend = _exact(
         inventory["backend"],
@@ -414,7 +505,8 @@ def validate_surface_inventory(
     )
 
     all_bindings = (
-        backend_routes
+        {owner: operation_ids[0] for owner, operation_ids in android_network.items()}
+        | backend_routes
         | backend_network
         | {field: persistence["operation_id"] for field in persistence["fields"]}
         | api_bindings
