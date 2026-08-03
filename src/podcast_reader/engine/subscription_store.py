@@ -26,7 +26,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
     from pathlib import Path
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 DATABASE_DIR = "subscriptions"
 DATABASE_FILE = "subscriptions.sqlite3"
 
@@ -180,7 +180,7 @@ CREATE TABLE email_outbox (
     )
 );
 CREATE UNIQUE INDEX email_outbox_automatic_unique
-    ON email_outbox(subscription_id, job_id, consent_revision)
+    ON email_outbox(subject, subscription_id, job_id, consent_revision)
     WHERE consent_kind = 'subscription_completion';
 CREATE UNIQUE INDEX email_outbox_manual_unique
     ON email_outbox(subject, manual_action_id)
@@ -236,12 +236,76 @@ CREATE TABLE IF NOT EXISTS email_outbox (
     )
 );
 CREATE UNIQUE INDEX IF NOT EXISTS email_outbox_automatic_unique
-    ON email_outbox(subscription_id, job_id, consent_revision)
+    ON email_outbox(subject, subscription_id, job_id, consent_revision)
     WHERE consent_kind = 'subscription_completion';
 CREATE UNIQUE INDEX IF NOT EXISTS email_outbox_manual_unique
     ON email_outbox(subject, manual_action_id)
     WHERE consent_kind = 'manual';
 CREATE INDEX IF NOT EXISTS email_outbox_claim_idx
+    ON email_outbox(subject, state, next_attempt_at, claim_expires_at, created_at);
+"""
+
+_EMAIL_V4_MIGRATION = """
+DROP INDEX IF EXISTS email_outbox_automatic_unique;
+DROP INDEX IF EXISTS email_outbox_manual_unique;
+DROP INDEX IF EXISTS email_outbox_claim_idx;
+ALTER TABLE email_outbox RENAME TO email_outbox_v3;
+CREATE TABLE email_outbox (
+    client_delivery_id TEXT PRIMARY KEY,
+    subject TEXT NOT NULL,
+    source_id TEXT NOT NULL CHECK (length(source_id) = 64),
+    job_id TEXT,
+    subscription_id TEXT REFERENCES subscriptions(id) ON DELETE SET NULL,
+    consent_kind TEXT NOT NULL CHECK (
+        consent_kind IN ('subscription_completion', 'manual')
+    ),
+    consent_revision INTEGER NOT NULL CHECK (consent_revision >= 1),
+    manual_action_id TEXT,
+    state TEXT NOT NULL CHECK (
+        state IN ('pending', 'claimed', 'delivered', 'failed', 'cancelled')
+    ),
+    attempts INTEGER NOT NULL CHECK (attempts BETWEEN 0 AND 8),
+    next_attempt_at TEXT,
+    error_code TEXT CHECK (
+        error_code IS NULL OR error_code IN (
+            'premium_feature_unavailable', 'delivery_too_large',
+            'idempotency_conflict', 'delivery_unavailable', 'email_not_verified',
+            'artifact_unavailable'
+        )
+    ),
+    claim_generation INTEGER NOT NULL CHECK (claim_generation >= 0),
+    claimed_at TEXT,
+    claim_expires_at TEXT,
+    server_delivery_id TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    delivered_at TEXT,
+    CHECK (
+        (consent_kind = 'subscription_completion'
+            AND job_id IS NOT NULL AND manual_action_id IS NULL) OR
+        (consent_kind = 'manual' AND manual_action_id IS NOT NULL)
+    )
+);
+INSERT INTO email_outbox (
+    client_delivery_id, subject, source_id, job_id, subscription_id,
+    consent_kind, consent_revision, manual_action_id, state, attempts,
+    next_attempt_at, error_code, claim_generation, claimed_at,
+    claim_expires_at, server_delivery_id, created_at, updated_at, delivered_at
+)
+SELECT
+    client_delivery_id, subject, source_id, job_id, subscription_id,
+    consent_kind, consent_revision, manual_action_id, state, attempts,
+    next_attempt_at, error_code, claim_generation, claimed_at,
+    claim_expires_at, server_delivery_id, created_at, updated_at, delivered_at
+FROM email_outbox_v3;
+DROP TABLE email_outbox_v3;
+CREATE UNIQUE INDEX email_outbox_automatic_unique
+    ON email_outbox(subject, subscription_id, job_id, consent_revision)
+    WHERE consent_kind = 'subscription_completion';
+CREATE UNIQUE INDEX email_outbox_manual_unique
+    ON email_outbox(subject, manual_action_id)
+    WHERE consent_kind = 'manual';
+CREATE INDEX email_outbox_claim_idx
     ON email_outbox(subject, state, next_attempt_at, claim_expires_at, created_at);
 """
 
@@ -360,7 +424,10 @@ class SubscriptionStore:
                     version = 2
                 if version == 2:
                     connection.executescript(_EMAIL_SCHEMA)
-                    version = 3
+                    version = 4
+                if version == 3:
+                    connection.executescript(_EMAIL_V4_MIGRATION)
+                    version = 4
                 if version != SCHEMA_VERSION:
                     raise RuntimeError(f"unsupported subscription database schema {version}")
                 connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
@@ -839,7 +906,8 @@ class SubscriptionStore:
                 WHERE episodes.state = 'completed' AND episodes.job_id IS NOT NULL
                   AND NOT EXISTS (
                       SELECT 1 FROM email_outbox
-                      WHERE email_outbox.subscription_id = episodes.subscription_id
+                      WHERE email_outbox.subject = preference.subject
+                        AND email_outbox.subscription_id = episodes.subscription_id
                         AND email_outbox.job_id = episodes.job_id
                         AND email_outbox.consent_revision = preference.consent_revision
                         AND email_outbox.consent_kind = 'subscription_completion'

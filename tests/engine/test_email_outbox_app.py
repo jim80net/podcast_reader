@@ -75,9 +75,10 @@ def test_email_routes_are_bearer_gated_exact_and_round_trip(tmp_path: Path) -> N
         assert client.put(capability_path, json=_capability()).status_code == 401
         assert client.put(capability_path, json=_capability(), headers=headers).status_code == 204
 
+        valid_capability = json.dumps(_capability()).encode()
         oversized = client.put(
             capability_path,
-            content=b"x" * 4097,
+            content=valid_capability + (b" " * (4097 - len(valid_capability))),
             headers={**headers, "Content-Type": "application/json"},
         )
         assert oversized.status_code == 400

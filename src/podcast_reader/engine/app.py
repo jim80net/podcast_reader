@@ -25,6 +25,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from starlette.background import BackgroundTask
+from starlette.concurrency import run_in_threadpool
 
 from podcast_reader.chapters import verify_key
 
@@ -884,7 +885,9 @@ def create_app(
                     raise ValueError("email capability body is too large")
                 raw.extend(chunk)
             body = EmailCapabilityBody.model_validate_json(bytes(raw))
-            manager.update_capability(EmailCapabilitySnapshot(**body.model_dump()))
+            await run_in_threadpool(
+                manager.update_capability, EmailCapabilitySnapshot(**body.model_dump())
+            )
         except (ValidationError, ValueError):
             manager.clear_capability()
             raise HTTPException(status_code=400, detail="invalid email capability") from None

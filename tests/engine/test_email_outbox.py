@@ -256,6 +256,27 @@ def test_capability_refresh_recovers_consent_covered_completion_after_restart(
         restarted_store.close()
 
 
+def test_each_subject_consent_gets_its_own_automatic_delivery(
+    outbox: tuple[EmailOutboxManager, SubscriptionStore, Path], clock: MutableClock
+) -> None:
+    manager, store, library_dir = outbox
+    _seed_library(library_dir)
+    _seed_subscription(store, clock)
+    manager.update_capability(_capability(clock))
+    manager.set_subscription_preference("sub_email", subject=SUBJECT, enabled=True)
+    manager.update_capability(_capability(clock, subject=OTHER_SUBJECT))
+    manager.set_subscription_preference("sub_email", subject=OTHER_SUBJECT, enabled=True)
+
+    episode = store.episodes_for_reconciliation()[0]
+    manager.record_subscription_completion(episode, updated_at=_iso(clock.value))
+    manager.update_capability(_capability(clock, subject=SUBJECT))
+
+    items = store.list_email_outbox()
+    assert len(items) == 2
+    assert {item["subject"] for item in items} == {SUBJECT, OTHER_SUBJECT}
+    assert {item["consent_revision"] for item in items} == {1}
+
+
 def test_manual_action_is_idempotent_and_claim_materializes_only_bounded_content(
     outbox: tuple[EmailOutboxManager, SubscriptionStore, Path], clock: MutableClock
 ) -> None:

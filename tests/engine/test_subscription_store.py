@@ -124,3 +124,45 @@ def test_online_backup_is_restore_proved_with_exact_row_counts(tmp_path: Path) -
             assert stat.S_IMODE(output.parent.stat().st_mode) == 0o700
     finally:
         store.close()
+
+
+def test_version_three_migration_preserves_outbox_and_subject_scopes_automatic_index(
+    tmp_path: Path,
+) -> None:
+    store = SubscriptionStore(tmp_path)
+    store.insert_manual_email(
+        client_delivery_id="eml_AAAAAAAAAAAAAAAAAAAAAAAA",
+        subject="usr_migration",
+        source_id="a" * 64,
+        action_id="act_BBBBBBBBBBBBBBBBBBBBBBBB",
+        created_at="2026-08-03T00:00:00Z",
+    )
+    connection = store.raw_connection_for_tests()
+    connection.execute("DROP INDEX email_outbox_automatic_unique")
+    connection.execute(
+        """
+        CREATE UNIQUE INDEX email_outbox_automatic_unique
+        ON email_outbox(subscription_id, job_id, consent_revision)
+        WHERE consent_kind = 'subscription_completion'
+        """
+    )
+    connection.execute("PRAGMA user_version = 3")
+    connection.commit()
+    store.close()
+
+    migrated = SubscriptionStore(tmp_path)
+    try:
+        assert len(migrated.list_email_outbox()) == 1
+        index_columns = [
+            row[2]
+            for row in migrated.raw_connection_for_tests().execute(
+                "PRAGMA index_info(email_outbox_automatic_unique)"
+            )
+        ]
+        assert index_columns == ["subject", "subscription_id", "job_id", "consent_revision"]
+        assert (
+            migrated.raw_connection_for_tests().execute("PRAGMA user_version").fetchone()[0]
+            == SCHEMA_VERSION
+        )
+    finally:
+        migrated.close()
