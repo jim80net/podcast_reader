@@ -1,0 +1,27 @@
+[
+  {
+    "code": "premium_feature_unavailable",
+    "message": "Transcript email is unavailable",
+    "request_id": "req_fixture"
+  },
+  {
+    "code": "delivery_too_large",
+    "message": "Transcript email content is too large",
+    "request_id": "req_fixture"
+  },
+  {
+    "code": "idempotency_conflict",
+    "message": "Delivery identifier conflicts with prior content",
+    "request_id": "req_fixture"
+  },
+  {
+    "code": "delivery_unavailable",
+    "message": "Transcript email could not be delivered",
+    "request_id": "req_fixture"
+  },
+  {
+    "code": "email_not_verified",
+    "message": "A verified email address is required",
+    "request_id": "req_fixture"
+  }
+]
