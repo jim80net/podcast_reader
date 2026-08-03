@@ -4,7 +4,7 @@ test('Local ordinary views make no subscription calls and the explicit view is r
   const { window, mock } = harness
   await expect(window.locator('.engine-pill')).toHaveAttribute('data-state', 'ready')
 
-  await window.getByRole('link', { name: 'New' }).click()
+  await window.getByRole('link', { name: 'New', exact: true }).click()
   await window.getByRole('link', { name: 'Settings' }).click()
   await window.getByRole('link', { name: 'Library' }).click()
   let requests = (await mock.log()).filter((entry) => entry.kind === 'request').map((entry) => entry.detail)

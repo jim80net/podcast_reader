@@ -63,6 +63,8 @@ test('engine bearer token is unreachable from the renderer', async ({ harness })
   // The bridge is the renderer's ONLY door, and it is payload-only.
   expect(probe.apiKeys).toEqual(
     [
+      'createSubscription',
+      'deleteSubscription',
       'getEngineStatus',
       'getPrivateWebStatus',
       'getPremiumState',
@@ -83,6 +85,7 @@ test('engine bearer token is unreachable from the renderer', async ({ harness })
       'keyStorageMode',
       'listProviders',
       'listPacks',
+      'listSubscriptions',
       'installPack',
       'uninstallPack',
       'isFirstRunComplete',
@@ -91,6 +94,7 @@ test('engine bearer token is unreachable from the renderer', async ({ harness })
       'signOutPremiumAccount',
       'getPremiumInventory',
       'openPremiumCta',
+      'pollSubscription',
       'startPairing',
       'listCookieJars',
       'deleteCookieJar',

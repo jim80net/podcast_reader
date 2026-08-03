@@ -4,7 +4,6 @@ import type {
   PremiumProductState
 } from '../../shared/ipc'
 import type { ProductState } from './contracts'
-import type { OnlineCapabilitySnapshot } from '../engine-client'
 import { isExactHttpsExternalUrl } from '../external-links'
 import type { PremiumDeviceFlow } from './device-flow'
 import type { PremiumRuntime } from './runtime'
@@ -12,6 +11,14 @@ import { PremiumRequestError } from './transport'
 import type { PremiumTransport } from './transport'
 
 interface CachedInventory extends PremiumAdInventory { generation: number }
+interface PremiumCapabilitySnapshot {
+  schema_version: 1
+  subject: string
+  entitlement_revision: number
+  flags_revision: number
+  podcast_subscriptions: boolean
+  expires_at: string
+}
 const MAX_TIMER_MS = 2_147_483_647
 
 export interface PremiumControllerDeps {
@@ -21,7 +28,7 @@ export interface PremiumControllerDeps {
   openExternal(url: string): Promise<void>
   invalidated(): void
   stateChanged(state: PremiumProductState): void
-  syncCapability?(snapshot: OnlineCapabilitySnapshot): Promise<void>
+  syncCapability?(snapshot: PremiumCapabilitySnapshot): Promise<void>
   capabilitySyncFailed?(): void
   now(): number
   schedule(callback: () => void, milliseconds: number): ReturnType<typeof setTimeout>
@@ -51,7 +58,7 @@ export class PremiumController implements PremiumAccess {
   private readonly pending = new Map<PremiumAdSlot, Promise<PremiumAdInventory | null>>()
   private expiryTimer: ReturnType<typeof setTimeout> | null = null
   private refreshPromise: Promise<PremiumProductState> | null = null
-  private lastCapability: OnlineCapabilitySnapshot | null = null
+  private lastCapability: PremiumCapabilitySnapshot | null = null
   private capabilityQueue: Promise<void> = Promise.resolve()
 
   constructor(private readonly deps: PremiumControllerDeps) {}
@@ -273,7 +280,7 @@ export class PremiumController implements PremiumAccess {
     this.enqueueCapability(snapshot, snapshot.podcast_subscriptions)
   }
 
-  private enqueueCapability(snapshot: OnlineCapabilitySnapshot, disableFirst = false): void {
+  private enqueueCapability(snapshot: PremiumCapabilitySnapshot, disableFirst = false): void {
     if (this.deps.syncCapability === undefined) return
     const sync = this.deps.syncCapability
     this.capabilityQueue = this.capabilityQueue
@@ -304,7 +311,7 @@ function productState(state: ProductState): PremiumProductState {
   return { state: state.state, available: true }
 }
 
-function capabilitySnapshot(state: ProductState, enabled: boolean): OnlineCapabilitySnapshot | null {
+function capabilitySnapshot(state: ProductState, enabled: boolean): PremiumCapabilitySnapshot | null {
   if (state.state !== 'online-free' && state.state !== 'online-premium') return null
   if (!Number.isSafeInteger(state.entitlementRevision) || !Number.isSafeInteger(state.flagsRevision)) return null
   return {

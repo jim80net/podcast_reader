@@ -23,6 +23,9 @@ def test_premium_service_is_absent_from_local_engine_and_desktop_dependency_clos
         desktop_root / "main" / "index.ts",
         desktop_root / "main" / "ipc.ts",
         desktop_root / "main" / "ipc.test.ts",
+        # Issue #121 admits the main-process subscription gate and its boundary proof.
+        desktop_root / "main" / "subscriptions.ts",
+        desktop_root / "main" / "subscriptions-ipc.test.ts",
         desktop_root / "preload" / "index.ts",
         desktop_root / "shared" / "ipc.ts",
         desktop_root / "renderer" / "src" / "premium-ad-slot.ts",
@@ -30,6 +33,9 @@ def test_premium_service_is_absent_from_local_engine_and_desktop_dependency_clos
         desktop_root / "renderer" / "src" / "views" / "reader.ts",
         desktop_root / "renderer" / "src" / "views" / "settings.ts",
         desktop_root / "renderer" / "src" / "views" / "premium-account-section.ts",
+        # Issue #121 admits the renderer subscription state projection and its reducer proof.
+        desktop_root / "renderer" / "src" / "views" / "subscriptions.ts",
+        desktop_root / "renderer" / "src" / "subscriptions-view.test.ts",
     }
     desktop_sources = [
         path
@@ -49,6 +55,7 @@ def test_premium_service_is_absent_from_local_engine_and_desktop_dependency_clos
                 )
                 is None
             ), path
+        # Negative proof: every non-allowlisted desktop source still fails closed.
         elif path not in premium_consumer_files:
             assert "premium" not in source.casefold(), path
 
