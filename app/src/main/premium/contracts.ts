@@ -25,6 +25,6 @@ export function reduceEntitlement(value: unknown, expectedSubject: string, now =
   const evaluatedAt = Date.parse(String(root.evaluated_at))
   if (!Number.isFinite(refreshAfter) || !Number.isFinite(evaluatedAt) || evaluatedAt > now + CLOCK_SKEW_MS || refreshAfter <= evaluatedAt || refreshAfter <= now || new Date(refreshAfter).toISOString().replace('.000Z', 'Z') !== root.refresh_after || new Date(evaluatedAt).toISOString().replace('.000Z', 'Z') !== root.evaluated_at) throw new Error('stale premium contract')
   if (root.tier === 'free' && (entitlement.source === 'none' || entitlement.source === 'admin') && (capabilities.ad_policy === 'none' || capabilities.ad_policy === 'house') && capabilities.podcast_subscriptions === false && capabilities.transcript_email === false && capabilities.mobile_ad_free === false && capabilities.topic_corpus === false) return { state: 'online-free', subject: expectedSubject, refreshAfter, adPolicy: capabilities.ad_policy }
-  if (root.tier === 'premium' && (entitlement.source === 'test_purchase' || entitlement.source === 'admin') && capabilities.ad_policy === 'none' && capabilities.mobile_ad_free === true) return { state: 'online-premium', subject: expectedSubject, refreshAfter }
+  if (root.tier === 'premium' && (entitlement.source === 'test_purchase' || entitlement.source === 'admin') && capabilities.ad_policy === 'none') return { state: 'online-premium', subject: expectedSubject, refreshAfter }
   throw new Error('invalid premium contract')
 }

@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -30,6 +30,7 @@ describe('premium desktop boundary', () => {
     const now = Date.parse('2026-08-03T00:00:00Z')
     const admin = { ...entitlement('premium'), entitlement: { source: 'admin', revision: 2 }, evaluated_at: '2026-08-02T23:59:00Z', refresh_after: '2026-08-03T00:04:00Z' }
     expect(reduceEntitlement(admin, 'usr_one', now)).toMatchObject({ state: 'online-premium' })
+    expect(reduceEntitlement({ ...admin, capabilities: { ...admin.capabilities, mobile_ad_free: false } }, 'usr_one', now)).toMatchObject({ state: 'online-premium' })
     expect(reduceEntitlement({ ...admin, evaluated_at: '2026-08-03T00:01:00Z', refresh_after: '2026-08-03T00:06:00Z' }, 'usr_one', now)).toMatchObject({ state: 'online-premium' })
     expect(() => reduceEntitlement({ ...admin, evaluated_at: '2026-08-03T00:06:00Z', refresh_after: '2026-08-03T00:11:00Z' }, 'usr_one', now)).toThrow('stale premium contract')
     const badFree = entitlement('free')
@@ -69,6 +70,18 @@ describe('premium desktop boundary', () => {
     writeFileSync(path, JSON.stringify({ schema_version: 1, ciphertext: null, surprise: true }))
     expect(new PremiumCredentialStore(path, safe).get()).toBeNull()
     expect(existsSync(path)).toBe(false)
+  })
+
+  it('quarantines a corrupt account record without touching the engine vault', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'premium-store-')); dirs.push(dir)
+    const path = join(dir, 'premium-account.json')
+    const engineVault = join(dir, 'vault.json')
+    writeFileSync(path, 'not-json')
+    writeFileSync(engineVault, 'engine-vault-sentinel')
+    expect(new PremiumCredentialStore(path, safe).get()).toBeNull()
+    expect(readdirSync(dir).some((name) => name.startsWith('premium-account.json.corrupt-'))).toBe(true)
+    expect(readFileSync(engineVault, 'utf8')).toBe('engine-vault-sentinel')
+    expect(path).not.toBe(engineVault)
   })
 
   it('keeps premium requests credential-separated and rejects redirects', async () => {
@@ -146,5 +159,17 @@ describe('premium desktop boundary', () => {
     expect(() => runtime.signOut()).toThrow('disk failed')
     expect(runtime.state).toEqual({ state: 'local' })
     expect(runtime.bearer).toBeNull()
+  })
+
+  it('clears definitive refresh rejection but retains transient account state', async () => {
+    const credential = { subject: 'usr_one', refreshToken: 'refresh_token_abcdefghijklmnopqrstuvwxyz' }
+    const store = { get: vi.fn(() => credential), set: vi.fn(), mode: 'encrypted' as const }
+    const transport = { refresh: vi.fn().mockRejectedValueOnce(new PremiumRequestError(401, 'refresh_token_reused')).mockRejectedValueOnce(new TypeError('network unavailable')) }
+    const runtime = new PremiumRuntime(transport as unknown as PremiumTransport, store as unknown as PremiumCredentialStore)
+    await expect(runtime.restore()).resolves.toEqual({ state: 'local' })
+    expect(store.set).toHaveBeenCalledWith(null)
+    store.set.mockClear()
+    await expect(runtime.restore()).resolves.toEqual({ state: 'online-unavailable' })
+    expect(store.set).not.toHaveBeenCalled()
   })
 })

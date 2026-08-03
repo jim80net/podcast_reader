@@ -1,6 +1,7 @@
 import { reduceEntitlement } from './contracts'
 import type { ProductState } from './contracts'
 import type { PremiumCredentialStore } from './credentials'
+import { PremiumRequestError } from './transport'
 import type { PremiumTransport } from './transport'
 
 export class PremiumRuntime {
@@ -28,8 +29,14 @@ export class PremiumRuntime {
       const entitlement = await this.transport.entitlement(tokens.access_token)
       if (generation !== this.generation) return this.current
       this.current = reduceEntitlement(entitlement, stored.subject)
-    } catch {
+    } catch (error) {
       if (generation !== this.generation) return this.current
+      if (!rotated && error instanceof PremiumRequestError && error.status === 401) {
+        this.accessToken = null
+        this.setLocal()
+        try { this.credentials.set(null) } catch { /* memory still returns to connect-account */ }
+        return this.current
+      }
       if (rotated) { try { this.credentials.set(null) } catch { /* stale token must never authorize */ } }
       this.accessToken = null
       this.current = { state: 'online-unavailable' }
