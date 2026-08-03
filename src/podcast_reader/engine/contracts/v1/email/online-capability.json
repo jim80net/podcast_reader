@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "subject": "usr_contract_fixture_01",
+  "entitlement_revision": 7,
+  "flags_revision": 12,
+  "transcript_email": true,
+  "expires_at": "2030-01-02T03:04:05Z"
+}
