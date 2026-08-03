@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { YOUTUBE_REFERER, YOUTUBE_URL_FILTER, isExternalWebUrl } from './external-links'
+import { YOUTUBE_REFERER, YOUTUBE_URL_FILTER, isExactHttpsExternalUrl, isExternalWebUrl } from './external-links'
 
 describe('isExternalWebUrl', () => {
   it('matches http and https URLs (these open in the OS browser)', () => {
@@ -19,6 +19,15 @@ describe('isExternalWebUrl', () => {
   it('rejects junk rather than throwing', () => {
     expect(isExternalWebUrl('not a url')).toBe(false)
     expect(isExternalWebUrl('')).toBe(false)
+  })
+})
+
+describe('isExactHttpsExternalUrl', () => {
+  it('accepts only exact credential-free HTTPS URLs', () => {
+    expect(isExactHttpsExternalUrl('https://example.com/learn?plan=free')).toBe(true)
+    for (const value of ['http://example.com/ad', 'https://u:p@example.com/ad', 'https://example.com/ad#tracking', 'https://example.com']) {
+      expect(isExactHttpsExternalUrl(value)).toBe(false)
+    }
   })
 })
 

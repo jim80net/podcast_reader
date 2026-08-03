@@ -65,6 +65,7 @@ test('engine bearer token is unreachable from the renderer', async ({ harness })
     [
       'getEngineStatus',
       'getPrivateWebStatus',
+      'getPremiumState',
       'submitJob',
       'listJobs',
       'getJob',
@@ -86,6 +87,10 @@ test('engine bearer token is unreachable from the renderer', async ({ harness })
       'uninstallPack',
       'isFirstRunComplete',
       'markFirstRunComplete',
+      'connectPremiumAccount',
+      'signOutPremiumAccount',
+      'getPremiumInventory',
+      'openPremiumCta',
       'startPairing',
       'listCookieJars',
       'deleteCookieJar',
@@ -97,12 +102,35 @@ test('engine bearer token is unreachable from the renderer', async ({ harness })
       'onEngineStatus',
       'onPipelineEvent',
       'onPrivateWebStatus',
+      'onPremiumInvalidated',
+      'onPremiumState',
       'onJobsHydrated',
       'onProtocolRequest',
       'onUpdateStatus'
     ].sort()
   )
   expect(probe.haystack).not.toContain(harness.mock.token)
+})
+
+test('Local mode keeps named desktop ad mounts collapsed and outside transcript content', async ({ harness }) => {
+  await expectEngineState(harness.window, 'ready')
+  const librarySlot = harness.window.locator('.house-ad-slot[data-slot="library"]')
+  await expect(librarySlot).toHaveCount(1)
+  await expect(librarySlot).toBeHidden()
+  await expect(librarySlot.locator('*')).toHaveCount(0)
+  expect(await librarySlot.evaluate((slot) => slot.nextElementSibling?.classList.contains('cards'))).toBe(true)
+
+  await harness.mock.control('/seed', {
+    library: [{ source_id: 'ep-local-ad-free', source: 'https://example.com/episode', title: 'Local episode', html_path: '/mock/local.html', created_at: Date.now() / 1000 }],
+    transcripts: { 'ep-local-ad-free': '<html><body><p>Private local transcript</p></body></html>' }
+  })
+  await harness.window.evaluate(() => { window.location.hash = '#/reader/ep-local-ad-free' })
+  const readerSlot = harness.window.locator('.house-ad-slot[data-slot="reader"]')
+  await expect(readerSlot).toHaveCount(1)
+  await expect(readerSlot).toBeHidden()
+  await expect(readerSlot.locator('*')).toHaveCount(0)
+  expect(await readerSlot.evaluate((slot) => slot.nextElementSibling?.classList.contains('reader-body'))).toBe(true)
+  await expect(harness.window.frameLocator('iframe.reader-frame').getByText('Private local transcript')).toBeVisible()
 })
 
 test('Reader renders the artifact in an opaque-origin sandbox with its script working', async ({

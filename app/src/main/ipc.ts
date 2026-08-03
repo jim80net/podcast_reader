@@ -2,7 +2,10 @@ import { CHANNELS } from '../shared/ipc'
 import type { EngineManager } from './engine-manager'
 import type { PrivateWebController } from './private-web'
 import type { SubmitJobRequest, UpdateStatus } from '../shared/ipc'
+import type { PremiumAdSlot } from '../shared/ipc'
 import type { SettingsUpdate } from '../shared/types'
+import { disabledPremiumAccess } from './premium/controller'
+import type { PremiumAccess } from './premium/controller'
 
 /**
  * Main-process side of the typed IPC surface (design decision 4): each
@@ -37,7 +40,8 @@ export function registerIpcHandlers(
   manager: EngineManager,
   updates: UpdaterAccess,
   config: AppConfigAccess,
-  privateWeb?: PrivateWebAccess
+  privateWeb?: PrivateWebAccess,
+  premium: PremiumAccess = disabledPremiumAccess()
 ): void {
   const client = () => {
     const c = manager.client
@@ -118,6 +122,11 @@ export function registerIpcHandlers(
     if (privateWeb === undefined) throw new Error('private web access is unavailable')
     return privateWeb.setEnabled(enabled)
   })
+  ipcMain.handle(CHANNELS.premiumGetState, () => premium.state())
+  ipcMain.handle(CHANNELS.premiumConnect, () => premium.connect())
+  ipcMain.handle(CHANNELS.premiumSignOut, () => premium.signOut())
+  ipcMain.handle(CHANNELS.premiumInventory, (_e, slot: PremiumAdSlot) => premium.inventory(slot))
+  ipcMain.handle(CHANNELS.premiumOpenCta, (_e, slot: PremiumAdSlot, url: string) => premium.openCta(slot, url))
 
   ipcMain.handle(CHANNELS.updateGetStatus, () => updates.status())
   ipcMain.handle(CHANNELS.updateInstall, () => updates.installNow())

@@ -4,6 +4,7 @@ import { registerIpcHandlers } from './ipc'
 import { CHANNELS } from '../shared/ipc'
 import type { AppConfigAccess, UpdaterAccess } from './ipc'
 import type { EngineManager } from './engine-manager'
+import type { PremiumAccess } from './premium/controller'
 
 const fakeUpdates: UpdaterAccess = {
   status: () => ({ state: 'disabled', reason: 'test' }),
@@ -82,6 +83,32 @@ describe('registerIpcHandlers', () => {
     for (const channel of Object.values(CHANNELS)) {
       expect(reg.handlers.has(channel), `missing handler: ${channel}`).toBe(true)
     }
+  })
+
+  it('routes premium presentation requests only to the isolated account boundary', async () => {
+    const reg = makeRegistrar()
+    const calls: unknown[][] = []
+    const premium: PremiumAccess = {
+      state: () => ({ state: 'online-free', available: true, expiresAt: 123 }),
+      restore: async () => ({ state: 'local', available: true }),
+      connect: async () => { calls.push(['connect']); return { state: 'online-free', available: true, expiresAt: 123 } },
+      signOut: () => { calls.push(['signOut']); return { state: 'local', available: true } },
+      background: () => ({ state: 'online-unavailable', available: true }),
+      inventory: async (slot) => { calls.push(['inventory', slot]); return null },
+      openCta: async (slot, url) => { calls.push(['openCta', slot, url]) }
+    }
+    registerIpcHandlers(reg.ipcMain, makeManager().manager, fakeUpdates, makeConfig(), undefined, premium)
+    await expect(reg.invoke(CHANNELS.premiumGetState)).resolves.toMatchObject({ state: 'online-free' })
+    await reg.invoke(CHANNELS.premiumConnect)
+    await reg.invoke(CHANNELS.premiumSignOut)
+    await reg.invoke(CHANNELS.premiumInventory, 'library')
+    await reg.invoke(CHANNELS.premiumOpenCta, 'library', 'https://example.com/ad')
+    expect(calls).toEqual([
+      ['connect'],
+      ['signOut'],
+      ['inventory', 'library'],
+      ['openCta', 'library', 'https://example.com/ad']
+    ])
   })
 
   it('maps job submission to the snake_case engine body', async () => {

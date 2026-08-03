@@ -2,6 +2,7 @@ import { mountCookiesSection } from './cookies-section'
 import { mountPacksSection } from './packs-section'
 import { mountPairingSection } from './pairing-section'
 import { mountPrivateWebSection } from './private-web-section'
+import { mountPremiumAccountSection } from './premium-account-section'
 import { planChapterSave } from '../chapter-onboarding'
 import { THEME_PREF_CHANGE_EVENT, getThemePref } from '../app-theme'
 import { el } from '../dom'
@@ -31,7 +32,9 @@ import type { CustomProviderConfig, EngineSettings, ProviderInfo } from '../../.
  */
 export function mountSettings(container: HTMLElement): ViewCleanup {
   const status = el('p', { class: 'view-status', text: 'Loading settings…' })
-  container.append(el('h2', { text: 'Settings' }), status)
+  const premiumContainer = el('section', { class: 'pairing-section premium-account-section' })
+  container.append(el('h2', { text: 'Settings' }), premiumContainer, status)
+  const cleanupPremium = mountPremiumAccountSection(premiumContainer)
 
   let disposed = false
   let loaded = false
@@ -745,5 +748,6 @@ export function mountSettings(container: HTMLElement): ViewCleanup {
     pairingSection?.cleanup()
     privateWebSection?.cleanup()
     cookiesSection?.cleanup()
+    cleanupPremium()
   }
 }
