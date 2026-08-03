@@ -13,6 +13,11 @@ response, and the five client state/error envelopes. Dynamic tokens, user codes,
 subjects, timestamps, and request IDs use explicit fixture placeholders; parity
 tests replace only those values and require every other live field byte-for-field.
 
+`v1/current-user/` freezes the bearer-authenticated subject-binding response as
+the opaque `id` alone. Email and verification status remain account-presentation
+data: no v1 native consumer needs them, so strict clients are not coupled to or
+required to decode unnecessary personal data.
+
 Any incompatible field, enum, or semantic change requires a new
 `schema_version` and an independent design gate. Additive server behavior must
 remain parseable as one of these strict v1 documents until consumers explicitly

@@ -69,6 +69,16 @@ def test_native_auth_route_inventory_and_success_fixtures_match_live_shapes(
     exchanged = cast("dict[str, object]", exchanged_response.json())
     token_fixture = _fixture("native-auth-v1-token-response.json")
     assert _normalize_token_response(exchanged) == token_fixture
+    current_response = client.get(
+        "/v1/me", headers={"Authorization": f"Bearer {exchanged['access_token']}"}
+    )
+    assert current_response.status_code == 200
+    current = cast("dict[str, object]", current_response.json())
+    current_fixture = cast("dict[str, object]", _fixture("v1/current-user/current-user-v1.json"))
+    assert set(current) == {"id"}
+    assert isinstance(current["id"], str) and current["id"]
+    current["id"] = current_fixture["id"]
+    assert current == current_fixture
 
     refreshed_response = client.post(
         "/v1/tokens/refresh", json={"refresh_token": exchanged["refresh_token"]}

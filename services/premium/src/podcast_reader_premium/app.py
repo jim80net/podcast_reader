@@ -36,6 +36,7 @@ from .contracts import (
     EMAIL_REQUEST_MAX_BYTES,
     AdInventoryV1,
     AdSlot,
+    CurrentUserV1,
     DeviceAuthorizationStartV1,
     EmailDeliveryRequestV1,
     EmailDeliveryV1,
@@ -914,9 +915,9 @@ def create_app(
                 _revoke_token_family(database, family, now_epoch())
         database.commit()
 
-    @app.get("/v1/me")
-    def current_user(user: User = Depends(_bearer_user)) -> dict[str, object]:
-        return {"id": user.id, "email": user.email, "verification": user.verification}
+    @app.get("/v1/me", response_model=CurrentUserV1)
+    def current_user(user: User = Depends(_bearer_user)) -> CurrentUserV1:
+        return CurrentUserV1(id=user.id)
 
     @app.get("/v1/me/entitlements", response_model=EntitlementV1)
     def current_entitlements(
