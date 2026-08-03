@@ -59,11 +59,11 @@ android {
 
     sourceSets {
         getByName("test") {
-            java.srcDir("src/sharedTest/java")
+            kotlin.directories.add("src/sharedTest/java")
             resources.directories.add("../../services/premium/contracts")
         }
         getByName("androidTest") {
-            java.srcDir("src/sharedTest/java")
+            kotlin.directories.add("src/sharedTest/java")
             assets.srcDir("../../services/premium/contracts")
         }
     }
