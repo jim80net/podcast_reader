@@ -36,7 +36,7 @@ data class EntitlementV1Dto(
         when (tier) {
             EntitlementTierDto.FREE -> {
                 require(entitlement.source == EntitlementSourceKindDto.NONE)
-                require(capabilities.adPolicy == AdPolicyDto.NONE)
+                require(capabilities.adPolicy == AdPolicyDto.NONE || capabilities.adPolicy == AdPolicyDto.HOUSE)
                 require(!capabilities.podcastSubscriptions)
                 require(!capabilities.transcriptEmail)
                 require(!capabilities.mobileAdFree)
@@ -103,6 +103,9 @@ data class EntitlementCapabilitiesDto(
 enum class AdPolicyDto {
     @SerialName("none")
     NONE,
+
+    @SerialName("house")
+    HOUSE,
 
 }
 
