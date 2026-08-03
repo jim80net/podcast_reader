@@ -10,6 +10,7 @@ import { chromium, expect, test as base } from '@playwright/test'
 import type { BrowserContext, Page } from '@playwright/test'
 import type { ChildProcess } from 'node:child_process'
 
+import { STORAGE_SCHEMA_VERSION } from '../../src/storage'
 import type { Pairing, TrackedJob } from '../../src/storage'
 
 /**
@@ -167,7 +168,12 @@ export const test = base.extend<{ harness: Harness }>({
       },
       seedStorage: async (page, pairing, trackedJobs) => {
         const items: Record<string, unknown> =
-          trackedJobs === undefined ? { pairing } : { pairing, trackedJobs }
+          trackedJobs === undefined
+            ? { pairing: { schema_version: STORAGE_SCHEMA_VERSION, ...pairing } }
+            : {
+                pairing: { schema_version: STORAGE_SCHEMA_VERSION, ...pairing },
+                trackedJobs: { schema_version: STORAGE_SCHEMA_VERSION, jobs: trackedJobs }
+              }
         await page.evaluate(async (values) => {
           await chrome.storage.local.set(values)
         }, items)
@@ -189,7 +195,10 @@ export { expect }
 export async function storedPairing(page: Page): Promise<Pairing | null> {
   return page.evaluate(async () => {
     const items = await chrome.storage.local.get(['pairing'])
-    return (items['pairing'] as { port: number; token: string } | undefined) ?? null
+    const value = items['pairing'] as { schema_version?: unknown; port?: unknown; token?: unknown } | undefined
+    return value?.schema_version === 1 && typeof value.port === 'number' && typeof value.token === 'string'
+      ? { port: value.port, token: value.token }
+      : null
   })
 }
 
@@ -197,6 +206,7 @@ export async function storedPairing(page: Page): Promise<Pairing | null> {
 export async function storedTrackedJobs(page: Page): Promise<TrackedJob[]> {
   return page.evaluate(async () => {
     const items = await chrome.storage.local.get(['trackedJobs'])
-    return (items['trackedJobs'] as TrackedJob[] | undefined) ?? []
+    const value = items['trackedJobs'] as { schema_version?: unknown; jobs?: unknown } | undefined
+    return value?.schema_version === 1 && Array.isArray(value.jobs) ? value.jobs as TrackedJob[] : []
   })
 }

@@ -155,7 +155,8 @@ mint button — it shows a combined `<port>-<code>` string (the 6-character
 code is single-use and expires in 5 minutes). Paste it into the extension
 popup's pairing form (or enter port and code separately). The popup
 exchanges the code for the engine's bearer token, verifies it against
-`GET /v1/health`, and stores `{port, token}` in `chrome.storage.local`.
+`GET /v1/health`, and stores the port and token in a versioned,
+strictly validated `chrome.storage.local` record.
 Pairing survives restarts (the engine port is fixed per install); if the
 popup ever reports the pairing expired (token rotated), mint a new code and
 pair again. When the desktop app isn't running, the popup offers to launch
