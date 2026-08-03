@@ -156,7 +156,41 @@ class PodcastReaderRuntimeTest {
         advanceUntilIdle()
 
         assertEquals(1, records.clearCount)
-        assertTrue(runtime.uiState.value.account is AccountUiState.OnlineUnavailable)
+        val unavailable = runtime.uiState.value.account as AccountUiState.OnlineUnavailable
+        assertEquals(OnlineUnavailableReason.LOCAL_CREDENTIAL_STORAGE, unavailable.reason)
+    }
+
+    @Test
+    fun lifecycleChangeCannotDiscardASignOutClearFailure() = runTest {
+        val records = TestPremiumRecords(
+            result = Result.success(account()),
+            clearResult = Result.failure(IllegalStateException("record survived")),
+        )
+        val runtime = PodcastReaderRuntime(
+            scope = this,
+            workDispatcher = StandardTestDispatcher(testScheduler),
+            engineRecords = EngineRecordProbe { Result.success(true) },
+            premiumRecords = records,
+            connectedFactory = ConnectedPremiumSessionFactory {
+                CompletedSession(
+                    PremiumRestoreResult.Online(
+                        ProductStateReducer.unavailable(OnlineUnavailableReason.OFFLINE),
+                    ),
+                )
+            },
+            now = { now },
+        )
+
+        runtime.foreground()
+        testScheduler.runCurrent()
+        runtime.dispatch(PodcastReaderRuntimeEvent.SignOut)
+        runtime.background()
+        runtime.foreground()
+        advanceUntilIdle()
+
+        assertEquals(1, records.clearCount)
+        val unavailable = runtime.uiState.value.account as AccountUiState.OnlineUnavailable
+        assertEquals(OnlineUnavailableReason.LOCAL_CREDENTIAL_STORAGE, unavailable.reason)
     }
 
     @Test

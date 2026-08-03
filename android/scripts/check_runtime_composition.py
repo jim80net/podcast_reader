@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 
@@ -49,17 +50,18 @@ def main() -> None:
     kotlin_files = list(MAIN.rglob("*.kt"))
     for class_name, definition_name in definitions.items():
         marker = f"{class_name}("
-        declaration = f"class {marker}"
+        constructor_pattern = re.compile(rf"\b{re.escape(class_name)}\s*\(")
+        declaration_pattern = re.compile(rf"\bclass\s+{re.escape(class_name)}\s*\(")
         occurrences = []
         for path in kotlin_files:
             source = path.read_text()
             if path.name == definition_name:
                 require(
-                    source.count(declaration) == 1,
+                    len(declaration_pattern.findall(source)) == 1,
                     f"expected one declaration for {class_name} in {definition_name}",
                 )
-                source = source.replace(declaration, "", 1)
-            occurrences.extend([path.resolve()] * source.count(marker))
+                source = declaration_pattern.sub("", source, count=1)
+            occurrences.extend([path.resolve()] * len(constructor_pattern.findall(source)))
         require(
             occurrences == [allowed],
             f"alternate production constructor for {marker}: {list(map(str, occurrences))}",

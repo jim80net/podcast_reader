@@ -183,4 +183,5 @@ enum class OnlineUnavailableReason {
     UNAUTHORIZED,
     STALE,
     INCOMPATIBLE_RESPONSE,
+    LOCAL_CREDENTIAL_STORAGE,
 }

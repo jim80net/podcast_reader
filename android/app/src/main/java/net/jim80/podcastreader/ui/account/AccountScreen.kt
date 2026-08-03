@@ -108,6 +108,8 @@ private fun OnlineUnavailableReason.readerMessage(): String = when (this) {
     OnlineUnavailableReason.UNAUTHORIZED -> "The account session ended. Reconnect to use online features."
     OnlineUnavailableReason.STALE -> "The last account status expired. It is not treated as free or premium."
     OnlineUnavailableReason.INCOMPATIBLE_RESPONSE -> "The premium service returned an unsupported response."
+    OnlineUnavailableReason.LOCAL_CREDENTIAL_STORAGE ->
+        "The saved account could not be removed from secure storage. You are not signed out yet."
 }
 
 @Composable

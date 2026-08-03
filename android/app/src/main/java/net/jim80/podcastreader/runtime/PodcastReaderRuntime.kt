@@ -50,6 +50,7 @@ internal class PodcastReaderRuntime(
     private var generation = 0L
     private var foreground = false
     private var signingOut = false
+    private var signOutClearFailed = false
     private var operation: Job? = null
     private var connected: ConnectedPremiumSession? = null
     private var snapshot = PodcastReaderRuntimeSnapshot.bootstrapping()
@@ -82,8 +83,15 @@ internal class PodcastReaderRuntime(
         }
     }
 
-    private fun retry() = synchronized(lock) {
-        if (foreground) beginRestoreLocked()
+    private fun retry() {
+        val retryClear = synchronized(lock) { foreground && signOutClearFailed }
+        if (retryClear) {
+            signOut()
+        } else {
+            synchronized(lock) {
+                if (foreground) beginRestoreLocked()
+            }
+        }
     }
 
     private fun cancelAuthorization() = synchronized(lock) {
@@ -98,6 +106,7 @@ internal class PodcastReaderRuntime(
             val activeSession = connected
             invalidateLocked()
             signingOut = true
+            signOutClearFailed = false
             connected = null
             publishLocked(PodcastReaderRuntimeSnapshot.restoring(snapshot.engine))
             activeSession to generation
@@ -107,13 +116,14 @@ internal class PodcastReaderRuntime(
             val clearResult = runCatching { premiumRecords.clear().getOrThrow() }
             synchronized(lock) {
                 signingOut = false
-                if (!isCurrentLocked(signOutGeneration)) return@synchronized
+                signOutClearFailed = clearResult.isFailure
+                if (!foreground) return@synchronized
                 val next = clearResult.fold(
                     onSuccess = { PodcastReaderRuntimeSnapshot.local(snapshot.engine) },
                     onFailure = {
                         PodcastReaderRuntimeSnapshot.online(
                             ProductStateReducer.unavailable(
-                                OnlineUnavailableReason.INCOMPATIBLE_RESPONSE,
+                                OnlineUnavailableReason.LOCAL_CREDENTIAL_STORAGE,
                             ),
                             snapshot.engine,
                         )
@@ -133,7 +143,18 @@ internal class PodcastReaderRuntime(
 
     private fun beginRestoreLocked() {
         if (signingOut) {
-            publishLocked(PodcastReaderRuntimeSnapshot.local(snapshot.engine))
+            publishLocked(PodcastReaderRuntimeSnapshot.restoring(snapshot.engine))
+            return
+        }
+        if (signOutClearFailed) {
+            publishLocked(
+                PodcastReaderRuntimeSnapshot.online(
+                    ProductStateReducer.unavailable(
+                        OnlineUnavailableReason.LOCAL_CREDENTIAL_STORAGE,
+                    ),
+                    snapshot.engine,
+                ),
+            )
             return
         }
         invalidateLocked()
