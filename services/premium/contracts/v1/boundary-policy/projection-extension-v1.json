@@ -1,0 +1,214 @@
+{
+  "schema_version": 1,
+  "contract": "podcast-reader-boundary-projection",
+  "policy_revision": 1,
+  "surface": "extension",
+  "roots": [
+    {
+      "path": "extension",
+      "surface": "extension",
+      "kind": "product-client",
+      "network_capable": true,
+      "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152"
+    }
+  ],
+  "operations": [
+    {
+      "id": "extension.engine.cookies",
+      "surface": "extension",
+      "from_zone": "extension.runtime",
+      "to_zone": "local-engine.storage",
+      "transport": "loopback-http",
+      "method": "REQUEST",
+      "route": "/v1/cookies",
+      "request_contract": "cookie-jar-v1",
+      "response_contract": "cookie-jar-metadata-v1",
+      "request_data": [
+        "secret.cookie-jar",
+        "secret.engine-bearer"
+      ],
+      "response_data": [
+        "metadata.cookie-jar"
+      ],
+      "destination_persistence": [
+        "secret.cookie-jar"
+      ],
+      "logging": [
+        "metadata.cookie-jar"
+      ],
+      "guards": [
+        "bearer-auth",
+        "cookie-values-write-only",
+        "loopback-only",
+        "user-granted-host-permission"
+      ],
+      "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152",
+      "enforcement_ids": [
+        "extension.manifest-inventory",
+        "extension.policy-projection",
+        "extension.route-inventory"
+      ]
+    },
+    {
+      "id": "extension.engine.events",
+      "surface": "extension",
+      "from_zone": "extension.runtime",
+      "to_zone": "local-engine.memory",
+      "transport": "loopback-http",
+      "method": "GET",
+      "route": "/v1/events",
+      "request_contract": null,
+      "response_contract": "pipeline-event-v1",
+      "request_data": [
+        "secret.engine-bearer"
+      ],
+      "response_data": [
+        "metadata.job",
+        "metadata.public-configuration"
+      ],
+      "destination_persistence": [],
+      "logging": [],
+      "guards": [
+        "bearer-auth",
+        "loopback-only",
+        "popup-lifetime"
+      ],
+      "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152",
+      "enforcement_ids": [
+        "extension.policy-projection",
+        "extension.route-inventory"
+      ]
+    },
+    {
+      "id": "extension.engine.jobs",
+      "surface": "extension",
+      "from_zone": "extension.runtime",
+      "to_zone": "local-engine.memory",
+      "transport": "loopback-http",
+      "method": "REQUEST",
+      "route": "/v1/jobs/{operation}",
+      "request_contract": "extension-jobs-v1",
+      "response_contract": "engine-job-v1",
+      "request_data": [
+        "locator.media-url",
+        "metadata.job",
+        "secret.engine-bearer"
+      ],
+      "response_data": [
+        "metadata.job"
+      ],
+      "destination_persistence": [
+        "metadata.job"
+      ],
+      "logging": [],
+      "guards": [
+        "bearer-auth",
+        "explicit-user-action",
+        "loopback-only"
+      ],
+      "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152",
+      "enforcement_ids": [
+        "extension.policy-projection",
+        "extension.route-inventory"
+      ]
+    },
+    {
+      "id": "extension.engine.pairing",
+      "surface": "extension",
+      "from_zone": "extension.runtime",
+      "to_zone": "local-engine.memory",
+      "transport": "loopback-http",
+      "method": "POST",
+      "route": "/v1/pair/claim",
+      "request_contract": "engine-pair-claim-v1",
+      "response_contract": "engine-pair-token-v1",
+      "request_data": [
+        "secret.device-code"
+      ],
+      "response_data": [
+        "secret.engine-bearer"
+      ],
+      "destination_persistence": [],
+      "logging": [],
+      "guards": [
+        "explicit-user-action",
+        "loopback-only",
+        "single-use-code"
+      ],
+      "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152",
+      "enforcement_ids": [
+        "extension.manifest-inventory",
+        "extension.policy-projection",
+        "extension.route-inventory"
+      ]
+    },
+    {
+      "id": "extension.storage.local",
+      "surface": "extension",
+      "from_zone": "extension.runtime",
+      "to_zone": "extension.local-storage",
+      "transport": "browser-storage",
+      "method": "WRITE",
+      "route": "/chrome.storage.local",
+      "request_contract": "extension-storage-v1",
+      "response_contract": "extension-storage-v1",
+      "request_data": [
+        "metadata.job",
+        "secret.engine-bearer"
+      ],
+      "response_data": [
+        "metadata.job",
+        "secret.engine-bearer"
+      ],
+      "destination_persistence": [
+        "metadata.job",
+        "secret.engine-bearer"
+      ],
+      "logging": [],
+      "guards": [
+        "exact-versioned-envelope",
+        "local-area-by-construction",
+        "storage-sync-forbidden"
+      ],
+      "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152",
+      "enforcement_ids": [
+        "extension.policy-projection",
+        "extension.storage-zone"
+      ]
+    }
+  ],
+  "copy_claims": [],
+  "legacy_fences": [
+    {
+      "id": "extension.engine-route-inventory",
+      "path": "extension/src/client.test.ts",
+      "assertion": "Extension engine requests use only reviewed loopback routes with bearer headers and no redirect credential path.",
+      "operation_ids": [
+        "extension.engine.cookies",
+        "extension.engine.events",
+        "extension.engine.jobs",
+        "extension.engine.pairing"
+      ],
+      "replacement_checker": "extension.route-inventory",
+      "retained_as_defense_in_depth": true,
+      "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152"
+    },
+    {
+      "id": "extension.local-storage-only",
+      "path": "extension/src/storage.test.ts",
+      "assertion": "Pairing and tracked jobs use exact versioned storage.local envelopes and never storage.sync.",
+      "operation_ids": [
+        "extension.storage.local"
+      ],
+      "replacement_checker": "extension.storage-zone",
+      "retained_as_defense_in_depth": true,
+      "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152"
+    }
+  ],
+  "checker_ids": [
+    "extension.manifest-inventory",
+    "extension.policy-projection",
+    "extension.route-inventory",
+    "extension.storage-zone"
+  ]
+}

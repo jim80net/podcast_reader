@@ -1,0 +1,226 @@
+{
+  "schema_version": 1,
+  "contract": "podcast-reader-boundary-projection",
+  "policy_revision": 1,
+  "surface": "private-web",
+  "roots": [],
+  "operations": [
+    {
+      "id": "private-web.library",
+      "surface": "private-web",
+      "from_zone": "private-web.browser",
+      "to_zone": "local-engine.memory",
+      "transport": "tailnet-https",
+      "method": "GET",
+      "route": "/web/api/library",
+      "request_contract": null,
+      "response_contract": "web-library-v1",
+      "request_data": [
+        "secret.engine-bearer"
+      ],
+      "response_data": [
+        "metadata.library"
+      ],
+      "destination_persistence": [],
+      "logging": [],
+      "guards": [
+        "http-only-session",
+        "no-store",
+        "scoped-cookie",
+        "tls"
+      ],
+      "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152",
+      "enforcement_ids": [
+        "private-web.policy-projection",
+        "private-web.route-inventory",
+        "private-web.session-security"
+      ]
+    },
+    {
+      "id": "private-web.pairing",
+      "surface": "private-web",
+      "from_zone": "private-web.browser",
+      "to_zone": "local-engine.memory",
+      "transport": "tailnet-https",
+      "method": "POST",
+      "route": "/web/api/pair/claim",
+      "request_contract": "engine-pair-claim-v1",
+      "response_contract": "engine-pair-token-v1",
+      "request_data": [
+        "secret.device-code"
+      ],
+      "response_data": [
+        "secret.engine-bearer"
+      ],
+      "destination_persistence": [],
+      "logging": [],
+      "guards": [
+        "exact-tailnet-origin",
+        "single-use-code",
+        "trusted-mutation-headers"
+      ],
+      "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152",
+      "enforcement_ids": [
+        "private-web.policy-projection",
+        "private-web.route-inventory",
+        "private-web.session-security"
+      ]
+    },
+    {
+      "id": "private-web.search",
+      "surface": "private-web",
+      "from_zone": "private-web.browser",
+      "to_zone": "local-engine.memory",
+      "transport": "tailnet-https",
+      "method": "POST",
+      "route": "/web/api/search",
+      "request_contract": "web-search-v1",
+      "response_contract": "web-search-v1",
+      "request_data": [
+        "metadata.library",
+        "secret.engine-bearer"
+      ],
+      "response_data": [
+        "content.transcript-plaintext",
+        "metadata.library"
+      ],
+      "destination_persistence": [],
+      "logging": [],
+      "guards": [
+        "bounded-query",
+        "http-only-session",
+        "minimized-results",
+        "no-store",
+        "trusted-mutation-headers"
+      ],
+      "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152",
+      "enforcement_ids": [
+        "private-web.policy-projection",
+        "private-web.route-inventory",
+        "private-web.session-security"
+      ]
+    },
+    {
+      "id": "private-web.session",
+      "surface": "private-web",
+      "from_zone": "private-web.browser",
+      "to_zone": "private-web.session",
+      "transport": "tailnet-https",
+      "method": "POST",
+      "route": "/web/api/{session-operation}",
+      "request_contract": "web-session-v1",
+      "response_contract": null,
+      "request_data": [
+        "secret.engine-bearer"
+      ],
+      "response_data": [],
+      "destination_persistence": [
+        "secret.engine-bearer"
+      ],
+      "logging": [],
+      "guards": [
+        "http-only",
+        "same-site-strict",
+        "scoped-cookie",
+        "secure-cookie",
+        "trusted-mutation-headers"
+      ],
+      "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152",
+      "enforcement_ids": [
+        "private-web.policy-projection",
+        "private-web.route-inventory",
+        "private-web.session-security"
+      ]
+    },
+    {
+      "id": "private-web.transcript",
+      "surface": "private-web",
+      "from_zone": "private-web.browser",
+      "to_zone": "local-engine.memory",
+      "transport": "tailnet-https",
+      "method": "GET",
+      "route": "/web/api/transcripts/{source_id}.html",
+      "request_contract": "source-id-v1",
+      "response_contract": "transcript-html-v1",
+      "request_data": [
+        "secret.engine-bearer"
+      ],
+      "response_data": [
+        "content.transcript-html"
+      ],
+      "destination_persistence": [],
+      "logging": [],
+      "guards": [
+        "content-security-policy",
+        "http-only-session",
+        "no-store",
+        "path-confinement",
+        "scoped-cookie"
+      ],
+      "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152",
+      "enforcement_ids": [
+        "private-web.policy-projection",
+        "private-web.route-inventory",
+        "private-web.session-security"
+      ]
+    }
+  ],
+  "copy_claims": [
+    {
+      "id": "private-web.session-scoped",
+      "operation_ids": [
+        "private-web.library",
+        "private-web.pairing",
+        "private-web.search",
+        "private-web.session",
+        "private-web.transcript"
+      ],
+      "surfaces": [
+        "desktop",
+        "private-web"
+      ],
+      "canonical_facts": [
+        "Private-web content is available only after explicit pairing over the exact tailnet HTTPS origin.",
+        "The browser credential is HttpOnly, short-lived, scoped to /web/, and is not returned in content responses."
+      ],
+      "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152"
+    }
+  ],
+  "legacy_fences": [
+    {
+      "id": "private-web.route-method-inventory",
+      "path": "tests/engine/test_app.py",
+      "assertion": "Private-web public, session, library, search, and transcript route methods are exact and default-deny.",
+      "operation_ids": [
+        "private-web.library",
+        "private-web.pairing",
+        "private-web.search",
+        "private-web.session",
+        "private-web.transcript"
+      ],
+      "replacement_checker": "private-web.route-inventory",
+      "retained_as_defense_in_depth": true,
+      "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152"
+    },
+    {
+      "id": "private-web.session-and-response-security",
+      "path": "tests/engine/test_app.py",
+      "assertion": "Private-web pairing, scoped session, no-store, CSP, origin, path confinement, and minimized response proofs remain.",
+      "operation_ids": [
+        "private-web.library",
+        "private-web.pairing",
+        "private-web.search",
+        "private-web.session",
+        "private-web.transcript"
+      ],
+      "replacement_checker": "private-web.session-security",
+      "retained_as_defense_in_depth": true,
+      "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152"
+    }
+  ],
+  "checker_ids": [
+    "private-web.policy-projection",
+    "private-web.route-inventory",
+    "private-web.session-security"
+  ]
+}

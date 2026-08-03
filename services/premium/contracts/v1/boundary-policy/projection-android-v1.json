@@ -1,0 +1,380 @@
+{
+  "schema_version": 1,
+  "contract": "podcast-reader-boundary-projection",
+  "policy_revision": 1,
+  "surface": "android",
+  "roots": [
+    {
+      "path": "android",
+      "surface": "android",
+      "kind": "product-client",
+      "network_capable": true,
+      "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152"
+    }
+  ],
+  "operations": [
+    {
+      "id": "android.engine.health",
+      "surface": "android",
+      "from_zone": "android.app",
+      "to_zone": "local-engine.memory",
+      "transport": "tailnet-https",
+      "method": "GET",
+      "route": "/v1/health",
+      "request_contract": null,
+      "response_contract": "engine-health-v1",
+      "request_data": [
+        "secret.engine-bearer"
+      ],
+      "response_data": [
+        "metadata.public-configuration"
+      ],
+      "destination_persistence": [],
+      "logging": [],
+      "guards": [
+        "bearer-auth",
+        "no-cache",
+        "no-cookies",
+        "no-redirects"
+      ],
+      "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152",
+      "enforcement_ids": [
+        "android.network-owner-inventory",
+        "android.policy-projection"
+      ]
+    },
+    {
+      "id": "android.engine.library",
+      "surface": "android",
+      "from_zone": "android.app",
+      "to_zone": "local-engine.memory",
+      "transport": "tailnet-https",
+      "method": "GET",
+      "route": "/v1/library",
+      "request_contract": null,
+      "response_contract": "engine-library-v1",
+      "request_data": [
+        "secret.engine-bearer"
+      ],
+      "response_data": [
+        "metadata.library"
+      ],
+      "destination_persistence": [],
+      "logging": [],
+      "guards": [
+        "bearer-auth",
+        "bounded-response",
+        "no-cache",
+        "no-cookies",
+        "no-redirects"
+      ],
+      "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152",
+      "enforcement_ids": [
+        "android.network-owner-inventory",
+        "android.policy-projection"
+      ]
+    },
+    {
+      "id": "android.engine.pair-claim",
+      "surface": "android",
+      "from_zone": "android.app",
+      "to_zone": "local-engine.memory",
+      "transport": "tailnet-https",
+      "method": "POST",
+      "route": "/v1/pair/claim",
+      "request_contract": "engine-pair-claim-v1",
+      "response_contract": "engine-pair-token-v1",
+      "request_data": [
+        "secret.device-code"
+      ],
+      "response_data": [
+        "secret.engine-bearer"
+      ],
+      "destination_persistence": [],
+      "logging": [],
+      "guards": [
+        "explicit-user-action",
+        "single-use-code",
+        "tls"
+      ],
+      "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152",
+      "enforcement_ids": [
+        "android.network-owner-inventory",
+        "android.policy-projection"
+      ]
+    },
+    {
+      "id": "android.engine.transcript",
+      "surface": "android",
+      "from_zone": "android.app",
+      "to_zone": "local-engine.memory",
+      "transport": "tailnet-https",
+      "method": "GET",
+      "route": "/v1/transcripts/{source_id}.html",
+      "request_contract": "source-id-v1",
+      "response_contract": "transcript-html-v1",
+      "request_data": [
+        "secret.engine-bearer"
+      ],
+      "response_data": [
+        "content.transcript-html"
+      ],
+      "destination_persistence": [],
+      "logging": [],
+      "guards": [
+        "bearer-auth",
+        "bounded-response",
+        "no-cache",
+        "no-cookies",
+        "no-redirects"
+      ],
+      "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152",
+      "enforcement_ids": [
+        "android.network-owner-inventory",
+        "android.policy-projection"
+      ]
+    },
+    {
+      "id": "android.external-cta.open",
+      "surface": "android",
+      "from_zone": "android.app",
+      "to_zone": "user.external-browser",
+      "transport": "external-browser",
+      "method": "OPEN",
+      "route": "/house-creative/cta",
+      "request_contract": "house-cta-v1",
+      "response_contract": null,
+      "request_data": [
+        "locator.external-cta-url"
+      ],
+      "response_data": [],
+      "destination_persistence": [],
+      "logging": [],
+      "guards": [
+        "https-only",
+        "user-gesture"
+      ],
+      "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152",
+      "enforcement_ids": [
+        "android.network-owner-inventory",
+        "android.policy-projection"
+      ]
+    },
+    {
+      "id": "android.premium.credentials-store",
+      "surface": "android",
+      "from_zone": "android.app",
+      "to_zone": "android.credential-store",
+      "transport": "encrypted-storage",
+      "method": "WRITE",
+      "route": "/premium-credentials",
+      "request_contract": "android-premium-credentials-v1",
+      "response_contract": null,
+      "request_data": [
+        "secret.premium-access",
+        "secret.premium-refresh"
+      ],
+      "response_data": [],
+      "destination_persistence": [
+        "secret.premium-access",
+        "secret.premium-refresh"
+      ],
+      "logging": [],
+      "guards": [
+        "domain-separated",
+        "encrypted-at-rest",
+        "exact-versioned-envelope"
+      ],
+      "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152",
+      "enforcement_ids": [
+        "android.policy-projection"
+      ]
+    },
+    {
+      "id": "android.premium.device-auth",
+      "surface": "android",
+      "from_zone": "android.app",
+      "to_zone": "premium-service.memory",
+      "transport": "https",
+      "method": "POST",
+      "route": "/v1/device-authorizations/{phase}",
+      "request_contract": "native-auth-v1",
+      "response_contract": "native-auth-v1",
+      "request_data": [
+        "identity.device",
+        "secret.device-code",
+        "secret.premium-refresh"
+      ],
+      "response_data": [
+        "secret.device-code",
+        "secret.premium-access",
+        "secret.premium-refresh"
+      ],
+      "destination_persistence": [],
+      "logging": [],
+      "guards": [
+        "bounded-body",
+        "no-cookies",
+        "no-redirects",
+        "tls"
+      ],
+      "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152",
+      "enforcement_ids": [
+        "android.network-owner-inventory",
+        "android.policy-projection"
+      ]
+    },
+    {
+      "id": "android.premium.entitlement",
+      "surface": "android",
+      "from_zone": "android.app",
+      "to_zone": "premium-service.memory",
+      "transport": "https",
+      "method": "GET",
+      "route": "/v1/me/entitlements",
+      "request_contract": null,
+      "response_contract": "entitlements-v1",
+      "request_data": [
+        "secret.premium-access"
+      ],
+      "response_data": [
+        "identity.account-subject",
+        "metadata.entitlement"
+      ],
+      "destination_persistence": [],
+      "logging": [],
+      "guards": [
+        "access-bearer",
+        "bounded-response",
+        "no-cookies",
+        "no-redirects",
+        "subject-binding",
+        "tls"
+      ],
+      "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152",
+      "enforcement_ids": [
+        "android.network-owner-inventory",
+        "android.policy-projection"
+      ]
+    },
+    {
+      "id": "android.premium.house-ads",
+      "surface": "android",
+      "from_zone": "android.app",
+      "to_zone": "premium-service.memory",
+      "transport": "https",
+      "method": "GET",
+      "route": "/v1/ads/inventory/{slot}",
+      "request_contract": "house-ad-slot-v1",
+      "response_contract": "house-ad-inventory-v1",
+      "request_data": [
+        "secret.premium-access"
+      ],
+      "response_data": [
+        "locator.external-cta-url",
+        "metadata.house-creative"
+      ],
+      "destination_persistence": [],
+      "logging": [],
+      "guards": [
+        "access-bearer",
+        "bounded-response",
+        "fresh-free-entitlement",
+        "native-text-only",
+        "no-store",
+        "subject-binding",
+        "tls"
+      ],
+      "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152",
+      "enforcement_ids": [
+        "android.dependency-allowlist",
+        "android.network-owner-inventory",
+        "android.policy-projection"
+      ]
+    }
+  ],
+  "copy_claims": [
+    {
+      "id": "tracking.house-only",
+      "operation_ids": [
+        "android.external-cta.open",
+        "android.premium.house-ads",
+        "desktop.external-cta.open",
+        "desktop.premium.house-ads"
+      ],
+      "surfaces": [
+        "android",
+        "desktop",
+        "site"
+      ],
+      "canonical_facts": [
+        "Ads are bounded first-party house text rendered natively.",
+        "No third-party ad SDK, tracker, executable creative, remote creative image, or impression beacon is admitted."
+      ],
+      "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152"
+    }
+  ],
+  "legacy_fences": [
+    {
+      "id": "android.account-secret-ui",
+      "path": "android/scripts/check_ad_containment.py",
+      "assertion": "Device authorization codes use secure-window containment and are not rememberSaveable.",
+      "operation_ids": [
+        "android.premium.device-auth"
+      ],
+      "replacement_checker": "android.policy-projection",
+      "retained_as_defense_in_depth": true,
+      "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152"
+    },
+    {
+      "id": "android.ad-dependency-denylist",
+      "path": "android/scripts/check_ad_containment.py",
+      "assertion": "Known ad, tracker, analytics, crash, and remote-image dependencies are forbidden.",
+      "operation_ids": [
+        "android.premium.house-ads"
+      ],
+      "replacement_checker": "android.dependency-allowlist",
+      "retained_as_defense_in_depth": true,
+      "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152"
+    },
+    {
+      "id": "android.ad-native-rendering",
+      "path": "android/scripts/check_ad_containment.py",
+      "assertion": "House creative uses native text and only designated placements.",
+      "operation_ids": [
+        "android.external-cta.open",
+        "android.premium.house-ads"
+      ],
+      "replacement_checker": "android.policy-projection",
+      "retained_as_defense_in_depth": true,
+      "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152"
+    },
+    {
+      "id": "android.ad-permission-denylist",
+      "path": "android/scripts/check_ad_containment.py",
+      "assertion": "Advertising and attribution permissions are forbidden and INTERNET is the sole manifest permission.",
+      "operation_ids": [
+        "android.premium.house-ads"
+      ],
+      "replacement_checker": "android.network-owner-inventory",
+      "retained_as_defense_in_depth": true,
+      "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152"
+    },
+    {
+      "id": "android.ad-source-denylist",
+      "path": "android/scripts/check_ad_containment.py",
+      "assertion": "Known executable creative and tracking source APIs are forbidden.",
+      "operation_ids": [
+        "android.premium.house-ads"
+      ],
+      "replacement_checker": "android.network-owner-inventory",
+      "retained_as_defense_in_depth": true,
+      "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152"
+    }
+  ],
+  "checker_ids": [
+    "android.dependency-allowlist",
+    "android.network-owner-inventory",
+    "android.policy-projection"
+  ]
+}

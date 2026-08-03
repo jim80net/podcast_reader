@@ -1,0 +1,372 @@
+{
+  "schema_version": 1,
+  "contract": "podcast-reader-boundary-projection",
+  "policy_revision": 1,
+  "surface": "backend",
+  "roots": [
+    {
+      "path": "packaging",
+      "surface": "backend",
+      "kind": "build-tooling",
+      "network_capable": true,
+      "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152"
+    },
+    {
+      "path": "services",
+      "surface": "backend",
+      "kind": "product-service",
+      "network_capable": true,
+      "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152"
+    },
+    {
+      "path": "site",
+      "surface": "backend",
+      "kind": "public-copy",
+      "network_capable": false,
+      "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152"
+    },
+    {
+      "path": "spike",
+      "surface": "backend",
+      "kind": "experimental-tooling",
+      "network_capable": true,
+      "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152"
+    },
+    {
+      "path": "src",
+      "surface": "backend",
+      "kind": "product-service",
+      "network_capable": true,
+      "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152"
+    }
+  ],
+  "operations": [
+    {
+      "id": "backend.engine.feed-fetch",
+      "surface": "backend",
+      "from_zone": "local-engine.memory",
+      "to_zone": "approved.content-host",
+      "transport": "https",
+      "method": "GET",
+      "route": "/user-selected-feed",
+      "request_contract": "feed-fetch-v1",
+      "response_contract": "feed-document-v1",
+      "request_data": [
+        "locator.feed-url",
+        "secret.cookie-jar"
+      ],
+      "response_data": [
+        "locator.media-url",
+        "metadata.subscription"
+      ],
+      "destination_persistence": [
+        "locator.feed-url"
+      ],
+      "logging": [],
+      "guards": [
+        "availability-gate",
+        "bounded-response",
+        "redirect-policy"
+      ],
+      "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152",
+      "enforcement_ids": [
+        "backend.network-owner-inventory",
+        "backend.policy-projection"
+      ]
+    },
+    {
+      "id": "backend.engine.media-fetch",
+      "surface": "backend",
+      "from_zone": "local-engine.memory",
+      "to_zone": "approved.content-host",
+      "transport": "https",
+      "method": "GET",
+      "route": "/user-selected-media",
+      "request_contract": "media-fetch-v1",
+      "response_contract": "media-bytes-v1",
+      "request_data": [
+        "locator.media-url",
+        "secret.cookie-jar"
+      ],
+      "response_data": [
+        "content.audio"
+      ],
+      "destination_persistence": [
+        "locator.media-url"
+      ],
+      "logging": [],
+      "guards": [
+        "bounded-download",
+        "redirect-policy",
+        "user-selected-source"
+      ],
+      "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152",
+      "enforcement_ids": [
+        "backend.network-owner-inventory",
+        "backend.policy-projection"
+      ]
+    },
+    {
+      "id": "backend.engine.model-provider",
+      "surface": "backend",
+      "from_zone": "local-engine.memory",
+      "to_zone": "approved.model-provider",
+      "transport": "https",
+      "method": "POST",
+      "route": "/configured-transcription-api",
+      "request_contract": "provider-transcription-v1",
+      "response_contract": "provider-transcript-v1",
+      "request_data": [
+        "content.audio",
+        "secret.provider-api-key"
+      ],
+      "response_data": [
+        "content.transcript-plaintext"
+      ],
+      "destination_persistence": [
+        "content.audio"
+      ],
+      "logging": [],
+      "guards": [
+        "configured-provider",
+        "explicit-user-job",
+        "tls"
+      ],
+      "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152",
+      "enforcement_ids": [
+        "backend.network-owner-inventory",
+        "backend.policy-projection"
+      ]
+    },
+    {
+      "id": "backend.engine.pack-download",
+      "surface": "backend",
+      "from_zone": "local-engine.memory",
+      "to_zone": "approved.package-host",
+      "transport": "https",
+      "method": "GET",
+      "route": "/pinned-pack-artifact",
+      "request_contract": "pack-manifest-v1",
+      "response_contract": "pack-bytes-v1",
+      "request_data": [
+        "metadata.public-configuration"
+      ],
+      "response_data": [
+        "metadata.public-configuration"
+      ],
+      "destination_persistence": [
+        "metadata.public-configuration"
+      ],
+      "logging": [
+        "metadata.public-configuration"
+      ],
+      "guards": [
+        "hash-verification",
+        "published-pack",
+        "tls"
+      ],
+      "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152",
+      "enforcement_ids": [
+        "backend.network-owner-inventory",
+        "backend.policy-projection"
+      ]
+    },
+    {
+      "id": "backend.engine.youtube",
+      "surface": "backend",
+      "from_zone": "local-engine.memory",
+      "to_zone": "approved.content-host",
+      "transport": "https",
+      "method": "GET",
+      "route": "/youtube/{video_id}",
+      "request_contract": "youtube-video-id-v1",
+      "response_contract": "youtube-transcript-v1",
+      "request_data": [
+        "locator.media-url"
+      ],
+      "response_data": [
+        "content.transcript-plaintext",
+        "metadata.public-configuration"
+      ],
+      "destination_persistence": [
+        "content.transcript-plaintext"
+      ],
+      "logging": [],
+      "guards": [
+        "bounded-response",
+        "validated-video-id",
+        "youtube-host-only"
+      ],
+      "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152",
+      "enforcement_ids": [
+        "backend.network-owner-inventory",
+        "backend.policy-projection"
+      ]
+    },
+    {
+      "id": "backend.premium.email-delivery",
+      "surface": "backend",
+      "from_zone": "desktop.main",
+      "to_zone": "premium-service.memory",
+      "transport": "https",
+      "method": "POST",
+      "route": "/v1/email-deliveries",
+      "request_contract": "email-delivery-request-v1",
+      "response_contract": "email-delivery-receipt-v1",
+      "request_data": [
+        "content.transcript-plaintext",
+        "identity.account-subject",
+        "metadata.subscription",
+        "secret.premium-access"
+      ],
+      "response_data": [
+        "metadata.delivery-receipt"
+      ],
+      "destination_persistence": [],
+      "logging": [
+        "metadata.delivery-receipt"
+      ],
+      "guards": [
+        "bounded-content",
+        "explicit-consent",
+        "fresh-email-entitlement",
+        "no-recipient-field",
+        "subject-binding"
+      ],
+      "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152",
+      "enforcement_ids": [
+        "backend.persistence-inventory",
+        "backend.policy-projection",
+        "backend.route-inventory"
+      ]
+    },
+    {
+      "id": "backend.premium.email-sink",
+      "surface": "backend",
+      "from_zone": "premium-service.memory",
+      "to_zone": "captured.dev-maildir",
+      "transport": "local-maildir",
+      "method": "WRITE",
+      "route": "/dev-maildir/message",
+      "request_contract": "email-delivery-request-v1",
+      "response_contract": null,
+      "request_data": [
+        "content.transcript-plaintext"
+      ],
+      "response_data": [],
+      "destination_persistence": [
+        "content.transcript-plaintext"
+      ],
+      "logging": [],
+      "guards": [
+        "dev-only",
+        "explicit-consent",
+        "no-provider-configuration"
+      ],
+      "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152",
+      "enforcement_ids": [
+        "backend.persistence-inventory",
+        "backend.policy-projection"
+      ]
+    },
+    {
+      "id": "backend.premium.receipt-persistence",
+      "surface": "backend",
+      "from_zone": "premium-service.memory",
+      "to_zone": "premium-service.database",
+      "transport": "database",
+      "method": "WRITE",
+      "route": "/email-delivery-receipts",
+      "request_contract": "email-delivery-receipt-v1",
+      "response_contract": null,
+      "request_data": [
+        "metadata.delivery-receipt"
+      ],
+      "response_data": [],
+      "destination_persistence": [
+        "metadata.delivery-receipt"
+      ],
+      "logging": [
+        "metadata.delivery-receipt"
+      ],
+      "guards": [
+        "content-fields-forbidden",
+        "no-recipient-field",
+        "strict-schema"
+      ],
+      "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152",
+      "enforcement_ids": [
+        "backend.persistence-inventory",
+        "backend.policy-projection"
+      ]
+    }
+  ],
+  "copy_claims": [
+    {
+      "id": "email.content-stateless",
+      "operation_ids": [
+        "backend.premium.email-delivery",
+        "backend.premium.email-sink",
+        "backend.premium.receipt-persistence",
+        "desktop.premium.email-delivery"
+      ],
+      "surfaces": [
+        "desktop",
+        "premium-readme",
+        "premium-template",
+        "site"
+      ],
+      "canonical_facts": [
+        "Transcript email is an explicit per-item or per-subscription action.",
+        "One bounded plain-text transcript and title enter premium request memory.",
+        "The premium database retains delivery metadata but no transcript, title, audio, feed URL, or recipient.",
+        "The captured DEV Maildir retains delivered development mail and no SMTP provider is configured."
+      ],
+      "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152"
+    }
+  ],
+  "legacy_fences": [
+    {
+      "id": "public-copy.approved-email-disclosure",
+      "path": "services/premium/tests/test_email_privacy_copy.py",
+      "assertion": "Premium README contains the approved content-stateless request and retaining DEV sink disclosure.",
+      "operation_ids": [
+        "backend.premium.email-delivery",
+        "backend.premium.email-sink",
+        "backend.premium.receipt-persistence"
+      ],
+      "replacement_checker": "backend.policy-projection",
+      "retained_as_defense_in_depth": true,
+      "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152"
+    },
+    {
+      "id": "public-copy.contradiction-negative-proof",
+      "path": "services/premium/tests/test_email_privacy_copy.py",
+      "assertion": "The motivating unconditional no-transcript-service claim is mechanically rejected.",
+      "operation_ids": [
+        "backend.premium.email-delivery"
+      ],
+      "replacement_checker": "backend.policy-projection",
+      "retained_as_defense_in_depth": true,
+      "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152"
+    },
+    {
+      "id": "public-copy.contradiction-regexes",
+      "path": "services/premium/tests/test_email_privacy_copy.py",
+      "assertion": "All discovered public copy surfaces remain scanned for unconditional local-only transcript claims.",
+      "operation_ids": [
+        "backend.premium.email-delivery",
+        "backend.premium.email-sink"
+      ],
+      "replacement_checker": "backend.policy-projection",
+      "retained_as_defense_in_depth": true,
+      "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152"
+    }
+  ],
+  "checker_ids": [
+    "backend.network-owner-inventory",
+    "backend.persistence-inventory",
+    "backend.policy-projection",
+    "backend.route-inventory"
+  ]
+}

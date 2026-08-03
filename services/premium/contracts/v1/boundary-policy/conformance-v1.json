@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "contract": "boundary-policy-v1",
+  "valid": [
+    {"name": "authoritative-policy", "document": "policy-v1.json"}
+  ],
+  "invalid": [
+    {"name": "copy-claim-no-clause", "mutation": {"op": "replace", "path": "/copy_claims/0/operation_ids/0", "value": "missing.operation"}, "error_contains": "unknown operation missing.operation"},
+    {"name": "declared-root-marked-non-network", "mutation": {"op": "replace", "path": "/surface_enforcement/declared_roots/0/network_capable", "value": false}, "error_contains": "undeclared network-capable roots"},
+    {"name": "email-consent-guard-removed", "mutation": {"op": "remove", "path": "/operations/14/guards/1", "value": null}, "error_contains": "email delivery is missing required guards"},
+    {"name": "empty-consuming-test", "mutation": {"op": "replace", "path": "/surface_enforcement/surfaces/android/consuming_tests", "value": []}, "error_contains": "must have checkers and consuming tests"},
+    {"name": "exception-without-provenance", "mutation": {"op": "add", "path": "/exceptions/-", "value": {"id": "temporary.exception", "operation_id": "android.engine.health", "reason": "negative vector", "owner": "podcast-reader-build", "expires_on": "2026-08-04", "removal_condition": "remove immediately"}}, "error_contains": "expected exact keys"},
+    {"name": "legacy-fence-removed", "mutation": {"op": "remove", "path": "/surface_enforcement/legacy_fences/0", "value": null}, "error_contains": "complete stage-1 mapping required"},
+    {"name": "premium-ad-carries-transcript", "mutation": {"op": "add", "path": "/operations/8/request_data/-", "value": "content.transcript-plaintext"}, "error_contains": "premium account/ad operation carries local content"},
+    {"name": "premium-database-retains-content", "mutation": {"op": "add", "path": "/operations/16/destination_persistence/-", "value": "content.transcript-plaintext"}, "error_contains": "premium database cannot retain content"},
+    {"name": "renderer-carries-secret", "mutation": {"op": "add", "path": "/operations/29/response_data/-", "value": "secret.premium-refresh"}, "error_contains": "renderer boundary cannot carry secrets"},
+    {"name": "reserved-operator-fork", "mutation": {"op": "replace", "path": "/operations/0/route", "value": "/production-email"}, "error_contains": "unresolved operator fork cannot enter v1 policy"},
+    {"name": "unknown-data-class", "mutation": {"op": "add", "path": "/operations/0/request_data/-", "value": "content.unknown"}, "error_contains": "unknown data class content.unknown"},
+    {"name": "unknown-schema-version", "mutation": {"op": "replace", "path": "/schema_version", "value": 2}, "error_contains": "unsupported policy schema"},
+    {"name": "unknown-top-level-key", "mutation": {"op": "add", "path": "/allow_everything", "value": true}, "error_contains": "expected exact keys"},
+    {"name": "unknown-zone", "mutation": {"op": "replace", "path": "/operations/0/to_zone", "value": "unknown.network"}, "error_contains": "unknown zone"},
+    {"name": "wildcard-route", "mutation": {"op": "replace", "path": "/operations/0/route", "value": "/v1/*"}, "error_contains": "wildcards are forbidden"}
+  ]
+}
