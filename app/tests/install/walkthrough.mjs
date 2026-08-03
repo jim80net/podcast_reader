@@ -44,6 +44,8 @@ import { join } from 'node:path'
 import { parseArgs } from 'node:util'
 import { _electron } from 'playwright'
 
+import { capturePageEvidence } from './capture-evidence.mjs'
+
 // A short, famously stable video with English captions ("Me at the zoo",
 // 19 s) — the keyless captions path needs no packs and no API key.
 const YOUTUBE_URL = 'https://www.youtube.com/watch?v=jNQXAC9IVRw'
@@ -91,9 +93,17 @@ function log(message) {
 async function fail(message) {
   console.error(`[walkthrough] FAIL: ${message}`)
   try {
-    if (page) await page.screenshot({ path: join(outDir, 'ZZ-failure.png') })
-  } catch {
-    /* window may be gone */
+    if (page) {
+      await capturePageEvidence(page, {
+        path: join(outDir, 'ZZ-failure.png'),
+        label: 'failure capture'
+      })
+    }
+  } catch (error) {
+    console.error(
+      `[walkthrough] failure capture unavailable or invalid: ` +
+        `${error instanceof Error ? error.message : String(error)}`
+    )
   }
   await writeFile(join(outDir, 'renderer-console.log'), consoleLines.join('\n'))
   process.exit(1)
@@ -192,7 +202,11 @@ async function captureSurface(number, surface) {
       )
       const filename = `${number}-${surface}-${scale.label}-${theme}.png`
       const fullPage = surface === 'new-view-submitted' || surface === 'new-view-job-done'
-      await page.screenshot({ path: join(outDir, filename), fullPage })
+      const evidence = await capturePageEvidence(page, {
+        path: join(outDir, filename),
+        fullPage,
+        label: filename
+      })
       captureRecords.push({
         filename,
         surface,
@@ -208,7 +222,8 @@ async function captureSurface(number, surface) {
           right: geometry.themeControlRight,
           width: geometry.themeControlWidth
         },
-        fullPage
+        fullPage,
+        evidence
       })
       log(`captured ${surface} at ${scale.label} in ${theme}`)
     }
