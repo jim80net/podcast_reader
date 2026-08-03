@@ -23,8 +23,34 @@ describe('premium desktop boundary', () => {
     const free = JSON.parse(readFileSync(join(contracts, 'entitlements-v1-free.json'), 'utf8')) as unknown
     const premium = JSON.parse(readFileSync(join(contracts, 'entitlements-v1-premium.json'), 'utf8')) as unknown
     const now = Date.parse('2026-08-02T00:02:00Z')
-    expect(reduceEntitlement(free, 'usr_free_fixture', now)).toMatchObject({ state: 'online-free', adPolicy: 'none' })
-    expect(reduceEntitlement(premium, 'usr_premium_fixture', now)).toMatchObject({ state: 'online-premium' })
+    expect(reduceEntitlement(free, 'usr_free_fixture', now)).toEqual({
+      state: 'online-free',
+      subject: 'usr_free_fixture',
+      refreshAfter: Date.parse('2026-08-02T00:05:00Z'),
+      entitlementRevision: 0,
+      flagsRevision: 0,
+      adPolicy: 'none',
+      podcastSubscriptions: false,
+      transcriptEmail: false
+    })
+    expect(reduceEntitlement(premium, 'usr_premium_fixture', now)).toEqual({
+      state: 'online-premium',
+      subject: 'usr_premium_fixture',
+      refreshAfter: Date.parse('2026-08-02T00:05:00Z'),
+      entitlementRevision: 7,
+      flagsRevision: 12,
+      adPolicy: 'none',
+      podcastSubscriptions: false,
+      transcriptEmail: false
+    })
+  })
+
+  it('rejects half-authorized online states at compile time', () => {
+    // @ts-expect-error Online free truth always carries revisions and explicit capability denials.
+    const incompleteFree: ProductState = { state: 'online-free', subject: 'usr_free', refreshAfter: 1, adPolicy: 'house' }
+    // @ts-expect-error Online premium truth always carries revisions and explicit capability decisions.
+    const incompletePremium: ProductState = { state: 'online-premium', subject: 'usr_premium', refreshAfter: 1 }
+    expect([incompleteFree.state, incompletePremium.state]).toEqual(['online-free', 'online-premium'])
   })
 
   it('passes every shared positive and negative entitlement conformance vector', () => {

@@ -151,12 +151,12 @@ export class PremiumController implements PremiumAccess {
 
   subscriptionsEnabled(): boolean {
     const state = this.deps.runtime.state
-    return state.state === 'online-premium' && state.podcastSubscriptions === true && state.refreshAfter > this.deps.now()
+    return state.state === 'online-premium' && state.podcastSubscriptions && state.refreshAfter > this.deps.now()
   }
 
   emailEnabled(): boolean {
     const state = this.deps.runtime.state
-    return state.state === 'online-premium' && state.transcriptEmail === true && state.refreshAfter > this.deps.now()
+    return state.state === 'online-premium' && state.transcriptEmail && state.refreshAfter > this.deps.now()
   }
 
   emailSubject(): string | null {
@@ -319,9 +319,9 @@ export class PremiumController implements PremiumAccess {
   }
 
   private queueCapabilities(state: ProductState): void {
+    if (state.state !== 'online-free' && state.state !== 'online-premium') return
     const subscription = subscriptionCapabilitySnapshot(state, this.subscriptionsEnabled())
     const email = emailCapabilitySnapshot(state, this.emailEnabled())
-    if (subscription === null || email === null) return
     this.deps.emailSender?.disable()
     this.lastCapability = subscription
     this.lastEmailCapability = email
@@ -378,32 +378,39 @@ export const disabledPremiumAccess = (): PremiumAccess => ({
 })
 
 function productState(state: ProductState): PremiumProductState {
-  if (state.state === 'online-free') return { state: state.state, available: true, expiresAt: state.refreshAfter }
-  if (state.state === 'online-premium') return { state: state.state, available: true, expiresAt: state.refreshAfter, subscriptionsAvailable: state.podcastSubscriptions === true, emailAvailable: state.transcriptEmail === true }
-  return { state: state.state, available: true }
+  switch (state.state) {
+    case 'local': return { state: 'local', available: true }
+    case 'online-unavailable': return { state: 'online-unavailable', available: true }
+    case 'online-free': return { state: 'online-free', available: true, expiresAt: state.refreshAfter }
+    case 'online-premium': return { state: 'online-premium', available: true, expiresAt: state.refreshAfter, subscriptionsAvailable: state.podcastSubscriptions, emailAvailable: state.transcriptEmail }
+  }
 }
 
+type OnlineProductState = Extract<ProductState, { state: 'online-free' | 'online-premium' }>
+
+function subscriptionCapabilitySnapshot(state: OnlineProductState, enabled: boolean): PremiumCapabilitySnapshot
+function subscriptionCapabilitySnapshot(state: ProductState, enabled: boolean): PremiumCapabilitySnapshot | null
 function subscriptionCapabilitySnapshot(state: ProductState, enabled: boolean): PremiumCapabilitySnapshot | null {
   if (state.state !== 'online-free' && state.state !== 'online-premium') return null
-  if (!Number.isSafeInteger(state.entitlementRevision) || !Number.isSafeInteger(state.flagsRevision)) return null
   return {
     schema_version: 1,
     subject: state.subject,
-    entitlement_revision: state.entitlementRevision as number,
-    flags_revision: state.flagsRevision as number,
+    entitlement_revision: state.entitlementRevision,
+    flags_revision: state.flagsRevision,
     podcast_subscriptions: enabled,
     expires_at: new Date(state.refreshAfter).toISOString().replace('.000Z', 'Z')
   }
 }
 
+function emailCapabilitySnapshot(state: OnlineProductState, enabled: boolean): EmailCapabilitySnapshot
+function emailCapabilitySnapshot(state: ProductState, enabled: boolean): EmailCapabilitySnapshot | null
 function emailCapabilitySnapshot(state: ProductState, enabled: boolean): EmailCapabilitySnapshot | null {
   if (state.state !== 'online-free' && state.state !== 'online-premium') return null
-  if (!Number.isSafeInteger(state.entitlementRevision) || !Number.isSafeInteger(state.flagsRevision)) return null
   return {
     schema_version: 1,
     subject: state.subject,
-    entitlement_revision: state.entitlementRevision as number,
-    flags_revision: state.flagsRevision as number,
+    entitlement_revision: state.entitlementRevision,
+    flags_revision: state.flagsRevision,
     transcript_email: enabled,
     expires_at: new Date(state.refreshAfter).toISOString().replace('.000Z', 'Z')
   }
