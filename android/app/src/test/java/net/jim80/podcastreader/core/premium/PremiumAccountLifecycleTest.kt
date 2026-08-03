@@ -2,7 +2,6 @@ package net.jim80.podcastreader.core.premium
 
 import net.jim80.podcastreader.core.security.FakeEncryptedRecordBackend
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -60,7 +59,22 @@ class PremiumAccountLifecycleTest {
     }
 
     @Test
-    fun revokeClearsOnlyAfterServerConfirmationSoFailureCanBeRetried() {
+    fun networkRefreshFailureAlsoReturnsToLocalMode() {
+        val authorizer = authorizer()
+        install(authorizer)
+        val offline = LifecycleApi(
+            refreshResult = NativeAuthResult.Failure(
+                PremiumFailure(PremiumFailureCategory.NETWORK, requestId = "request-2c"),
+            ),
+        )
+
+        assertTrue(authorizer.refreshOnce(offline, "request-2c") is SessionMutationResult.Disconnected)
+        assertNull(authorizer.currentAccessToken())
+        assertNull(authorizer.restoreAccountRecord().getOrThrow())
+    }
+
+    @Test
+    fun revokeAttemptsTheServerThenClearsEvenWhenOffline() {
         val authorizer = authorizer()
         install(authorizer)
         val offline = LifecycleApi(
@@ -69,13 +83,10 @@ class PremiumAccountLifecycleTest {
             ),
         )
 
-        assertTrue(authorizer.revoke(offline, "request-3") is SessionMutationResult.Failed)
+        assertTrue(authorizer.revoke(offline, "request-3") is SessionMutationResult.Disconnected)
         assertNull(authorizer.currentAccessToken())
-        assertNotNull(authorizer.restoreAccountRecord().getOrThrow())
-
-        val online = LifecycleApi(revokeResult = NativeAuthResult.Success(Unit))
-        assertTrue(authorizer.revoke(online, "request-4") is SessionMutationResult.Disconnected)
         assertNull(authorizer.restoreAccountRecord().getOrThrow())
+        assertEquals(1, offline.revokeCount)
     }
 
     private fun authorizer() = PremiumAccountAuthorizer(
@@ -119,9 +130,10 @@ private class LifecycleApi(
     ),
 ) : PremiumNativeAuthApi {
     var refreshCount = 0
+    var revokeCount = 0
 
     override fun start(requestId: String): NativeAuthResult<DeviceAuthorizationStartV1Dto> = error("unused")
     override fun poll(deviceCode: DeviceCode, requestId: String): NativeAuthResult<TokenResponseV1Dto> = error("unused")
     override fun refresh(refreshToken: PremiumRefreshToken, requestId: String) = refreshResult.also { refreshCount += 1 }
-    override fun revoke(refreshToken: PremiumRefreshToken, requestId: String) = revokeResult
+    override fun revoke(refreshToken: PremiumRefreshToken, requestId: String) = revokeResult.also { revokeCount += 1 }
 }

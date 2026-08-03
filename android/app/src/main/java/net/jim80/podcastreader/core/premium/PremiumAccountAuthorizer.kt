@@ -30,7 +30,7 @@ class PremiumAccountAuthorizer(
     fun refreshOnce(api: PremiumNativeAuthApi, requestId: String): SessionMutationResult {
         val credentials = credentialStore.load().getOrElse {
             accessToken = null
-            return SessionMutationResult.Failed(storageFailure(requestId))
+            return disconnectResult(requestId)
         } ?: run {
             accessToken = null
             return SessionMutationResult.Disconnected
@@ -46,34 +46,22 @@ class PremiumAccountAuthorizer(
                         },
                         onFailure = {
                             accessToken = null
-                            credentialStore.disconnectLocalRecord()
-                            SessionMutationResult.Failed(storageFailure(requestId))
+                            disconnectResult(requestId)
                         },
                     )
                 },
                 onFailure = {
                     accessToken = null
-                    SessionMutationResult.Failed(incompatibleFailure(requestId))
+                    disconnectResult(requestId)
                 },
             )
             is NativeAuthResult.ProtocolError -> {
                 accessToken = null
-                val code = runCatching { result.error.requireValid().code }.getOrElse {
-                    return SessionMutationResult.Failed(incompatibleFailure(requestId))
-                }
-                if (code == NativeAuthErrorCode.REFRESH_TOKEN_REUSED) {
-                    disconnectResult(requestId)
-                } else {
-                    SessionMutationResult.Failed(incompatibleFailure(requestId))
-                }
+                disconnectResult(requestId)
             }
             is NativeAuthResult.Failure -> {
                 accessToken = null
-                if (result.failure.category == PremiumFailureCategory.UNAUTHORIZED) {
-                    disconnectResult(requestId)
-                } else {
-                    SessionMutationResult.Failed(result.failure)
-                }
+                disconnectResult(requestId)
             }
         }
     }
@@ -82,16 +70,10 @@ class PremiumAccountAuthorizer(
     fun revoke(api: PremiumNativeAuthApi, requestId: String): SessionMutationResult {
         accessToken = null
         val credentials = credentialStore.load().getOrElse {
-            return SessionMutationResult.Failed(storageFailure(requestId))
-        } ?: return SessionMutationResult.Disconnected
-        return when (val result = api.revoke(credentials.refreshToken, requestId)) {
-            is NativeAuthResult.Success -> credentialStore.disconnectLocalRecord().fold(
-                onSuccess = { SessionMutationResult.Disconnected },
-                onFailure = { SessionMutationResult.Failed(storageFailure(requestId)) },
-            )
-            is NativeAuthResult.ProtocolError -> SessionMutationResult.Failed(incompatibleFailure(requestId))
-            is NativeAuthResult.Failure -> SessionMutationResult.Failed(result.failure)
-        }
+            return disconnectResult(requestId)
+        } ?: return disconnectResult(requestId)
+        runCatching { api.revoke(credentials.refreshToken, requestId) }
+        return disconnectResult(requestId)
     }
 
     @Synchronized
@@ -114,11 +96,6 @@ sealed interface SessionMutationResult {
 }
 
 private fun storageFailure(requestId: String) = PremiumFailure(
-    PremiumFailureCategory.INCOMPATIBLE_RESPONSE,
-    requestId = requestId,
-)
-
-private fun incompatibleFailure(requestId: String) = PremiumFailure(
     PremiumFailureCategory.INCOMPATIBLE_RESPONSE,
     requestId = requestId,
 )
