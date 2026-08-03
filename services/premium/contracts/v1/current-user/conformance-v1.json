@@ -45,6 +45,12 @@
       }
     },
     {
+      "name": "subject-contains-internal-whitespace",
+      "document": {
+        "id": "usr bad"
+      }
+    },
+    {
       "name": "subject-exceeds-storage-bound",
       "document": {
         "id": "12345678901234567890123456789012345678901"
