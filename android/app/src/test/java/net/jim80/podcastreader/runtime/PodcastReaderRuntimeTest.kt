@@ -8,14 +8,16 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
-import net.jim80.podcastreader.core.premium.ConnectedPremiumSession
 import net.jim80.podcastreader.core.premium.AuthorizedPremiumTokens
+import net.jim80.podcastreader.core.premium.ConnectedPremiumSession
 import net.jim80.podcastreader.core.premium.DeviceAuthorizationSession
 import net.jim80.podcastreader.core.premium.DeviceAuthorizationTransition
 import net.jim80.podcastreader.core.premium.DeviceCode
 import net.jim80.podcastreader.core.premium.OnlineUnavailableReason
 import net.jim80.podcastreader.core.premium.PremiumAccessToken
 import net.jim80.podcastreader.core.premium.PremiumAccountCredentials
+import net.jim80.podcastreader.core.premium.PremiumFailure
+import net.jim80.podcastreader.core.premium.PremiumFailureCategory
 import net.jim80.podcastreader.core.premium.PremiumOrigin
 import net.jim80.podcastreader.core.premium.PremiumRefreshToken
 import net.jim80.podcastreader.core.premium.PremiumRestoreResult
@@ -351,6 +353,66 @@ class PodcastReaderRuntimeTest {
     }
 
     @Test
+    fun cancellingADeviceStartThatReturnsLateCancelsItsMintedSession() = runTest {
+        lateinit var runtime: PodcastReaderRuntime
+        val connection = TestAccountConnection(
+            initial = DeviceAuthorizationTransition.Failed(
+                PremiumFailure(
+                    PremiumFailureCategory.NETWORK,
+                    requestId = "unused",
+                ),
+            ),
+            poll = DeviceAuthorizationTransition.TooEarly,
+            completedSession = CompletedSession(PremiumRestoreResult.Local),
+            onBegin = {
+                runtime.dispatch(PodcastReaderRuntimeEvent.CancelAuthorization)
+                DeviceAuthorizationTransition.Waiting(authorizationSession(nextPollAt = now.plusSeconds(5)))
+            },
+        )
+        runtime = runtime(
+            accountResult = Result.success(null),
+            factory = ConnectedPremiumSessionFactory { error("unexpected restore") },
+            connectionFactory = PremiumAccountConnectionFactory { connection },
+        )
+
+        runtime.foreground()
+        advanceUntilIdle()
+        runtime.dispatch(PodcastReaderRuntimeEvent.DevelopmentOriginChanged("https://premium.example.test"))
+        runtime.dispatch(PodcastReaderRuntimeEvent.ConnectAccount)
+        advanceUntilIdle()
+
+        assertEquals(1, connection.cancelCount)
+        assertTrue(runtime.uiState.value.account is AccountUiState.Local)
+    }
+
+    @Test
+    fun cancellingDuringTooEarlyDelayPreventsAnotherPoll() = runTest {
+        val connection = TestAccountConnection(
+            initial = DeviceAuthorizationTransition.Waiting(authorizationSession(nextPollAt = now)),
+            poll = DeviceAuthorizationTransition.TooEarly,
+            completedSession = CompletedSession(PremiumRestoreResult.Local),
+        )
+        val runtime = runtime(
+            accountResult = Result.success(null),
+            factory = ConnectedPremiumSessionFactory { error("unexpected restore") },
+            connectionFactory = PremiumAccountConnectionFactory { connection },
+        )
+
+        runtime.foreground()
+        advanceUntilIdle()
+        runtime.dispatch(PodcastReaderRuntimeEvent.DevelopmentOriginChanged("https://premium.example.test"))
+        runtime.dispatch(PodcastReaderRuntimeEvent.ConnectAccount)
+        testScheduler.runCurrent()
+        assertEquals(1, connection.pollCount)
+
+        runtime.dispatch(PodcastReaderRuntimeEvent.CancelAuthorization)
+        advanceUntilIdle()
+
+        assertEquals(1, connection.pollCount)
+        assertEquals(1, connection.cancelCount)
+    }
+
+    @Test
     fun backgroundApprovalPersistsButDefersTruthValidationUntilForegroundRestore() = runTest {
         val records = TestPremiumRecords(Result.success(null))
         val completed = CompletedSession(
@@ -469,17 +531,19 @@ private class TestAccountConnection(
     private val poll: DeviceAuthorizationTransition,
     private val completedSession: ConnectedPremiumSession,
     private val onComplete: () -> Unit = {},
+    private val onBegin: (() -> DeviceAuthorizationTransition)? = null,
 ) : PremiumAccountConnection {
     var cancelCount = 0
     var completeCount = 0
+    var pollCount = 0
 
-    override fun begin(now: Instant, requestId: String): DeviceAuthorizationTransition = initial
+    override fun begin(now: Instant, requestId: String): DeviceAuthorizationTransition = onBegin?.invoke() ?: initial
 
     override fun poll(
         session: DeviceAuthorizationSession,
         now: Instant,
         requestId: String,
-    ): DeviceAuthorizationTransition = poll
+    ): DeviceAuthorizationTransition = poll.also { pollCount += 1 }
 
     override fun cancel(session: DeviceAuthorizationSession) {
         cancelCount += 1

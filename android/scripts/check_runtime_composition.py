@@ -73,6 +73,26 @@ def main() -> None:
             f"alternate production constructor for {marker}: {list(map(str, occurrences))}",
         )
 
+    account_factory_pattern = re.compile(r"\bPremiumAccountConnectionFactory\s*\{")
+    account_factory_declaration = re.compile(r"\bfun\s+interface\s+PremiumAccountConnectionFactory\s*\{")
+    account_factory_occurrences = []
+    for path in kotlin_files:
+        source = path.read_text()
+        if path.name == "PodcastReaderRuntime.kt":
+            require(
+                len(account_factory_declaration.findall(source)) == 1,
+                "expected one PremiumAccountConnectionFactory declaration",
+            )
+            source = account_factory_declaration.sub("", source, count=1)
+        account_factory_occurrences.extend(
+            [path.resolve()] * len(account_factory_pattern.findall(source)),
+        )
+    require(
+        account_factory_occurrences == [allowed],
+        "alternate production PremiumAccountConnectionFactory construction: "
+        f"{list(map(str, account_factory_occurrences))}",
+    )
+
 
 if __name__ == "__main__":
     main()

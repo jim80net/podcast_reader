@@ -188,15 +188,27 @@ internal class PodcastReaderRuntime(
                 ),
             )
         }
-        while (isAuthorizationCurrent(authorizationGeneration)) {
+        while (true) {
+            if (!isAuthorizationCurrent(authorizationGeneration)) {
+                (transition as? DeviceAuthorizationTransition.Waiting)?.session?.let {
+                    runCatching { connection.cancel(it) }
+                }
+                return
+            }
             when (transition) {
                 is DeviceAuthorizationTransition.Waiting -> {
-                    session = transition.session
-                    synchronized(lock) {
-                        if (!isAuthorizationCurrentLocked(authorizationGeneration)) return
+                    val waitingSession = transition.session
+                    session = waitingSession
+                    val accepted = synchronized(lock) {
+                        if (!isAuthorizationCurrentLocked(authorizationGeneration)) return@synchronized false
                         accountConnection = connection
-                        authorizationSession = session
-                        publishLocked(PodcastReaderRuntimeSnapshot.authorizing(snapshot.engine, session))
+                        authorizationSession = waitingSession
+                        publishLocked(PodcastReaderRuntimeSnapshot.authorizing(snapshot.engine, waitingSession))
+                        true
+                    }
+                    if (!accepted) {
+                        runCatching { connection.cancel(waitingSession) }
+                        return
                     }
                     val waitMillis = runCatching {
                         Duration.between(now(), session.nextPollAt).toMillis().coerceAtLeast(0L)
@@ -234,6 +246,7 @@ internal class PodcastReaderRuntime(
                         Duration.between(now(), pending.nextPollAt).toMillis().coerceAtLeast(1L)
                     }.getOrDefault(1L)
                     delay(waitMillis)
+                    if (!isAuthorizationCurrent(authorizationGeneration)) return
                     transition = runCatching {
                         connection.poll(
                             pending,

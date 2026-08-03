@@ -62,14 +62,9 @@ class PodcastReaderUiState private constructor(
                     snapshot.developmentOriginValid,
                     snapshot.connectionIssue,
                 )
-                AccountRuntimePhase.AUTHORIZING -> snapshot.authorization
-                    ?.takeIf { now.isBefore(it.expiresAt) }
-                    ?.let { AccountUiState.Authorizing(it.userCode, it.expiresAt) }
-                    ?: AccountUiState.Local(
-                        developmentOriginDraft = "",
-                        developmentOriginValid = false,
-                        connectionIssue = AccountConnectionIssue.AUTHORIZATION_EXPIRED,
-                    )
+                AccountRuntimePhase.AUTHORIZING -> requireNotNull(snapshot.authorization).let {
+                    AccountUiState.Authorizing(it.userCode, it.expiresAt)
+                }
                 AccountRuntimePhase.ONLINE -> requireNotNull(productState).fold(
                     onLocal = { error("online snapshot contained local truth") },
                     onOnlineFree = { AccountUiState.OnlineFree },

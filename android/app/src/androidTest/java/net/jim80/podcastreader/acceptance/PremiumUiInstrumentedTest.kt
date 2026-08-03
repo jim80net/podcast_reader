@@ -4,6 +4,7 @@ import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
@@ -15,6 +16,7 @@ import net.jim80.podcastreader.core.ads.HouseAdCta
 import net.jim80.podcastreader.core.ads.HouseAdPlacement
 import net.jim80.podcastreader.core.ads.HouseInventory
 import net.jim80.podcastreader.core.premium.OnlineUnavailableReason
+import net.jim80.podcastreader.core.premium.PremiumOrigin
 import net.jim80.podcastreader.core.premium.UserCode
 import net.jim80.podcastreader.runtime.PodcastReaderRuntimeSnapshot
 import net.jim80.podcastreader.support.FixtureProductStates
@@ -63,12 +65,21 @@ class PremiumUiInstrumentedTest {
     @Test
     fun localAccountRequiresExplicitDevelopmentOriginEntry() {
         var entered = ""
+        var connectDelivered = false
+        val state = mutableStateOf<AccountUiState>(AccountUiState.Local("", false, null))
         compose.setContent {
             PodcastReaderTheme {
                 AccountScreen(
-                    state = AccountUiState.Local("", false, null),
-                    onDevelopmentOriginChanged = { entered = it },
-                    onConnect = {},
+                    state = state.value,
+                    onDevelopmentOriginChanged = {
+                        entered = it
+                        state.value = AccountUiState.Local(
+                            developmentOriginDraft = it,
+                            developmentOriginValid = PremiumOrigin.fromTrustedConfiguration(it).isSuccess,
+                            connectionIssue = null,
+                        )
+                    },
+                    onConnect = { connectDelivered = true },
                     onCancelConnect = {},
                     onRetry = {},
                     onSignOut = {},
@@ -80,6 +91,8 @@ class PremiumUiInstrumentedTest {
         compose.onNodeWithText("Connect development account").assertIsNotEnabled()
         compose.onNodeWithText("Development service origin").performTextInput("https://premium.example.test")
         compose.runOnIdle { assertEquals("https://premium.example.test", entered) }
+        compose.onNodeWithText("Connect development account").assertIsEnabled().performClick()
+        compose.runOnIdle { assertTrue(connectDelivered) }
     }
 
     @Test
