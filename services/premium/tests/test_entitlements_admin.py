@@ -14,7 +14,6 @@ from sqlalchemy.orm import Session
 from podcast_reader_premium.cli import _repair_entitlements
 from podcast_reader_premium.entitlements import (
     apply_entitlement_event,
-    assert_projection_matches_ledger,
     evaluate_entitlements,
     rebuild_projection,
     require_entitlement_configuration,
@@ -160,7 +159,7 @@ def test_ledger_rebuild_matches_projection_for_override_event_orders(
                 reason="projection property test",
             )
         database.commit()
-        assert_projection_matches_ledger(database, cast("str", account["id"]))
+        evaluate_entitlements(database, cast("str", account["id"]))
         rebuilt = rebuild_projection(database, cast("str", account["id"]))
         assert rebuilt["effective_tier"] == expected
         revisions = database.scalars(
@@ -613,13 +612,33 @@ def test_entitlement_endpoint_fails_closed_when_projection_is_missing(
         database.commit()
     with Session(_app(client).state.engine) as database:
         with pytest.raises(ValueError, match="projection is missing"):
-            assert_projection_matches_ledger(database, cast("str", account["id"]))
+            evaluate_entitlements(database, cast("str", account["id"]))
         assert database.get(EntitlementProjection, account["id"]) is None
     response = client.get("/v1/me/entitlements", headers={"Authorization": f"Bearer {token}"})
     assert response.status_code == 500
     assert response.json()["code"] == "internal_error"
     with Session(_app(client).state.engine) as database:
         assert database.get(EntitlementProjection, account["id"]) is None
+
+
+def test_entitlement_endpoint_fails_closed_when_projection_disagrees_with_ledger(
+    client: TestClient, account: dict[str, object]
+) -> None:
+    auth = _make_admin(client, account)
+    token = _issue_bearer(client, auth)
+    with Session(_app(client).state.engine) as database:
+        projection = database.get(EntitlementProjection, account["id"])
+        assert projection is not None
+        projection.effective_tier = "premium"
+        database.commit()
+
+    response = client.get("/v1/me/entitlements", headers={"Authorization": f"Bearer {token}"})
+
+    assert response.status_code == 500
+    assert response.json()["code"] == "internal_error"
+    with Session(_app(client).state.engine) as database:
+        projection = database.get(EntitlementProjection, account["id"])
+        assert projection is not None and projection.effective_tier == "premium"
 
 
 def test_cli_repair_persists_missing_projection_and_audits(
