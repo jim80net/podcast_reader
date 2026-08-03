@@ -30,7 +30,8 @@ describe('premium desktop boundary', () => {
     const now = Date.parse('2026-08-03T00:00:00Z')
     const admin = { ...entitlement('premium'), entitlement: { source: 'admin', revision: 2 }, evaluated_at: '2026-08-02T23:59:00Z', refresh_after: '2026-08-03T00:04:00Z' }
     expect(reduceEntitlement(admin, 'usr_one', now)).toMatchObject({ state: 'online-premium' })
-    expect(() => reduceEntitlement({ ...admin, evaluated_at: '2026-08-03T00:01:00Z' }, 'usr_one', now)).toThrow('stale premium contract')
+    expect(reduceEntitlement({ ...admin, evaluated_at: '2026-08-03T00:01:00Z', refresh_after: '2026-08-03T00:06:00Z' }, 'usr_one', now)).toMatchObject({ state: 'online-premium' })
+    expect(() => reduceEntitlement({ ...admin, evaluated_at: '2026-08-03T00:06:00Z', refresh_after: '2026-08-03T00:11:00Z' }, 'usr_one', now)).toThrow('stale premium contract')
     const badFree = entitlement('free')
     badFree.capabilities.transcript_email = true
     expect(() => reduceEntitlement(badFree, 'usr_one', now)).toThrow('invalid premium contract')
