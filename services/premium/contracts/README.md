@@ -3,6 +3,9 @@
 The JSON files in this directory are committed consumer fixtures. The entitlement
 fixtures freeze the complete v1 response shape, enum values, timestamp encoding,
 and free versus premium capability meanings for desktop, extension, and Android.
+`v1/entitlements/conformance-v1.json` is the executable validation language shared
+by the backend, desktop, and Android: every named positive document must be accepted
+and every named negative document must fail closed in all three consumers.
 
 The `native-auth-v1-*` fixtures freeze device-authorization start, the shared
 device-exchange/refresh token response, the sign-out revoke request and empty 204

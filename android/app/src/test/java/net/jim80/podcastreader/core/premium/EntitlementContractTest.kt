@@ -1,6 +1,10 @@
 package net.jim80.podcastreader.core.premium
 
 import java.time.Instant
+import kotlinx.serialization.json.decodeFromJsonElement
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -34,6 +38,52 @@ class EntitlementContractTest {
 
         assertTrue(state is ProductState.OnlinePremium)
         assertTrue((state as ProductState.OnlinePremium).entitlement.capabilities.mobileAdFree)
+    }
+
+    @Test
+    fun passesEverySharedPositiveAndNegativeConformanceVector() {
+        val vectors = premiumJson.parseToJsonElement(
+            fixture("v1/entitlements/conformance-v1.json"),
+        ).jsonObject
+        assertEquals(
+            setOf("schema_version", "contract", "expected_subject", "now", "valid", "invalid"),
+            vectors.keys,
+        )
+        assertEquals(1, vectors.getValue("schema_version").jsonPrimitive.content.toInt())
+        assertEquals("entitlements-v1", vectors.getValue("contract").jsonPrimitive.content)
+        val expectedSubject = vectors.getValue("expected_subject").jsonPrimitive.content
+        val now = Instant.parse(vectors.getValue("now").jsonPrimitive.content)
+        val valid = vectors.getValue("valid").jsonArray
+        val invalid = vectors.getValue("invalid").jsonArray
+        val names = (valid + invalid).map { it.jsonObject.getValue("name").jsonPrimitive.content }
+        assertEquals(names.size, names.toSet().size)
+        assertTrue(names.contains("boolean-capability-as-integer"))
+
+        valid.forEach { element ->
+            val vector = element.jsonObject
+            val name = vector.getValue("name").jsonPrimitive.content
+            val dto = premiumJson.decodeFromJsonElement<EntitlementV1Dto>(
+                vector.getValue("document"),
+            )
+            val state = ProductStateReducer.online(dto, expectedSubject, now)
+            val actual = when (state) {
+                is ProductState.OnlineFree -> "online-free"
+                is ProductState.OnlinePremium -> "online-premium"
+                else -> "unavailable"
+            }
+            assertEquals(name, vector.getValue("expected_state").jsonPrimitive.content, actual)
+        }
+        val acceptedInvalidVectors = invalid.mapNotNull { element ->
+            val vector = element.jsonObject
+            val name = vector.getValue("name").jsonPrimitive.content
+            val result = runCatching {
+                premiumJson.decodeFromJsonElement<EntitlementV1Dto>(
+                    vector.getValue("document"),
+                ).validated(expectedSubject).getOrThrow()
+            }
+            name.takeIf { result.isSuccess }
+        }
+        assertTrue("invalid vectors accepted: $acceptedInvalidVectors", acceptedInvalidVectors.isEmpty())
     }
 
     @Test

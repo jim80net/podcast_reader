@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { PremiumCredentialStore } from './credentials'
 import type { PremiumCredentials } from './credentials'
 import { reduceEntitlement } from './contracts'
+import type { ProductState } from './contracts'
 import { PremiumDeviceFlow } from './device-flow'
 import { PremiumOrigin } from './origin'
 import { PremiumRuntime } from './runtime'
@@ -24,6 +25,30 @@ describe('premium desktop boundary', () => {
     const now = Date.parse('2026-08-02T00:02:00Z')
     expect(reduceEntitlement(free, 'usr_free_fixture', now)).toMatchObject({ state: 'online-free', adPolicy: 'none' })
     expect(reduceEntitlement(premium, 'usr_premium_fixture', now)).toMatchObject({ state: 'online-premium' })
+  })
+
+  it('passes every shared positive and negative entitlement conformance vector', () => {
+    const path = join(process.cwd(), '..', 'services', 'premium', 'contracts', 'v1', 'entitlements', 'conformance-v1.json')
+    const vectors = JSON.parse(readFileSync(path, 'utf8')) as {
+      schema_version: number
+      contract: string
+      expected_subject: string
+      now: string
+      valid: Array<{ name: string; expected_state: ProductState['state']; document: unknown }>
+      invalid: Array<{ name: string; document: unknown }>
+    }
+    expect(Object.keys(vectors).sort()).toEqual(['contract', 'expected_subject', 'invalid', 'now', 'schema_version', 'valid'])
+    expect(vectors).toMatchObject({ schema_version: 1, contract: 'entitlements-v1' })
+    const names = [...vectors.valid, ...vectors.invalid].map((item) => item.name)
+    expect(new Set(names).size).toBe(names.length)
+    expect(names).toContain('boolean-capability-as-integer')
+    const now = Date.parse(vectors.now)
+    for (const vector of vectors.valid) {
+      expect(reduceEntitlement(vector.document, vectors.expected_subject, now).state, vector.name).toBe(vector.expected_state)
+    }
+    for (const vector of vectors.invalid) {
+      expect(() => reduceEntitlement(vector.document, vectors.expected_subject, now), vector.name).toThrow()
+    }
   })
 
   it('accepts admin projections but rejects future or capability-inconsistent truth', () => {

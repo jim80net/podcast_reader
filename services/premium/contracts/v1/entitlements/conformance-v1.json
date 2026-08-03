@@ -1,0 +1,106 @@
+{
+  "schema_version": 1,
+  "contract": "entitlements-v1",
+  "expected_subject": "usr_conformance",
+  "now": "2026-08-02T00:01:00Z",
+  "valid": [
+    {
+      "name": "free-provider-default",
+      "expected_state": "online-free",
+      "document": {"schema_version": 1, "subject": "usr_conformance", "tier": "free", "entitlement": {"source": "none", "revision": 0}, "capabilities": {"ad_policy": "none", "podcast_subscriptions": false, "transcript_email": false, "mobile_ad_free": false, "topic_corpus": false}, "flags_revision": 0, "evaluated_at": "2026-08-02T00:00:00Z", "refresh_after": "2026-08-02T00:05:00Z"}
+    },
+    {
+      "name": "free-admin-house",
+      "expected_state": "online-free",
+      "document": {"schema_version": 1, "subject": "usr_conformance", "tier": "free", "entitlement": {"source": "admin", "revision": 2}, "capabilities": {"ad_policy": "house", "podcast_subscriptions": false, "transcript_email": false, "mobile_ad_free": false, "topic_corpus": false}, "flags_revision": 3, "evaluated_at": "2026-08-02T00:00:00Z", "refresh_after": "2026-08-02T00:05:00Z"}
+    },
+    {
+      "name": "premium-purchase-features-disabled",
+      "expected_state": "online-premium",
+      "document": {"schema_version": 1, "subject": "usr_conformance", "tier": "premium", "entitlement": {"source": "test_purchase", "revision": 7}, "capabilities": {"ad_policy": "none", "podcast_subscriptions": false, "transcript_email": false, "mobile_ad_free": false, "topic_corpus": false}, "flags_revision": 8, "evaluated_at": "2026-08-02T00:00:00Z", "refresh_after": "2026-08-02T00:05:00Z"}
+    },
+    {
+      "name": "premium-admin-features-enabled",
+      "expected_state": "online-premium",
+      "document": {"schema_version": 1, "subject": "usr_conformance", "tier": "premium", "entitlement": {"source": "admin", "revision": 9007199254740991}, "capabilities": {"ad_policy": "none", "podcast_subscriptions": true, "transcript_email": true, "mobile_ad_free": true, "topic_corpus": true}, "flags_revision": 9007199254740991, "evaluated_at": "2026-08-02T00:00:00Z", "refresh_after": "2026-08-02T00:05:00Z"}
+    }
+  ],
+  "invalid": [
+    {
+      "name": "boolean-capability-as-integer",
+      "document": {"schema_version": 1, "subject": "usr_conformance", "tier": "free", "entitlement": {"source": "none", "revision": 0}, "capabilities": {"ad_policy": "none", "podcast_subscriptions": false, "transcript_email": false, "mobile_ad_free": false, "topic_corpus": 1}, "flags_revision": 0, "evaluated_at": "2026-08-02T00:00:00Z", "refresh_after": "2026-08-02T00:05:00Z"}
+    },
+    {
+      "name": "schema-version-as-boolean",
+      "document": {"schema_version": true, "subject": "usr_conformance", "tier": "free", "entitlement": {"source": "none", "revision": 0}, "capabilities": {"ad_policy": "none", "podcast_subscriptions": false, "transcript_email": false, "mobile_ad_free": false, "topic_corpus": false}, "flags_revision": 0, "evaluated_at": "2026-08-02T00:00:00Z", "refresh_after": "2026-08-02T00:05:00Z"}
+    },
+    {
+      "name": "subject-as-number",
+      "document": {"schema_version": 1, "subject": 7, "tier": "free", "entitlement": {"source": "none", "revision": 0}, "capabilities": {"ad_policy": "none", "podcast_subscriptions": false, "transcript_email": false, "mobile_ad_free": false, "topic_corpus": false}, "flags_revision": 0, "evaluated_at": "2026-08-02T00:00:00Z", "refresh_after": "2026-08-02T00:05:00Z"}
+    },
+    {
+      "name": "revision-as-string",
+      "document": {"schema_version": 1, "subject": "usr_conformance", "tier": "free", "entitlement": {"source": "none", "revision": "0"}, "capabilities": {"ad_policy": "none", "podcast_subscriptions": false, "transcript_email": false, "mobile_ad_free": false, "topic_corpus": false}, "flags_revision": 0, "evaluated_at": "2026-08-02T00:00:00Z", "refresh_after": "2026-08-02T00:05:00Z"}
+    },
+    {
+      "name": "revision-above-shared-safe-integer",
+      "document": {"schema_version": 1, "subject": "usr_conformance", "tier": "free", "entitlement": {"source": "none", "revision": 9007199254740992}, "capabilities": {"ad_policy": "none", "podcast_subscriptions": false, "transcript_email": false, "mobile_ad_free": false, "topic_corpus": false}, "flags_revision": 0, "evaluated_at": "2026-08-02T00:00:00Z", "refresh_after": "2026-08-02T00:05:00Z"}
+    },
+    {
+      "name": "flags-revision-negative",
+      "document": {"schema_version": 1, "subject": "usr_conformance", "tier": "free", "entitlement": {"source": "none", "revision": 0}, "capabilities": {"ad_policy": "none", "podcast_subscriptions": false, "transcript_email": false, "mobile_ad_free": false, "topic_corpus": false}, "flags_revision": -1, "evaluated_at": "2026-08-02T00:00:00Z", "refresh_after": "2026-08-02T00:05:00Z"}
+    },
+    {
+      "name": "unknown-root-field",
+      "document": {"schema_version": 1, "subject": "usr_conformance", "tier": "free", "entitlement": {"source": "none", "revision": 0}, "capabilities": {"ad_policy": "none", "podcast_subscriptions": false, "transcript_email": false, "mobile_ad_free": false, "topic_corpus": false}, "flags_revision": 0, "evaluated_at": "2026-08-02T00:00:00Z", "refresh_after": "2026-08-02T00:05:00Z", "future": true}
+    },
+    {
+      "name": "unknown-nested-field",
+      "document": {"schema_version": 1, "subject": "usr_conformance", "tier": "free", "entitlement": {"source": "none", "revision": 0, "future": true}, "capabilities": {"ad_policy": "none", "podcast_subscriptions": false, "transcript_email": false, "mobile_ad_free": false, "topic_corpus": false}, "flags_revision": 0, "evaluated_at": "2026-08-02T00:00:00Z", "refresh_after": "2026-08-02T00:05:00Z"}
+    },
+    {
+      "name": "missing-capability",
+      "document": {"schema_version": 1, "subject": "usr_conformance", "tier": "free", "entitlement": {"source": "none", "revision": 0}, "capabilities": {"ad_policy": "none", "podcast_subscriptions": false, "transcript_email": false, "mobile_ad_free": false}, "flags_revision": 0, "evaluated_at": "2026-08-02T00:00:00Z", "refresh_after": "2026-08-02T00:05:00Z"}
+    },
+    {
+      "name": "unknown-tier",
+      "document": {"schema_version": 1, "subject": "usr_conformance", "tier": "enterprise", "entitlement": {"source": "none", "revision": 0}, "capabilities": {"ad_policy": "none", "podcast_subscriptions": false, "transcript_email": false, "mobile_ad_free": false, "topic_corpus": false}, "flags_revision": 0, "evaluated_at": "2026-08-02T00:00:00Z", "refresh_after": "2026-08-02T00:05:00Z"}
+    },
+    {
+      "name": "unknown-source",
+      "document": {"schema_version": 1, "subject": "usr_conformance", "tier": "premium", "entitlement": {"source": "gift", "revision": 1}, "capabilities": {"ad_policy": "none", "podcast_subscriptions": false, "transcript_email": false, "mobile_ad_free": false, "topic_corpus": false}, "flags_revision": 1, "evaluated_at": "2026-08-02T00:00:00Z", "refresh_after": "2026-08-02T00:05:00Z"}
+    },
+    {
+      "name": "unsupported-paid-ad-policy",
+      "document": {"schema_version": 1, "subject": "usr_conformance", "tier": "free", "entitlement": {"source": "none", "revision": 0}, "capabilities": {"ad_policy": "paid", "podcast_subscriptions": false, "transcript_email": false, "mobile_ad_free": false, "topic_corpus": false}, "flags_revision": 0, "evaluated_at": "2026-08-02T00:00:00Z", "refresh_after": "2026-08-02T00:05:00Z"}
+    },
+    {
+      "name": "noncanonical-offset-time",
+      "document": {"schema_version": 1, "subject": "usr_conformance", "tier": "free", "entitlement": {"source": "none", "revision": 0}, "capabilities": {"ad_policy": "none", "podcast_subscriptions": false, "transcript_email": false, "mobile_ad_free": false, "topic_corpus": false}, "flags_revision": 0, "evaluated_at": "2026-08-02T00:00:00+00:00", "refresh_after": "2026-08-02T00:05:00Z"}
+    },
+    {
+      "name": "fractional-second-time",
+      "document": {"schema_version": 1, "subject": "usr_conformance", "tier": "free", "entitlement": {"source": "none", "revision": 0}, "capabilities": {"ad_policy": "none", "podcast_subscriptions": false, "transcript_email": false, "mobile_ad_free": false, "topic_corpus": false}, "flags_revision": 0, "evaluated_at": "2026-08-02T00:00:00.000Z", "refresh_after": "2026-08-02T00:05:00Z"}
+    },
+    {
+      "name": "refresh-not-after-evaluation",
+      "document": {"schema_version": 1, "subject": "usr_conformance", "tier": "free", "entitlement": {"source": "none", "revision": 0}, "capabilities": {"ad_policy": "none", "podcast_subscriptions": false, "transcript_email": false, "mobile_ad_free": false, "topic_corpus": false}, "flags_revision": 0, "evaluated_at": "2026-08-02T00:00:00Z", "refresh_after": "2026-08-02T00:00:00Z"}
+    },
+    {
+      "name": "free-with-premium-capability",
+      "document": {"schema_version": 1, "subject": "usr_conformance", "tier": "free", "entitlement": {"source": "none", "revision": 0}, "capabilities": {"ad_policy": "none", "podcast_subscriptions": true, "transcript_email": false, "mobile_ad_free": false, "topic_corpus": false}, "flags_revision": 1, "evaluated_at": "2026-08-02T00:00:00Z", "refresh_after": "2026-08-02T00:05:00Z"}
+    },
+    {
+      "name": "free-with-purchase-source",
+      "document": {"schema_version": 1, "subject": "usr_conformance", "tier": "free", "entitlement": {"source": "test_purchase", "revision": 1}, "capabilities": {"ad_policy": "none", "podcast_subscriptions": false, "transcript_email": false, "mobile_ad_free": false, "topic_corpus": false}, "flags_revision": 1, "evaluated_at": "2026-08-02T00:00:00Z", "refresh_after": "2026-08-02T00:05:00Z"}
+    },
+    {
+      "name": "premium-with-none-source",
+      "document": {"schema_version": 1, "subject": "usr_conformance", "tier": "premium", "entitlement": {"source": "none", "revision": 1}, "capabilities": {"ad_policy": "none", "podcast_subscriptions": false, "transcript_email": false, "mobile_ad_free": false, "topic_corpus": false}, "flags_revision": 1, "evaluated_at": "2026-08-02T00:00:00Z", "refresh_after": "2026-08-02T00:05:00Z"}
+    },
+    {
+      "name": "premium-with-house-ads",
+      "document": {"schema_version": 1, "subject": "usr_conformance", "tier": "premium", "entitlement": {"source": "test_purchase", "revision": 1}, "capabilities": {"ad_policy": "house", "podcast_subscriptions": false, "transcript_email": false, "mobile_ad_free": false, "topic_corpus": false}, "flags_revision": 1, "evaluated_at": "2026-08-02T00:00:00Z", "refresh_after": "2026-08-02T00:05:00Z"}
+    }
+  ]
+}

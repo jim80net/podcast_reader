@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import hashlib
+import re
 import unicodedata
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Literal, Self
 from urllib.parse import urlsplit
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, field_validator, model_validator
 
+MAX_SAFE_REVISION = 9_007_199_254_740_991
 Revision = Annotated[int, Field(ge=0, le=9_223_372_036_854_775_807)]
+EntitlementRevision = Annotated[int, Field(ge=0, le=MAX_SAFE_REVISION)]
 OpaqueToken = Annotated[str, Field(min_length=20, max_length=256)]
 EMAIL_CONTENT_MAX_BYTES = 512 * 1024
 EMAIL_CONTENT_MAX_LINES = 20_000
@@ -17,6 +20,22 @@ USER_CODE_PATTERN = (
     r"^[23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{4}-"
     r"[23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{4}$"
 )
+CANONICAL_UTC_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+
+
+def _canonical_utc(value: object) -> datetime:
+    if isinstance(value, str):
+        if CANONICAL_UTC_PATTERN.fullmatch(value) is None:
+            raise ValueError("timestamp must be canonical UTC seconds")
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if isinstance(value, datetime):
+        if value.utcoffset() != timedelta(0) or value.microsecond != 0:
+            raise ValueError("timestamp must be canonical UTC seconds")
+        return value.astimezone(UTC)
+    raise ValueError("timestamp must be canonical UTC seconds")
+
+
+CanonicalUtc = Annotated[datetime, BeforeValidator(_canonical_utc)]
 
 
 class DeviceAuthorizationStartV1(BaseModel):
@@ -59,16 +78,16 @@ class NativeAuthErrorV1(BaseModel):
 
 
 class EntitlementSource(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
 
     source: Literal["none", "test_purchase", "admin"]
-    revision: Revision
+    revision: EntitlementRevision
 
 
 class Capabilities(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
 
-    ad_policy: Literal["none", "house", "paid"]
+    ad_policy: Literal["none", "house"]
     podcast_subscriptions: bool
     transcript_email: bool
     mobile_ad_free: bool
@@ -76,21 +95,37 @@ class Capabilities(BaseModel):
 
 
 class EntitlementV1(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
 
-    schema_version: Literal[1] = 1
+    schema_version: Annotated[int, Field(strict=True, ge=1, le=1)] = 1
     subject: str
     tier: Literal["free", "premium"]
     entitlement: EntitlementSource
     capabilities: Capabilities
-    flags_revision: Revision
-    evaluated_at: datetime
-    refresh_after: datetime
+    flags_revision: EntitlementRevision
+    evaluated_at: CanonicalUtc
+    refresh_after: CanonicalUtc
 
     @model_validator(mode="after")
     def validate_refresh_window(self) -> Self:
         if self.refresh_after <= self.evaluated_at:
             raise ValueError("refresh_after must be later than evaluated_at")
+        if self.tier == "free":
+            if self.entitlement.source not in {"none", "admin"}:
+                raise ValueError("free entitlement source is invalid")
+            if self.capabilities.ad_policy not in {"none", "house"} or any(
+                (
+                    self.capabilities.podcast_subscriptions,
+                    self.capabilities.transcript_email,
+                    self.capabilities.mobile_ad_free,
+                    self.capabilities.topic_corpus,
+                )
+            ):
+                raise ValueError("free entitlement capabilities are invalid")
+        elif self.entitlement.source not in {"test_purchase", "admin"}:
+            raise ValueError("premium entitlement source is invalid")
+        elif self.capabilities.ad_policy != "none":
+            raise ValueError("premium ad policy is invalid")
         return self
 
 
