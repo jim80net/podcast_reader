@@ -8,9 +8,15 @@ import okhttp3.CookieJar
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.ResponseBody
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
 
 sealed class PremiumRoute protected constructor(internal val path: String) {
     data object Entitlements : PremiumRoute("/v1/me/entitlements")
+    data object DeviceStart : PremiumRoute("/v1/device-authorizations")
+    data object DeviceToken : PremiumRoute("/v1/device-authorizations/token")
+    data object RefreshToken : PremiumRoute("/v1/tokens/refresh")
+    data object RevokeToken : PremiumRoute("/v1/tokens/revoke")
 }
 
 internal fun securePremiumHttpClient(): OkHttpClient = OkHttpClient.Builder()
@@ -28,6 +34,32 @@ class PremiumRequestFactory(private val origin: PremiumOrigin) {
         .header("Authorization", "Bearer ${token.value}")
         .header("Accept", "application/json")
         .get()
+        .build()
+
+    internal fun deviceStart(): Request = jsonPost(
+        PremiumRoute.DeviceStart,
+        premiumJson.encodeToString(DeviceAuthorizationRequestV1("android")),
+    )
+
+    internal fun devicePoll(deviceCode: DeviceCode): Request = jsonPost(
+        PremiumRoute.DeviceToken,
+        premiumJson.encodeToString(DeviceTokenRequestV1(deviceCode.authorizationValue())),
+    )
+
+    internal fun refresh(refreshToken: PremiumRefreshToken): Request = jsonPost(
+        PremiumRoute.RefreshToken,
+        premiumJson.encodeToString(RefreshTokenRequestV1(refreshToken.value)),
+    )
+
+    internal fun revoke(refreshToken: PremiumRefreshToken): Request = jsonPost(
+        PremiumRoute.RevokeToken,
+        premiumJson.encodeToString(RefreshTokenRequestV1(refreshToken.value)),
+    )
+
+    private fun jsonPost(route: PremiumRoute, json: String): Request = Request.Builder()
+        .url(origin.resolve(route))
+        .header("Accept", "application/json")
+        .post(json.toRequestBody(JSON_MEDIA_TYPE))
         .build()
 }
 
@@ -51,11 +83,15 @@ sealed interface EntitlementFetchResult {
     data class Failure(val failure: PremiumFailure) : EntitlementFetchResult
 }
 
+interface PremiumEntitlementApi {
+    fun fetch(token: PremiumAccessToken, requestId: String): EntitlementFetchResult
+}
+
 class PremiumEntitlementTransport(
     private val requestFactory: PremiumRequestFactory,
     private val client: OkHttpClient = securePremiumHttpClient(),
-) {
-    fun fetch(token: PremiumAccessToken, requestId: String): EntitlementFetchResult = try {
+) : PremiumEntitlementApi {
+    override fun fetch(token: PremiumAccessToken, requestId: String): EntitlementFetchResult = try {
         client.newCall(requestFactory.authenticatedGet(PremiumRoute.Entitlements, token)).execute().use { response ->
             if (response.code != 200) {
                 EntitlementFetchResult.Failure(PremiumFailureMapper.fromHttp(response.code, requestId))
@@ -89,7 +125,7 @@ object PremiumFailureMapper {
     )
 }
 
-private fun ResponseBody.readBounded(): String {
+internal fun ResponseBody.readBounded(): String {
     val declaredLength = contentLength()
     require(declaredLength == -1L || declaredLength <= MAX_RESPONSE_BYTES) { "response is too large" }
     return charStream().use { reader -> reader.readAtMost(MAX_RESPONSE_CHARS) }
@@ -108,3 +144,4 @@ private fun Reader.readAtMost(limit: Int): String {
 
 private const val MAX_RESPONSE_BYTES = 64L * 1024L
 private const val MAX_RESPONSE_CHARS = 64 * 1024
+private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
