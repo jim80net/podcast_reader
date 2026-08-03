@@ -28,7 +28,7 @@ describe('EngineClient frozen email routes', () => {
     const calls: Array<{ url: string; init?: RequestInit }> = []
     const fetchFn = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input)
-      calls.push({ url, init })
+      calls.push(init === undefined ? { url } : { url, init })
       if (url.endsWith('/v1/email/online-capability')) return new Response(null, { status: 204 })
       if (url.endsWith('/v1/email-outbox/claim')) {
         return new Response(JSON.stringify(fixture('claim.json')), { status: 200 })

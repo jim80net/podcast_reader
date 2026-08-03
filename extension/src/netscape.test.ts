@@ -38,9 +38,9 @@ describe('serializeNetscape', () => {
 
   it('writes 0 expiry for session cookies and missing expirations', () => {
     expect(serializeNetscape([cookie({ session: true })])).toContain('\t0\tsid\t')
-    expect(
-      serializeNetscape([cookie({ session: false, expirationDate: undefined })])
-    ).toContain('\t0\tsid\t')
+    const missingExpiration = cookie({ session: false })
+    delete missingExpiration.expirationDate
+    expect(serializeNetscape([missingExpiration])).toContain('\t0\tsid\t')
   })
 
   it('marks insecure cookies FALSE in the secure field', () => {

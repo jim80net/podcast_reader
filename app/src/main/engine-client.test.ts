@@ -223,9 +223,9 @@ function sseResponse(chunks: string[]): Response {
 
 const event = (message: string): PipelineEvent => ({
   kind: 'warning',
-  step: null,
+  step: 'resolve',
   message,
-  data: {}
+  data: { job_id: 'j1', code: 'fixture' }
 })
 
 describe('EventStream', () => {
@@ -237,7 +237,10 @@ describe('EventStream', () => {
       if (req.url.includes('/v1/events')) {
         connections += 1
         if (connections > 1) return new Response(null, { status: 401 }) // stop after one pass
-        return sseResponse([`data: ${JSON.stringify(event('e1'))}\n\n`])
+        return sseResponse([
+          `data: ${JSON.stringify(event('e1'))}\n\n`,
+          'data: {"kind":"pack_state","step":null,"message":"bad","data":{"pack_id":"p","job_id":"j1","state":"installed"}}\n\n'
+        ])
       }
       return json(jobs)
     })

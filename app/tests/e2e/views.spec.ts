@@ -1,4 +1,5 @@
 import { expect, expectEngineState, test } from './fixtures'
+import type { PipelineEvent } from '../../src/shared/types'
 import type { Harness } from './fixtures'
 
 /**
@@ -41,7 +42,7 @@ test('Library lists entries as cards and opens the Reader', async ({ harness }) 
     job: { id: 'done-job', source: 'https://example.com/episodes/2', state: 'done' },
     events: [
       { kind: 'job_done', step: null, message: 'done', data: { job_id: 'done-job' } }
-    ]
+    ] satisfies PipelineEvent[]
   })
   const cards = harness.window.locator('.cards .card')
   await expect(cards).toHaveCount(2)
@@ -281,7 +282,7 @@ test('New: pasted URL submits and shows live step progress, failure shows the hi
         message: 'transcribing audio',
         data: { job_id: jobId }
       }
-    ]
+    ] satisfies PipelineEvent[]
   })
   await expect(card.locator('.job-state')).toHaveText('running')
   await expect(card.locator('.job-row-key', { hasText: 'transcribe' })).toBeVisible()
@@ -292,11 +293,16 @@ test('New: pasted URL submits and shows live step progress, failure shows the hi
     events: [
       {
         kind: 'job_failed',
-        step: 'transcribe',
+        step: null,
         message: 'Audio download failed',
-        data: { job_id: jobId, code: 'download_failed', hint: 'Check the URL and try again.' }
+        data: {
+          job_id: jobId,
+          code: 'download_failed',
+          hint: 'Check the URL and try again.',
+          detail: ''
+        }
       }
-    ]
+    ] satisfies PipelineEvent[]
   })
   await expect(card.locator('.job-state')).toHaveText('failed')
   await expect(card.locator('.job-error-message')).toContainText(
@@ -337,10 +343,10 @@ test('New: a finished job links to its transcript', async ({ harness }) => {
         kind: 'warning',
         step: 'chapters',
         message: 'ANTHROPIC_API_KEY is not set; chapters skipped',
-        data: { job_id: jobId }
+        data: { job_id: jobId, code: 'chapters_skipped' }
       },
       { kind: 'job_done', step: null, message: 'done', data: { job_id: jobId } }
-    ]
+    ] satisfies PipelineEvent[]
   })
   await expect(card.locator('.job-state')).toHaveText('done')
   const chapterWarning = card.locator('.warning-detail')
@@ -376,11 +382,11 @@ test('New: a job can be rerun with a different chapter model', async ({ harness 
     events: [
       {
         kind: 'job_failed',
-        step: 'transcribe',
+        step: null,
         message: 'boom',
-        data: { job_id: jobId, code: 'internal', hint: '' }
+        data: { job_id: jobId, code: 'internal', hint: '', detail: '' }
       }
-    ]
+    ] satisfies PipelineEvent[]
   })
   const card = harness.window.locator('.job-card')
   await expect(card.locator('.job-state')).toHaveText('failed')

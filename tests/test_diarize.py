@@ -20,7 +20,9 @@ from podcast_reader import diarize
 from podcast_reader.engine import packs
 
 if TYPE_CHECKING:
-    from podcast_reader.types import PipelineEvent
+    from collections.abc import Callable
+
+    from podcast_reader.types import PipelineRunEvent
 
 
 class TestAssignSpeakers:
@@ -126,7 +128,9 @@ def _install_pack(base: Path) -> Path:
     return pack_dir
 
 
-def _fake_run_child(turns: list[dict[str, Any]], *, worker_returncode: int = 0) -> Any:
+def _fake_run_child(
+    turns: list[dict[str, Any]], *, worker_returncode: int = 0
+) -> Callable[[list[str]], subprocess.CompletedProcess[str]]:
     """A run_child stand-in dispatching on the spawned executable.
 
     ffmpeg: creates the staged WAV it was asked to produce. Worker: writes
@@ -163,12 +167,12 @@ class TestDiarizeStep:
 
     def _run(
         self, tmp_path: Path, *, with_speakers: bool = False, run_child: Any = None
-    ) -> tuple[Path, list[PipelineEvent]]:
+    ) -> tuple[Path, list[PipelineRunEvent]]:
         audio = tmp_path / "episode.mp3"
         audio.write_bytes(b"ID3")
         json_path = tmp_path / "episode.json"
         _write_transcript(json_path, with_speakers=with_speakers)
-        events: list[PipelineEvent] = []
+        events: list[PipelineRunEvent] = []
         fake = run_child if run_child is not None else _fake_run_child(list(_TURNS))
         with patch("podcast_reader.diarize.run_child", side_effect=fake):
             diarize.diarize_step(audio_path=audio, json_path=json_path, on_event=events.append)
@@ -198,6 +202,7 @@ class TestDiarizeStep:
 
         assert spawns == []
         assert [e["kind"] for e in events] == ["step_started", "step_finished"]
+        assert events[0]["kind"] == "step_started"
         assert events[0]["data"] == {"cached": True}
 
     def test_missing_pack_warns_and_skips(self, tmp_path: Path) -> None:
@@ -234,6 +239,7 @@ class TestDiarizeStep:
         data = json.loads(json_path.read_text())
         assert all("speaker" not in s for s in data["segments"])
         assert [e["kind"] for e in events] == ["step_started", "warning"]
+        assert events[1]["kind"] == "warning"
         assert events[1]["data"]["code"] == "diarization_failed"
         assert "boom" in events[1]["message"]
 
@@ -260,6 +266,7 @@ class TestDiarizeStep:
         data = json.loads(json_path.read_text())
         assert all("speaker" not in s for s in data["segments"])
         assert [e["kind"] for e in events] == ["step_started", "warning"]
+        assert events[1]["kind"] == "warning"
         assert events[1]["data"]["code"] == "diarization_failed"
         assert "unreadable output" in events[1]["message"]
 
@@ -272,6 +279,7 @@ class TestDiarizeStep:
         _json_path, events = self._run(tmp_path, run_child=failing_ffmpeg)
 
         assert [e["kind"] for e in events] == ["step_started", "warning"]
+        assert events[1]["kind"] == "warning"
         assert events[1]["data"]["code"] == "diarization_failed"
 
     def test_preconvert_targets_16khz_mono_wav(self, tmp_path: Path, _data_dir: Path) -> None:

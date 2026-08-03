@@ -14,7 +14,7 @@ import pytest
 
 from podcast_reader.cli import main_with_args
 from podcast_reader.pipeline import InputType, PipelineError, classify_input
-from podcast_reader.types import PipelineEvent, PipelineResult
+from podcast_reader.types import PipelineResult, PipelineRunEvent, StepStartedEvent
 
 if TYPE_CHECKING:
     from podcast_reader.types import PipelineRequest
@@ -25,9 +25,13 @@ class TestCliAdapter:
     def test_one_shot_invokes_pipeline_and_prints(
         self, mock_run: MagicMock, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        def fake(req: PipelineRequest, on_event: Callable[[PipelineEvent], None]) -> PipelineResult:
+        def fake(
+            req: PipelineRequest, on_event: Callable[[PipelineRunEvent], None]
+        ) -> PipelineResult:
             on_event(
-                PipelineEvent(kind="step_started", step="resolve", message="Resolving...", data={})
+                StepStartedEvent(
+                    kind="step_started", step="resolve", message="Resolving...", data={}
+                )
             )
             return PipelineResult(
                 json_path="a.json", chapters_path=None, html_path="a.html", title="T"

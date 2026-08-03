@@ -20,7 +20,7 @@ from podcast_reader.types import PipelineError
 from podcast_reader.ytdlp import build_video_args, download_video
 
 if TYPE_CHECKING:
-    from podcast_reader.types import PipelineEvent
+    from podcast_reader.types import PipelineRunEvent
 
 
 @patch("podcast_reader.ytdlp.resolve_tool", return_value="yt-dlp")
@@ -173,7 +173,7 @@ class TestDownloadVideoSelfHeal:
                 return self._completed(args, stdout="Updated\n")
             return self._completed(args, stdout="2026.06.06\n")
 
-        events: list[PipelineEvent] = []
+        events: list[PipelineRunEvent] = []
         with (
             patch("podcast_reader.ytdlp.resolve_tool", return_value=str(binary)),
             patch("podcast_reader.ytdlp.run_child", side_effect=fake_download_run),
@@ -184,6 +184,7 @@ class TestDownloadVideoSelfHeal:
         assert result == out_dir / "123.mp4"
         assert len(downloads) == 2
         (warning,) = events
+        assert warning["kind"] == "warning"
         assert warning["data"]["code"] == "ytdlp_self_update"
         assert load_user_manifest(tmp_path / "data")["versions"]["yt-dlp"] == "2026.06.06"
 

@@ -9,7 +9,7 @@ delegating surface in test_jobs.py; here: the seam contract.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from podcast_reader.engine.events import (
     SUBSCRIBER_FULL_STREAK_LIMIT,
@@ -17,7 +17,17 @@ from podcast_reader.engine.events import (
     EventBus,
 )
 from podcast_reader.engine.jobs import JobStore
-from podcast_reader.types import PipelineEvent, PipelineResult
+from podcast_reader.types import (
+    JobDoneEvent,
+    JobStepProgressEvent,
+    JobWarningEvent,
+    PackProgressEvent,
+    PackStateEvent,
+    PipelineEvent,
+    PipelineResult,
+    PipelineRunEvent,
+    StepStartedEvent,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -26,8 +36,22 @@ if TYPE_CHECKING:
     from podcast_reader.types import EventKind, JobRecord
 
 
-def _event(kind: EventKind = "warning", message: str = "m") -> PipelineEvent:
-    return PipelineEvent(kind=kind, step=None, message=message, data={})
+def _event(
+    kind: Literal["warning", "pack_progress"] = "warning", message: str = "m"
+) -> PipelineEvent:
+    if kind == "pack_progress":
+        return PackProgressEvent(
+            kind="pack_progress",
+            step=None,
+            message=message,
+            data={"pack_id": "fixture", "bytes": 1, "total": 2},
+        )
+    return JobWarningEvent(
+        kind="warning",
+        step="resolve",
+        message=message,
+        data={"job_id": "j1", "code": "fixture"},
+    )
 
 
 class TestEventBus:
@@ -66,8 +90,10 @@ class TestSharedBus:
         """The seam: a bus constructed outside the store carries job events,
         so a second producer (the pack manager) shares the same fan-out."""
 
-        def runner(record: JobRecord, on_event: Callable[[PipelineEvent], None]) -> PipelineResult:
-            on_event(_event(kind="job_done", message="done"))
+        def runner(
+            record: JobRecord, on_event: Callable[[PipelineRunEvent], None]
+        ) -> PipelineResult:
+            on_event(JobDoneEvent(kind="job_done", step=None, message="done", data={}))
             return PipelineResult(json_path="j", chapters_path=None, html_path="h", title="t")
 
         bus = EventBus()
@@ -98,9 +124,27 @@ class TestEventKindWidening:
     def test_pack_and_progress_kinds_are_valid_pipeline_events(self) -> None:
         """Task 2.3: EventKind widens to the pack kinds plus step_progress;
         StepName gains diarize (for groups 3/5)."""
+        events: tuple[PipelineEvent, ...] = (
+            PackStateEvent(
+                kind="pack_state",
+                step=None,
+                message="",
+                data={"pack_id": "pack-1", "state": "installed"},
+            ),
+            PackProgressEvent(
+                kind="pack_progress",
+                step=None,
+                message="",
+                data={"pack_id": "pack-1", "bytes": 1, "total": 2},
+            ),
+            JobStepProgressEvent(
+                kind="step_progress",
+                step="transcribe",
+                message="",
+                data={"job_id": "job-1", "seconds": 1.0, "duration": 2.0},
+            ),
+        )
         kinds: tuple[EventKind, ...] = ("pack_state", "pack_progress", "step_progress")
-        for kind in kinds:
-            event = PipelineEvent(kind=kind, step=None, message="", data={})
-            assert event["kind"] == kind
-        diarize = PipelineEvent(kind="step_started", step="diarize", message="", data={})
+        assert tuple(event["kind"] for event in events) == kinds
+        diarize = StepStartedEvent(kind="step_started", step="diarize", message="", data={})
         assert diarize["step"] == "diarize"

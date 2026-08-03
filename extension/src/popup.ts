@@ -6,13 +6,14 @@ import { applyEvent, isTerminal, viewFromRecord } from './jobs-view'
 import { serializeNetscape, uniqueCookies } from './netscape'
 import { performPairing, resolvePairingInput } from './pairing'
 import { SseParser } from './sse'
+import { parsePipelineEvent } from '../../app/src/shared/pipeline-event'
 import { localStore } from './storage'
 import { trackSubmission } from './tracking'
 import type { JobView } from './jobs-view'
 import type { Pairing } from './storage'
 import type { SourceKind } from './url-detect'
 import { classifySource, sourceLabel } from './url-detect'
-import type { JobRecord, PipelineEvent } from '../../app/src/shared/types'
+import type { JobRecord } from '../../app/src/shared/types'
 
 /**
  * The popup: submission surface (per U1 — with `default_popup` set,
@@ -245,12 +246,14 @@ function attachStream(client: EngineClient, jobList: HTMLElement): void {
         const { done, value } = await reader.read()
         if (done) return
         for (const payload of parser.push(decoder.decode(value, { stream: true }))) {
-          let event: PipelineEvent
+          let parsed: unknown
           try {
-            event = JSON.parse(payload) as PipelineEvent
+            parsed = JSON.parse(payload) as unknown
           } catch {
             continue
           }
+          const event = parsePipelineEvent(parsed)
+          if (event === null) continue
           const result = applyEvent(views, event)
           views = result.views
           if (result.refreshJobId !== null) {

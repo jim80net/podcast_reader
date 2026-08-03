@@ -36,9 +36,10 @@ from podcast_reader.engine.subscriptions import (  # type: ignore[import-untyped
     SubscriptionManager,
 )
 from podcast_reader.types import (  # type: ignore[import-untyped]  # noqa: E402
+    JobDoneEvent,
     LibraryEntry,
-    PipelineEvent,
     PipelineResult,
+    PipelineRunEvent,
 )
 
 from podcast_reader_premium.entitlements import apply_entitlement_event  # noqa: E402
@@ -157,8 +158,8 @@ def _capabilities(clock: Clock) -> tuple[OnlineCapabilitySnapshot, EmailCapabili
 
 def _runner(
     library_dir: Path,
-) -> Callable[[JobRecord, Callable[[PipelineEvent], None]], PipelineResult]:
-    def run(record: JobRecord, on_event: Callable[[PipelineEvent], None]) -> PipelineResult:
+) -> Callable[[JobRecord, Callable[[PipelineRunEvent], None]], PipelineResult]:
+    def run(record: JobRecord, on_event: Callable[[PipelineRunEvent], None]) -> PipelineResult:
         source_id = library.source_identity(record["source"])
         directory = library.entry_dir(library_dir, source_id)
         directory.mkdir(parents=True, exist_ok=True)
@@ -178,7 +179,7 @@ def _runner(
                 created_at=time.time(),
             ),
         )
-        on_event(PipelineEvent(kind="job_done", step=None, message="Done", data={}))
+        on_event(JobDoneEvent(kind="job_done", step=None, message="Done", data={}))
         return PipelineResult(
             json_path=str(transcript_path),
             chapters_path=None,

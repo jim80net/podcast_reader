@@ -42,12 +42,19 @@ import shutil
 import threading
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from podcast_reader import youtube
 from podcast_reader.engine.settings import atomic_write_json
 from podcast_reader.tools import resolve_tool, run_child
-from podcast_reader.types import MediaInfo, MediaKind, MediaStatus, PipelineEvent
+from podcast_reader.types import (
+    MediaInfo,
+    MediaKind,
+    MediaProgressEvent,
+    MediaStateEvent,
+    MediaStatus,
+    PipelineRunEvent,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -414,12 +421,12 @@ class MediaManager:
 
     # -- events ----------------------------------------------------------
 
-    def _forward_event(self, source_id: str) -> Callable[[PipelineEvent], None]:
+    def _forward_event(self, source_id: str) -> Callable[[PipelineRunEvent], None]:
         """Re-publish a download's warning/progress events as media-prep events."""
 
-        def forward(event: PipelineEvent) -> None:
+        def forward(event: PipelineRunEvent) -> None:
             self._bus.publish(
-                PipelineEvent(
+                MediaProgressEvent(
                     kind="media_progress",
                     step=None,
                     message=event["message"],
@@ -432,8 +439,14 @@ class MediaManager:
     def _publish_state(self, source_id: str, state: MediaStatus, *, message: str) -> None:
         # Media events carry source_id and MUST NOT carry job_id, mirroring the
         # pack-event split (job_id presence is the renderer's discriminator).
-        data: dict[str, Any] = {"source_id": source_id, "state": state}
-        self._bus.publish(PipelineEvent(kind="media_state", step=None, message=message, data=data))
+        self._bus.publish(
+            MediaStateEvent(
+                kind="media_state",
+                step=None,
+                message=message,
+                data={"source_id": source_id, "state": state},
+            )
+        )
 
 
 def _unavailable() -> MediaInfo:
@@ -446,7 +459,7 @@ def download_video(
     url: str,
     output_dir: Path,
     cookies: Path | None = None,
-    on_event: Callable[[PipelineEvent], None] | None = None,
+    on_event: Callable[[PipelineRunEvent], None] | None = None,
 ) -> Path:
     """Indirection over :func:`ytdlp.download_video` (patchable seam).
 

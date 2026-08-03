@@ -6,7 +6,8 @@ describe('EngineClient subscription routes', () => {
   it('keeps capability and feed traffic on bearer-authenticated loopback routes', async () => {
     const calls: Array<{ url: string; init?: RequestInit }> = []
     const fetchFn = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
-      calls.push({ url: String(input), init })
+      const url = String(input)
+      calls.push(init === undefined ? { url } : { url, init })
       if (init?.method === 'DELETE' || String(input).endsWith('/online-capabilities')) return new Response(null, { status: 204 })
       if (String(input).endsWith('/poll')) return new Response(JSON.stringify({ subscription: {}, discovered_count: 0, not_modified: true }), { status: 200 })
       return new Response(JSON.stringify([]), { status: 200 })

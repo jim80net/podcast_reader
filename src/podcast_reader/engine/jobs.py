@@ -30,16 +30,28 @@ from typing import TYPE_CHECKING, cast
 from podcast_reader.engine.events import EventBus
 from podcast_reader.engine.settings import atomic_write_json
 from podcast_reader.pipeline import PipelineError
-from podcast_reader.types import JobError, PipelineEvent, new_job_record
+from podcast_reader.types import (
+    JobError,
+    JobFailedEvent,
+    JobPipelineEvent,
+    PipelineEvent,
+    new_job_record,
+)
 
 if TYPE_CHECKING:
     import queue
     from collections.abc import Callable
     from pathlib import Path
 
-    from podcast_reader.types import JobOverrides, JobRecord, JobState, PipelineResult
+    from podcast_reader.types import (
+        JobOverrides,
+        JobRecord,
+        JobState,
+        PipelineResult,
+        PipelineRunEvent,
+    )
 
-    JobRunner = Callable[[JobRecord, Callable[[PipelineEvent], None]], PipelineResult]
+    JobRunner = Callable[[JobRecord, Callable[[PipelineRunEvent], None]], PipelineResult]
 
     class StoredJobRecord(JobRecord, total=False):
         """Journal-only fields that must never cross the public job boundary."""
@@ -387,12 +399,12 @@ class JobStore:
         with self._lock:
             record = _public_record(self._jobs[job_id])
 
-        def on_event(event: PipelineEvent) -> None:
-            tagged = PipelineEvent(
-                kind=event["kind"],
-                step=event["step"],
-                message=event["message"],
-                data={**event["data"], "job_id": job_id},
+        def on_event(event: PipelineRunEvent) -> None:
+            # TypedDict spread cannot express that adding job_id maps every
+            # run-event member to its routed twin; producers are already exact.
+            tagged = cast(
+                "JobPipelineEvent",
+                {**event, "data": {**event["data"], "job_id": job_id}},
             )
             with self._lock:
                 live = self._jobs[job_id]
@@ -429,7 +441,7 @@ class JobStore:
         self,
         job_id: str,
         error: JobError,
-        on_event: Callable[[PipelineEvent], None],
+        on_event: Callable[[PipelineRunEvent], None],
     ) -> None:
         state = self._failure_state()
         self._transition(job_id, state, error=error)
@@ -438,7 +450,7 @@ class JobStore:
             # job is recoverable (retry affordance), so no job_failed event.
             return
         on_event(
-            PipelineEvent(
+            JobFailedEvent(
                 kind="job_failed",
                 step=None,
                 message=error["message"],

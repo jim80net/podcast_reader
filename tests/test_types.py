@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from podcast_reader.types import JOB_STATES, PipelineEvent, new_job_record
+from podcast_reader.types import JOB_STATES, StepStartedEvent, new_job_record
 
 
 def test_pipeline_event_shape() -> None:
-    e = PipelineEvent(kind="step_started", step="transcribe", message="", data={})
+    e = StepStartedEvent(kind="step_started", step="transcribe", message="", data={})
     assert e["kind"] == "step_started"
 
 

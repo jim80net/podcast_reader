@@ -315,7 +315,12 @@ describe('EngineManager.start', () => {
   it('forwards stream events and hydrations to the renderer', async () => {
     const world = makeWorld()
     await world.manager.start()
-    world.handlers?.onEvent({ kind: 'warning', step: null, message: 'm', data: {} })
+      world.handlers?.onEvent({
+        kind: 'warning',
+        step: 'resolve',
+        message: 'm',
+        data: { job_id: 'j1', code: 'fixture' }
+      })
     world.handlers?.onHydrate([])
     expect(world.sends.map((s) => s.channel)).toContain('engine:event')
     expect(world.sends.map((s) => s.channel)).toContain('jobs:hydrated')
@@ -385,7 +390,6 @@ describe('EngineManager — unexpected engine exit (respawn supervision)', () =>
         spawnedWorldHandle(childExited),
         new Promise<Partial<EngineHandle>>(() => {}) as never
       ],
-      ensureFailsOnCall: undefined,
       deferSleep: true
     })
     await world.manager.start()
@@ -429,8 +433,7 @@ describe('EngineManager — respawn give-up', () => {
     })
     // First start succeeds with a spawned handle; every respawn ensure() fails.
     const world = makeWorld({
-      handle: spawnedWorldHandle(firstExit),
-      ensureFailsOnCall: undefined
+      handle: spawnedWorldHandle(firstExit)
     })
     // Override: only the initial ensure() (call 0) succeeds; respawns reject.
     const deps = (world.manager as unknown as { deps: ManagerDeps }).deps

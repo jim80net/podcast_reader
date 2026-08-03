@@ -21,7 +21,15 @@ from podcast_reader.engine.jobs import (
     JobStore,
 )
 from podcast_reader.pipeline import PipelineError
-from podcast_reader.types import JOB_STATES, PipelineEvent, PipelineResult
+from podcast_reader.types import (
+    JOB_STATES,
+    JobDoneEvent,
+    JobWarningEvent,
+    PipelineResult,
+    PipelineRunEvent,
+    StepStartedEvent,
+    WarningEvent,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -37,9 +45,9 @@ _RESULT = PipelineResult(
 )
 
 
-def _ok_runner(record: JobRecord, on_event: Callable[[PipelineEvent], None]) -> PipelineResult:
-    on_event(PipelineEvent(kind="step_started", step="resolve", message="Resolving...", data={}))
-    on_event(PipelineEvent(kind="job_done", step=None, message="Done", data={}))
+def _ok_runner(record: JobRecord, on_event: Callable[[PipelineRunEvent], None]) -> PipelineResult:
+    on_event(StepStartedEvent(kind="step_started", step="resolve", message="Resolving...", data={}))
+    on_event(JobDoneEvent(kind="job_done", step=None, message="Done", data={}))
     return _RESULT
 
 
@@ -186,7 +194,9 @@ class TestExecution:
     def test_models_recorded_by_runner_are_persisted(self, tmp_path: Path) -> None:
         # The runner records the resolved models on its working record; the
         # store must persist them so the UI shows what the job ran with.
-        def runner(record: JobRecord, on_event: Callable[[PipelineEvent], None]) -> PipelineResult:
+        def runner(
+            record: JobRecord, on_event: Callable[[PipelineRunEvent], None]
+        ) -> PipelineResult:
             record["models"] = {
                 "whisper_model": "large-v3",
                 "chapter_provider": "xai",
@@ -206,7 +216,9 @@ class TestExecution:
         store.shutdown()
 
     def test_failed_carries_structured_error(self, tmp_path: Path) -> None:
-        def failing(record: JobRecord, on_event: Callable[[PipelineEvent], None]) -> PipelineResult:
+        def failing(
+            record: JobRecord, on_event: Callable[[PipelineRunEvent], None]
+        ) -> PipelineResult:
             raise PipelineError("not_found", "File not found: /nope", "Check the path.")
 
         store = JobStore(tmp_path, failing)
@@ -232,7 +244,7 @@ class TestExecution:
         recommended (per N2)."""
 
         def auth_failing(
-            record: JobRecord, on_event: Callable[[PipelineEvent], None]
+            record: JobRecord, on_event: Callable[[PipelineRunEvent], None]
         ) -> PipelineResult:
             raise PipelineError("download_auth_required", "yt-dlp failed: login required", "")
 
@@ -248,14 +260,18 @@ class TestExecution:
         assert "--cookies-from-browser" not in error["hint"]
         assert error["detail"] == ""
         # the job_failed event carries the same authored hint
-        assert store.get(record["id"])["events"][-1]["data"]["hint"] == error["hint"]
+        failed_event = store.get(record["id"])["events"][-1]
+        assert failed_event["kind"] == "job_failed"
+        assert failed_event["data"]["hint"] == error["hint"]
         store.shutdown()
 
     def test_pipeline_authored_hints_pass_through_unchanged(self, tmp_path: Path) -> None:
         """The engine-face mapping fills only the neutral auth hint; any
         hint authored at the raise site passes through verbatim."""
 
-        def failing(record: JobRecord, on_event: Callable[[PipelineEvent], None]) -> PipelineResult:
+        def failing(
+            record: JobRecord, on_event: Callable[[PipelineRunEvent], None]
+        ) -> PipelineResult:
             raise PipelineError("download_failed", "yt-dlp failed: broken", "Try again later.")
 
         store = JobStore(tmp_path, failing)
@@ -270,7 +286,7 @@ class TestExecution:
 
     def test_unexpected_exception_maps_to_internal_error(self, tmp_path: Path) -> None:
         def exploding(
-            record: JobRecord, on_event: Callable[[PipelineEvent], None]
+            record: JobRecord, on_event: Callable[[PipelineRunEvent], None]
         ) -> PipelineResult:
             raise RuntimeError("boom")
 
@@ -321,7 +337,7 @@ class TestExecution:
         run_order: list[str] = []
 
         def blocking(
-            record: JobRecord, on_event: Callable[[PipelineEvent], None]
+            record: JobRecord, on_event: Callable[[PipelineRunEvent], None]
         ) -> PipelineResult:
             run_order.append(record["source"])
             first_started.set()
@@ -355,7 +371,7 @@ class TestShutdown:
         run_order: list[str] = []
 
         def blocking(
-            record: JobRecord, on_event: Callable[[PipelineEvent], None]
+            record: JobRecord, on_event: Callable[[PipelineRunEvent], None]
         ) -> PipelineResult:
             run_order.append(record["source"])
             first_started.set()
@@ -400,7 +416,7 @@ class TestAwaitingConfirmation:
         ran: list[str] = []
 
         def recording(
-            record: JobRecord, on_event: Callable[[PipelineEvent], None]
+            record: JobRecord, on_event: Callable[[PipelineRunEvent], None]
         ) -> PipelineResult:
             ran.append(record["id"])
             return _RESULT
@@ -447,7 +463,7 @@ class TestAwaitingConfirmation:
         started = threading.Event()
 
         def blocking(
-            record: JobRecord, on_event: Callable[[PipelineEvent], None]
+            record: JobRecord, on_event: Callable[[PipelineRunEvent], None]
         ) -> PipelineResult:
             started.set()
             assert release.wait(timeout=10)
@@ -495,7 +511,7 @@ class TestAwaitingConfirmation:
         ran: list[str] = []
 
         def recording(
-            record: JobRecord, on_event: Callable[[PipelineEvent], None]
+            record: JobRecord, on_event: Callable[[PipelineRunEvent], None]
         ) -> PipelineResult:
             ran.append(record["id"])
             return _RESULT
@@ -523,7 +539,9 @@ class TestStoppingFlag:
     def _blocked_failing_store(
         self, tmp_path: Path, release: threading.Event, started: threading.Event
     ) -> JobStore:
-        def runner(record: JobRecord, on_event: Callable[[PipelineEvent], None]) -> PipelineResult:
+        def runner(
+            record: JobRecord, on_event: Callable[[PipelineRunEvent], None]
+        ) -> PipelineResult:
             started.set()
             assert release.wait(timeout=10)
             raise RuntimeError("child terminated")
@@ -571,7 +589,9 @@ class TestStoppingFlag:
     def test_failure_after_worker_restart_is_failed_again(self, tmp_path: Path) -> None:
         """A restarted worker clears the stopping flag: failures are real again."""
 
-        def failing(record: JobRecord, on_event: Callable[[PipelineEvent], None]) -> PipelineResult:
+        def failing(
+            record: JobRecord, on_event: Callable[[PipelineRunEvent], None]
+        ) -> PipelineResult:
             raise RuntimeError("boom")
 
         store = JobStore(tmp_path, failing)
@@ -691,7 +711,7 @@ class TestPersistence:
         run_order: list[str] = []
 
         def ordered_runner(
-            record: JobRecord, on_event: Callable[[PipelineEvent], None]
+            record: JobRecord, on_event: Callable[[PipelineRunEvent], None]
         ) -> PipelineResult:
             run_order.append(record["id"])
             return _RESULT
@@ -736,15 +756,25 @@ class TestSubscriptions:
         record = store.submit("https://example.com/a", None)
         store.start_worker()
         event = q.get(timeout=10)
+        assert event["kind"] == "step_started"
         assert event["data"]["job_id"] == record["id"]
         store.unsubscribe(q)
         assert store.subscriber_count == 0
         store.shutdown()
 
     def test_full_subscriber_queue_drops_oldest(self, tmp_path: Path) -> None:
-        def chatty(record: JobRecord, on_event: Callable[[PipelineEvent], None]) -> PipelineResult:
+        def chatty(
+            record: JobRecord, on_event: Callable[[PipelineRunEvent], None]
+        ) -> PipelineResult:
             for i in range(300):
-                on_event(PipelineEvent(kind="warning", step=None, message=str(i), data={}))
+                on_event(
+                    WarningEvent(
+                        kind="warning",
+                        step="resolve",
+                        message=str(i),
+                        data={"code": "fixture"},
+                    )
+                )
             return _RESULT
 
         store = JobStore(tmp_path, chatty)
@@ -763,7 +793,12 @@ class TestSubscriptions:
         publishes is treated as abandoned and dropped (no GC-dependent cleanup)."""
         store = JobStore(tmp_path, _ok_runner)
         store.subscribe()  # never drained
-        event = PipelineEvent(kind="warning", step=None, message="m", data={})
+        event = JobWarningEvent(
+            kind="warning",
+            step="resolve",
+            message="m",
+            data={"job_id": "j1", "code": "fixture"},
+        )
         for _ in range(SUBSCRIBER_QUEUE_SIZE):  # fill without ever hitting Full
             store.bus.publish(event)
         assert store.subscriber_count == 1
@@ -776,7 +811,12 @@ class TestSubscriptions:
     def test_full_streak_resets_when_consumer_drains(self, tmp_path: Path) -> None:
         store = JobStore(tmp_path, _ok_runner)
         q = store.subscribe()
-        event = PipelineEvent(kind="warning", step=None, message="m", data={})
+        event = JobWarningEvent(
+            kind="warning",
+            step="resolve",
+            message="m",
+            data={"job_id": "j1", "code": "fixture"},
+        )
         for _ in range(SUBSCRIBER_QUEUE_SIZE + SUBSCRIBER_FULL_STREAK_LIMIT - 1):
             store.bus.publish(event)
         q.get_nowait()  # a live consumer drains → the next publish is not full

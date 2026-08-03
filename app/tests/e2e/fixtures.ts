@@ -59,11 +59,12 @@ export class MockEngine {
    * With a body (even `{}`) it POSTs; without one it GETs.
    */
   async control(path: string, body?: unknown): Promise<Response> {
-    const res = await fetch(`${this.baseUrl}/__mock${path}`, {
+    const init: RequestInit = {
       method: body === undefined ? 'GET' : 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: body === undefined ? undefined : JSON.stringify(body)
-    })
+      headers: { 'content-type': 'application/json' }
+    }
+    if (body !== undefined) init.body = JSON.stringify(body)
+    const res = await fetch(`${this.baseUrl}/__mock${path}`, init)
     if (!res.ok) throw new Error(`mock control ${path} failed: ${res.status}`)
     return res
   }

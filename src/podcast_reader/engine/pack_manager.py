@@ -21,7 +21,7 @@ import shutil
 import sys
 import threading
 import zipfile
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import httpx
 
@@ -47,7 +47,7 @@ from podcast_reader.engine.packs import (
     read_manifest,
 )
 from podcast_reader.engine.settings import atomic_write_json
-from podcast_reader.types import PipelineEvent
+from podcast_reader.types import PackProgressEvent, PackStateEvent, PackStateEventData
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
@@ -616,14 +616,14 @@ class PackManager:
     ) -> None:
         # Per Q5: pack events carry pack_id and MUST NOT carry job_id —
         # job_id presence is the renderer's job/pack discriminator.
-        data: dict[str, Any] = {"pack_id": pack_id, "state": state}
+        data = PackStateEventData(pack_id=pack_id, state=state)
         if error is not None:
             data["error"] = error
-        self._bus.publish(PipelineEvent(kind="pack_state", step=None, message=message, data=data))
+        self._bus.publish(PackStateEvent(kind="pack_state", step=None, message=message, data=data))
 
     def _publish_progress(self, pack_id: str, done: int, total: int) -> None:
         self._bus.publish(
-            PipelineEvent(
+            PackProgressEvent(
                 kind="pack_progress",
                 step=None,
                 message="",

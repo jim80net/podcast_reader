@@ -12,7 +12,13 @@ import {
   selectionInstalled,
   setupNeeded
 } from './packs-store'
-import type { HardwareInfo, PackState, PackStatus, PipelineEvent } from '../../shared/types'
+import type {
+  HardwareInfo,
+  PackInstallError,
+  PackState,
+  PackStatus,
+  PipelineEvent
+} from '../../shared/types'
 
 function pack(partial: Partial<PackStatus> & { id: string }): PackStatus {
   return {
@@ -29,9 +35,19 @@ function pack(partial: Partial<PackStatus> & { id: string }): PackStatus {
   }
 }
 
-function event(kind: PipelineEvent['kind'], data: Record<string, unknown>): PipelineEvent {
-  return { kind, step: null, message: '', data }
-}
+const packProgress = (packId: string, bytes: number, total: number): PipelineEvent => ({
+  kind: 'pack_progress',
+  step: null,
+  message: '',
+  data: { pack_id: packId, bytes, total }
+})
+
+const packState = (packId: string, state: PackState, error?: PackInstallError): PipelineEvent => ({
+  kind: 'pack_state',
+  step: null,
+  message: '',
+  data: { pack_id: packId, state, ...(error === undefined ? {} : { error }) }
+})
 
 const winNvidia: HardwareInfo = {
   platform: 'win32',
@@ -43,14 +59,19 @@ describe('applyPackEvent', () => {
   const packs = [pack({ id: 'cuda-runtime', kind: 'runtime' }), pack({ id: 'model-small' })]
 
   it('passes job events through untouched', () => {
-    const result = applyPackEvent(packs, event('step_started', { job_id: 'j1' }))
+    const result = applyPackEvent(packs, {
+      kind: 'step_started',
+      step: 'resolve',
+      message: '',
+      data: { job_id: 'j1' }
+    })
     expect(result).toEqual({ packs, isPackEvent: false, needsRefresh: false })
   })
 
   it('patches progress in place without forcing a refresh', () => {
     const result = applyPackEvent(
       packs,
-      event('pack_progress', { pack_id: 'model-small', bytes: 250, total: 1000 })
+      packProgress('model-small', 250, 1000)
     )
     expect(result.isPackEvent).toBe(true)
     expect(result.needsRefresh).toBe(false)
@@ -64,7 +85,7 @@ describe('applyPackEvent', () => {
   it('patches pack_state immediately AND requests authoritative re-hydration', () => {
     const result = applyPackEvent(
       packs,
-      event('pack_state', { pack_id: 'model-small', state: 'installed' })
+      packState('model-small', 'installed')
     )
     expect(result.needsRefresh).toBe(true)
     expect(result.packs[1]).toMatchObject({ state: 'installed', progress: null, error: null })
@@ -73,10 +94,9 @@ describe('applyPackEvent', () => {
   it('carries the structured error on a failed pack_state', () => {
     const result = applyPackEvent(
       packs,
-      event('pack_state', {
-        pack_id: 'model-small',
-        state: 'failed',
-        error: { code: 'verification_failed', message: 'sha256 mismatch' }
+      packState('model-small', 'failed', {
+        code: 'verification_failed',
+        message: 'sha256 mismatch'
       })
     )
     expect(result.packs[1]).toMatchObject({
@@ -85,19 +105,26 @@ describe('applyPackEvent', () => {
     })
   })
 
+  it('falls back to authoritative refresh for a malformed raw pack event', () => {
+    const malformed = {
+      kind: 'pack_progress',
+      step: null,
+      message: '',
+      data: { pack_id: 'model-small', bytes: 250 }
+    } as unknown as PipelineEvent
+
+    expect(applyPackEvent(packs, malformed)).toEqual({
+      packs,
+      isPackEvent: true,
+      needsRefresh: true
+    })
+  })
+
   it('flags refresh for events about unknown packs', () => {
-    const result = applyPackEvent(packs, event('pack_state', { pack_id: 'nope', state: 'failed' }))
+    const result = applyPackEvent(packs, packState('nope', 'failed'))
     expect(result).toEqual({ packs, isPackEvent: true, needsRefresh: true })
   })
 
-  it('flags refresh for malformed pack events instead of guessing', () => {
-    const malformed = applyPackEvent(
-      packs,
-      event('pack_progress', { pack_id: 'model-small', bytes: 'x' })
-    )
-    expect(malformed.needsRefresh).toBe(true)
-    expect(malformed.packs).toBe(packs)
-  })
 })
 
 describe('setupNeeded / defaultSelection', () => {

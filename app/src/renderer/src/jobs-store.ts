@@ -1,4 +1,5 @@
-import type { JobRecord, PipelineEvent } from '../../shared/types'
+import { isJobPipelineEvent } from '../../shared/types'
+import type { JobPipelineEvent, JobRecord, PipelineEvent } from '../../shared/types'
 
 /**
  * Renderer-side job state: pure reducers over an immutable id → record map.
@@ -37,8 +38,10 @@ export function removeJob(jobs: JobsMap, jobId: string): JobsMap {
 }
 
 export function applyPipelineEvent(jobs: JobsMap, event: PipelineEvent): ApplyResult {
-  const jobId = event.data['job_id']
-  if (typeof jobId !== 'string') return { jobs, jobId: null, known: false }
+  if (!isJobPipelineEvent(event)) {
+    return { jobs, jobId: null, known: false }
+  }
+  const jobId = event.data.job_id
   const record = jobs.get(jobId)
   if (record === undefined) return { jobs, jobId, known: false }
   const updated: JobRecord = {
@@ -50,7 +53,7 @@ export function applyPipelineEvent(jobs: JobsMap, event: PipelineEvent): ApplyRe
   return { jobs: upsertJob(jobs, updated), jobId, known: true }
 }
 
-function nextState(record: JobRecord, event: PipelineEvent): JobRecord['state'] {
+function nextState(record: JobRecord, event: JobPipelineEvent): JobRecord['state'] {
   if (event.kind === 'job_done') return 'done'
   if (event.kind === 'job_failed') return 'failed'
   // Only a step event means the worker picked the job up (the engine
@@ -61,7 +64,7 @@ function nextState(record: JobRecord, event: PipelineEvent): JobRecord['state'] 
   return record.state
 }
 
-function nextError(record: JobRecord, event: PipelineEvent): JobRecord['error'] {
+function nextError(record: JobRecord, event: JobPipelineEvent): JobRecord['error'] {
   if (event.kind !== 'job_failed') return record.error
   return {
     code: typeof event.data['code'] === 'string' ? event.data['code'] : '',

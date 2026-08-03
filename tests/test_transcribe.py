@@ -30,7 +30,7 @@ from podcast_reader.types import PipelineError
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from podcast_reader.types import PipelineEvent
+    from podcast_reader.types import PipelineRunEvent
 
 
 @patch("podcast_reader.transcribe.resolve_tool", return_value="whisper-ctranslate2")
@@ -322,7 +322,7 @@ class TestWorkerPathSwitch:
         registry-unavailable — this test runs on POSIX, where the win32-only
         cuda-runtime entry cannot be installed."""
         _install_model_pack(base, "tiny")
-        events: list[PipelineEvent] = []
+        events: list[PipelineRunEvent] = []
 
         with (
             patch(
@@ -454,12 +454,12 @@ class TestEffectiveDevice:
         (target / MANIFEST_FILE).write_text(json.dumps(manifest))
 
     def test_non_cuda_device_passes_through(self, base: Path) -> None:
-        events: list[PipelineEvent] = []
+        events: list[PipelineRunEvent] = []
         assert _effective_device(base, "cpu", events.append, platform="win32") == "cpu"
         assert events == []
 
     def test_no_gpu_degrades_with_reason(self, base: Path) -> None:
-        events: list[PipelineEvent] = []
+        events: list[PipelineRunEvent] = []
         with patch("podcast_reader.transcribe.detect_hardware", return_value=self._hw(False)):
             device = _effective_device(base, "cuda", events.append, platform="win32")
         assert device == "cpu"
@@ -469,7 +469,7 @@ class TestEffectiveDevice:
         assert "GPU" in warning["message"]
 
     def test_pack_not_installed_degrades_with_reason(self, base: Path) -> None:
-        events: list[PipelineEvent] = []
+        events: list[PipelineRunEvent] = []
         with patch("podcast_reader.transcribe.detect_hardware", return_value=self._hw(True)):
             device = _effective_device(base, "cuda", events.append, platform="win32")
         assert device == "cpu"
@@ -478,7 +478,7 @@ class TestEffectiveDevice:
 
     def test_incompatible_pack_degrades_with_reason(self, base: Path) -> None:
         self._cuda_pack(base, pack_schema=99)
-        events: list[PipelineEvent] = []
+        events: list[PipelineRunEvent] = []
         with patch("podcast_reader.transcribe.detect_hardware", return_value=self._hw(True)):
             device = _effective_device(base, "cuda", events.append, platform="win32")
         assert device == "cpu"
@@ -491,7 +491,7 @@ class TestEffectiveDevice:
         manifest = json.loads((target / MANIFEST_FILE).read_text())
         manifest["files"] = manifest["files"][1:]
         (target / MANIFEST_FILE).write_text(json.dumps(manifest))
-        events: list[PipelineEvent] = []
+        events: list[PipelineRunEvent] = []
 
         with patch("podcast_reader.transcribe.detect_hardware", return_value=self._hw(True)):
             device = _effective_device(base, "cuda", events.append, platform="win32")
@@ -504,7 +504,7 @@ class TestEffectiveDevice:
 
     def test_usable_pack_keeps_cuda(self, base: Path) -> None:
         self._cuda_pack(base)
-        events: list[PipelineEvent] = []
+        events: list[PipelineRunEvent] = []
         with patch("podcast_reader.transcribe.detect_hardware", return_value=self._hw(True)):
             device = _effective_device(base, "cuda", events.append, platform="win32")
         assert device == "cuda"
@@ -516,7 +516,7 @@ class TestProgressStreaming:
         """Spec: stderr `progress` lines map onto transcribe step_progress
         events carrying seconds and the total duration."""
         _install_model_pack(base, "tiny")
-        events: list[PipelineEvent] = []
+        events: list[PipelineRunEvent] = []
 
         def scripted(
             args: list[str],
@@ -577,7 +577,7 @@ class TestProgressStreaming:
             "print(str(json_path.resolve()), flush=True)\n"
         )
         script.chmod(0o755)
-        events: list[PipelineEvent] = []
+        events: list[PipelineRunEvent] = []
 
         with patch("podcast_reader.transcribe.resolve_bundled_worker", return_value=str(script)):
             result = transcribe(

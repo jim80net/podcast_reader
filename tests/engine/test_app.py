@@ -38,7 +38,13 @@ from podcast_reader.engine.web_session import (
 )
 from podcast_reader.html import build_html
 from podcast_reader.providers import PROVIDERS
-from podcast_reader.types import LibraryEntry, PipelineEvent, PipelineResult
+from podcast_reader.types import (
+    JobDoneEvent,
+    LibraryEntry,
+    PipelineResult,
+    PipelineRunEvent,
+    StepStartedEvent,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -133,12 +139,16 @@ class _Engine:
         self.data_dir = data_dir
         self.runner_release = runner_release
 
-        def runner(record: JobRecord, on_event: Callable[[PipelineEvent], None]) -> PipelineResult:
+        def runner(
+            record: JobRecord, on_event: Callable[[PipelineRunEvent], None]
+        ) -> PipelineResult:
             assert runner_release.wait(timeout=10)
             on_event(
-                PipelineEvent(kind="step_started", step="resolve", message="Resolving...", data={})
+                StepStartedEvent(
+                    kind="step_started", step="resolve", message="Resolving...", data={}
+                )
             )
-            on_event(PipelineEvent(kind="job_done", step=None, message="Done", data={}))
+            on_event(JobDoneEvent(kind="job_done", step=None, message="Done", data={}))
             return _RESULT
 
         self.store = JobStore(data_dir, runner)

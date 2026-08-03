@@ -1,18 +1,20 @@
 import { describe, expect, it } from 'vitest'
 
 import { deriveProgress, formatDate, sortJobs, sourceLabel, userFacingJobWarning } from './job-view'
-import type { JobRecord, PipelineEvent } from '../../shared/types'
+import type { JobRecord, PipelineEvent, StepName } from '../../shared/types'
 
-function event(overrides: Partial<PipelineEvent>): PipelineEvent {
-  return { kind: 'step_started', step: 'resolve', message: '', data: {}, ...overrides }
-}
+const stepEvent = (
+  kind: 'step_started' | 'step_finished',
+  step: StepName,
+  message = ''
+): PipelineEvent => ({ kind, step, message, data: { job_id: 'j1' } })
 
 describe('deriveProgress', () => {
   it('derives ordered steps with running/done status from events', () => {
     const events: PipelineEvent[] = [
-      event({ kind: 'step_started', step: 'resolve', message: 'Resolving…' }),
-      event({ kind: 'step_finished', step: 'resolve', message: 'Video: T' }),
-      event({ kind: 'step_started', step: 'transcribe', message: 'Running whisper…' })
+      stepEvent('step_started', 'resolve', 'Resolving…'),
+      stepEvent('step_finished', 'resolve', 'Video: T'),
+      stepEvent('step_started', 'transcribe', 'Running whisper…')
     ]
     const progress = deriveProgress(events)
     expect(progress.steps).toEqual([
@@ -23,29 +25,37 @@ describe('deriveProgress', () => {
 
   it('keeps the last non-empty message as the step detail', () => {
     const events: PipelineEvent[] = [
-      event({ kind: 'step_started', step: 'captions', message: 'Fetching captions' }),
-      event({ kind: 'step_finished', step: 'captions', message: '' })
+      stepEvent('step_started', 'captions', 'Fetching captions'),
+      stepEvent('step_finished', 'captions')
     ]
     expect(deriveProgress(events).steps[0]?.detail).toBe('Fetching captions')
   })
 
-  it('attaches warnings to their step and collects step-less warnings', () => {
+  it('attaches warnings to their required pipeline step', () => {
     const events: PipelineEvent[] = [
-      event({ kind: 'step_started', step: 'chapters' }),
-      event({ kind: 'warning', step: 'chapters', message: 'no API key' }),
-      event({ kind: 'warning', step: null, message: 'global warning' })
+      stepEvent('step_started', 'chapters'),
+      {
+        kind: 'warning',
+        step: 'chapters',
+        message: 'no API key',
+        data: { job_id: 'j1', code: 'chapters_skipped' }
+      }
     ]
     const progress = deriveProgress(events)
     expect(progress.steps[0]?.warnings).toEqual(['no API key'])
-    expect(progress.warnings).toEqual(['global warning'])
   })
 
   it('ignores job_done / job_failed events (states come from the record)', () => {
     const events: PipelineEvent[] = [
-      event({ kind: 'job_done', step: null, message: 'Done' }),
-      event({ kind: 'job_failed', step: null, message: 'boom' })
+      { kind: 'job_done', step: null, message: 'Done', data: { job_id: 'j1' } },
+      {
+        kind: 'job_failed',
+        step: null,
+        message: 'boom',
+        data: { job_id: 'j1', code: 'failed', hint: '', detail: '' }
+      }
     ]
-    expect(deriveProgress(events)).toEqual({ steps: [], warnings: [] })
+    expect(deriveProgress(events)).toEqual({ steps: [] })
   })
 })
 

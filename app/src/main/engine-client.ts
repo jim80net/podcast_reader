@@ -1,4 +1,5 @@
 import { SseParser } from './sse'
+import { parsePipelineEvent } from '../shared/pipeline-event'
 import {
   validateEmailClaim,
   validateEmailOutboxStatus,
@@ -316,12 +317,10 @@ export class EngineClient {
   ): Promise<Response> {
     const headers: Record<string, string> = { authorization: `Bearer ${this.token}` }
     if (body !== undefined) headers['content-type'] = 'application/json'
-    const res = await this.fetchFn(`${this.baseUrl}${path}`, {
-      method,
-      headers,
-      body: body !== undefined ? JSON.stringify(body) : undefined,
-      signal
-    })
+    const init: RequestInit = { method, headers }
+    if (body !== undefined) init.body = JSON.stringify(body)
+    if (signal !== undefined) init.signal = signal
+    const res = await this.fetchFn(`${this.baseUrl}${path}`, init)
     if (!res.ok) throw new EngineRequestError(res.status, await readDetail(res))
     return res
   }
@@ -451,12 +450,14 @@ export class EventStream {
   }
 
   private dispatch(payload: string): void {
-    let event: PipelineEvent
+    let parsed: unknown
     try {
-      event = JSON.parse(payload) as PipelineEvent
+      parsed = JSON.parse(payload) as unknown
     } catch {
       return // a malformed frame is dropped; hydration covers any gap
     }
+    const event = parsePipelineEvent(parsed)
+    if (event === null) return // an incompatible frame is dropped; hydration covers any gap
     this.handlers.onEvent(event)
   }
 }
