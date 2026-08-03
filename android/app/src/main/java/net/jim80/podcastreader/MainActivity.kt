@@ -4,7 +4,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import java.time.Instant
-import net.jim80.podcastreader.core.premium.ProductStateReducer
+import net.jim80.podcastreader.core.premium.ProductState.ProductStateReducer
 import net.jim80.podcastreader.ui.PodcastReaderActions
 import net.jim80.podcastreader.ui.PodcastReaderApp
 import net.jim80.podcastreader.ui.PodcastReaderUiState

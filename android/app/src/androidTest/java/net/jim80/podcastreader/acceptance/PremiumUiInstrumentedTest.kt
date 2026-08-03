@@ -16,7 +16,7 @@ import net.jim80.podcastreader.core.ads.HouseInventory
 import net.jim80.podcastreader.core.premium.EntitlementV1Dto
 import net.jim80.podcastreader.core.premium.OnlineUnavailableReason
 import net.jim80.podcastreader.core.premium.ProductState
-import net.jim80.podcastreader.core.premium.ProductStateReducer
+import net.jim80.podcastreader.core.premium.ProductState.ProductStateReducer
 import net.jim80.podcastreader.core.premium.UserCode
 import net.jim80.podcastreader.core.premium.premiumJson
 import net.jim80.podcastreader.ui.AccountUiState

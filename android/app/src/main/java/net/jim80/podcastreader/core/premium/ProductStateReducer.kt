@@ -58,12 +58,27 @@ sealed class ProductState private constructor() {
         override fun toString(): String = "ProductState.OnlineUnavailable($reason)"
     }
 
-    internal companion object {
+    object ProductStateReducer {
         fun local(): ProductState = LocalState
 
-        fun online(projection: EntitlementProjection): ProductState = when (projection.tier) {
-            EntitlementTierDto.FREE -> OnlineFreeState(OnlineFreeTruth.from(projection))
-            EntitlementTierDto.PREMIUM -> OnlinePremiumState(OnlinePremiumTruth.from(projection))
+        fun online(
+            dto: EntitlementV1Dto,
+            expectedSubject: String,
+            now: Instant,
+        ): ProductState {
+            val projection = dto.validated(expectedSubject).getOrElse {
+                return OnlineUnavailableState(OnlineUnavailableReason.INCOMPATIBLE_RESPONSE)
+            }
+            if (now.isBefore(projection.evaluatedAt)) {
+                return OnlineUnavailableState(OnlineUnavailableReason.INCOMPATIBLE_RESPONSE)
+            }
+            if (!now.isBefore(projection.refreshAfter)) {
+                return OnlineUnavailableState(OnlineUnavailableReason.STALE)
+            }
+            return when (projection.tier) {
+                EntitlementTierDto.FREE -> OnlineFreeState(OnlineFreeTruth.from(projection))
+                EntitlementTierDto.PREMIUM -> OnlinePremiumState(OnlinePremiumTruth.from(projection))
+            }
         }
 
         fun unavailable(reason: OnlineUnavailableReason): ProductState = OnlineUnavailableState(reason)
@@ -168,27 +183,4 @@ enum class OnlineUnavailableReason {
     UNAUTHORIZED,
     STALE,
     INCOMPATIBLE_RESPONSE,
-}
-
-object ProductStateReducer {
-    fun local(): ProductState = ProductState.local()
-
-    fun online(
-        dto: EntitlementV1Dto,
-        expectedSubject: String,
-        now: Instant,
-    ): ProductState {
-        val projection = dto.validated(expectedSubject).getOrElse {
-            return ProductState.unavailable(OnlineUnavailableReason.INCOMPATIBLE_RESPONSE)
-        }
-        if (now.isBefore(projection.evaluatedAt)) {
-            return ProductState.unavailable(OnlineUnavailableReason.INCOMPATIBLE_RESPONSE)
-        }
-        if (!now.isBefore(projection.refreshAfter)) {
-            return ProductState.unavailable(OnlineUnavailableReason.STALE)
-        }
-        return ProductState.online(projection)
-    }
-
-    fun unavailable(reason: OnlineUnavailableReason): ProductState = ProductState.unavailable(reason)
 }
