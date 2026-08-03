@@ -3,6 +3,8 @@ import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 
+import { captureLocatorEvidence, capturePageEvidence } from '../install/capture-evidence.mjs'
+
 /**
  * Anchor-offset regression gate for the transcript artifact (issue #63).
  *
@@ -407,7 +409,11 @@ test('search honors reduced motion and chaptered sidebar geometry (#88)', async 
     await input.press('Enter')
     await expect(page.getByRole('status')).toContainText('2 of 2')
     const screenshot = testInfo.outputPath('transcript-search-1280-dark-chaptered.png')
-    await page.screenshot({ path: screenshot, fullPage: true, caret: 'initial' })
+    await capturePageEvidence(page, {
+      path: screenshot,
+      fullPage: true,
+      caret: 'initial'
+    })
     await testInfo.attach('transcript-search-1280-dark-chaptered.png', {
       path: screenshot,
       contentType: 'image/png'
@@ -470,7 +476,11 @@ test('search and media sync coexist in the opaque-style iframe boundary (#88)', 
     expect(combined.transition).toBe('0s')
     expect(combined.boxShadow).not.toBe('none')
     const screenshot = testInfo.outputPath('transcript-search-390-dark-sync-combined.png')
-    await page.screenshot({ path: screenshot, fullPage: true, caret: 'initial' })
+    await capturePageEvidence(page, {
+      path: screenshot,
+      fullPage: true,
+      caret: 'initial'
+    })
     await testInfo.attach('transcript-search-390-dark-sync-combined.png', {
       path: screenshot,
       contentType: 'image/png'
@@ -1000,7 +1010,7 @@ for (const viewport of [
         await expect(page.getByRole('status')).toContainText('1 of 30')
         await input.evaluate((node) => node.blur())
         const expandedName = `transcript-search-${viewport.width}-${theme}-expanded.png`
-        await page.screenshot({
+        await capturePageEvidence(page, {
           path: testInfo.outputPath(expandedName),
           fullPage: true,
           caret: 'initial'
@@ -1030,7 +1040,7 @@ for (const viewport of [
         expect(stuck.activeTop).toBeGreaterThanOrEqual(stuck.railBottom - 1)
         await input.evaluate((node) => node.blur())
         const stuckName = `transcript-search-${viewport.width}-${theme}-stuck.png`
-        await page.screenshot({
+        await capturePageEvidence(page, {
           path: testInfo.outputPath(stuckName),
           fullPage: true,
           caret: 'initial'
@@ -1082,7 +1092,7 @@ for (const viewport of [
 
         const screenshotName = `full-reader-${viewport.width}-${theme}.png`
         const screenshotPath = testInfo.outputPath(screenshotName)
-        await page.screenshot({ path: screenshotPath, fullPage: true })
+        await capturePageEvidence(page, { path: screenshotPath, fullPage: true })
         await testInfo.attach(screenshotName, {
           path: screenshotPath,
           contentType: 'image/png'
@@ -1223,7 +1233,7 @@ for (const viewport of [
         expect(probe.allLinksVisible).toBe(true)
         const screenshotName = `near-hour-rail-${viewport.width}-${theme}.png`
         const screenshotPath = testInfo.outputPath(screenshotName)
-        await page.locator('.timeline-nav').screenshot({ path: screenshotPath })
+        await captureLocatorEvidence(page.locator('.timeline-nav'), { path: screenshotPath })
         await testInfo.attach(screenshotName, {
           path: screenshotPath,
           contentType: 'image/png'
@@ -1265,7 +1275,7 @@ for (const theme of ['dark', 'light'] as const) {
 
       const screenshotName = `section-badges-1280-${theme}.png`
       const screenshotPath = testInfo.outputPath(screenshotName)
-      await page.screenshot({ path: screenshotPath })
+      await capturePageEvidence(page, { path: screenshotPath })
       await testInfo.attach(screenshotName, {
         path: screenshotPath,
         contentType: 'image/png'

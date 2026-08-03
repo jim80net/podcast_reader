@@ -8,6 +8,8 @@ import { join, resolve } from 'node:path'
 
 import { chromium, expect, test } from '@playwright/test'
 
+import { capturePageEvidence } from '../install/capture-evidence.mjs'
+
 const REPO_ROOT = resolve(__dirname, '../../..')
 const SOURCE_IDS = ['a'.repeat(64), 'b'.repeat(64), 'c'.repeat(64)] as const
 const SEARCH_CANARY = 's3arch-k4-canary-6f29d17c'
@@ -348,7 +350,7 @@ test('real HTTPS reader pairs, searches, renders, contains secrets, and rejects 
     expect(busyAttempts).toBe(2)
     await page.unroute('**/web/api/search')
     const phoneSearch = testInfo.outputPath('phone-search-390-light.png')
-    await page.screenshot({ path: phoneSearch, fullPage: true })
+    await capturePageEvidence(page, { path: phoneSearch, fullPage: true })
     await testInfo.attach('phone-search-390-light.png', {
       path: phoneSearch,
       contentType: 'image/png'
@@ -480,7 +482,7 @@ test('real HTTPS reader pairs, searches, renders, contains secrets, and rejects 
     await expect(page.getByText('The team compares local retrieval architecture.')).toBeVisible()
     await expect(page.getByRole('status')).toHaveText('1 match.')
     const desktopSearch = testInfo.outputPath('desktop-search-1280-dark.png')
-    await page.screenshot({ path: desktopSearch, fullPage: true })
+    await capturePageEvidence(page, { path: desktopSearch, fullPage: true })
     await testInfo.attach('desktop-search-1280-dark.png', {
       path: desktopSearch,
       contentType: 'image/png'
