@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 import secrets
 import threading
@@ -13,6 +14,7 @@ from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Protocol, TypedDict
 
 from podcast_reader.engine import library
+from podcast_reader.engine.subscription_store import EmailIdempotencyConflictError
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -43,6 +45,7 @@ _ERROR_CODES = frozenset(
         "idempotency_conflict",
         "delivery_unavailable",
         "email_not_verified",
+        "artifact_unavailable",
     }
 )
 
@@ -131,20 +134,26 @@ class EmailOutboxManager:
             raise ValueError("email capability lifetime is too long")
         with self._capability_lock:
             self._capability = snapshot
+        if snapshot.transcript_email:
+            self._reconcile_completed(snapshot.subject)
 
     def clear_capability(self) -> None:
         with self._capability_lock:
             self._capability = None
 
-    def _available_snapshot(self) -> EmailCapabilitySnapshot | None:
+    def _current_snapshot(self) -> EmailCapabilitySnapshot | None:
         with self._capability_lock:
             snapshot = self._capability
-        if snapshot is None or not snapshot.transcript_email:
+        if snapshot is None:
             return None
         try:
             return snapshot if _parse_time(snapshot.expires_at) > self._clock() else None
         except ValueError:
             return None
+
+    def _available_snapshot(self) -> EmailCapabilitySnapshot | None:
+        snapshot = self._current_snapshot()
+        return snapshot if snapshot is not None and snapshot.transcript_email else None
 
     def is_available(self) -> bool:
         return self._available_snapshot() is not None
@@ -203,6 +212,19 @@ class EmailOutboxManager:
             source_id=source_id if snapshot is not None else None,
         )
 
+    def _reconcile_completed(self, subject: str) -> None:
+        """Recover consent-covered completions missed during a capability gap."""
+        for episode in self.store.completed_email_candidates(subject):
+            now = _iso(self._clock())
+            self.store.insert_reconciled_email(
+                subscription_id=episode["subscription_id"],
+                episode_key=episode["episode_key"],
+                client_delivery_id=_new_id("eml"),
+                subject=subject,
+                source_id=library.source_identity(episode["enclosure_url"]),
+                created_at=now,
+            )
+
     def create_manual(self, *, action_id: str, source_id: str) -> dict[str, object]:
         snapshot = self._require_available()
         if _ACTION_ID_RE.fullmatch(action_id) is None:
@@ -212,17 +234,26 @@ class EmailOutboxManager:
         if library.get_entry(self._library_dir(), source_id) is None:
             raise KeyError(source_id)
         now = _iso(self._clock())
-        item = self.store.insert_manual_email(
-            client_delivery_id=_new_id("eml"),
-            subject=snapshot.subject,
-            source_id=source_id,
-            action_id=action_id,
-            created_at=now,
-        )
+        try:
+            item = self.store.insert_manual_email(
+                client_delivery_id=_new_id("eml"),
+                subject=snapshot.subject,
+                source_id=source_id,
+                action_id=action_id,
+                created_at=now,
+            )
+        except EmailIdempotencyConflictError as exc:
+            raise EmailOutboxError("idempotency_conflict") from exc
         return self._public_status(item)
 
     def list_status(self) -> list[dict[str, object]]:
-        return [self._public_status(item) for item in self.store.list_email_outbox()]
+        snapshot = self._current_snapshot()
+        if snapshot is None:
+            raise EmailFeatureUnavailableError("premium_feature_unavailable")
+        return [
+            self._public_status(item)
+            for item in self.store.list_email_outbox(subject=snapshot.subject)
+        ]
 
     @staticmethod
     def _public_status(item: EmailOutboxRecord) -> dict[str, object]:
@@ -261,7 +292,7 @@ class EmailOutboxManager:
     def _materialize(self, item: EmailOutboxRecord) -> EmailClaim:
         entry = library.get_entry(self._library_dir(), item["source_id"])
         if entry is None:
-            raise EmailOutboxError("delivery_unavailable")
+            raise EmailOutboxError("artifact_unavailable")
         title = unicodedata.normalize("NFC", entry["title"].strip())
         if not title or len(title) > 200 or _has_disallowed_control(title, allow_newlines=False):
             raise EmailOutboxError("delivery_too_large")
@@ -310,7 +341,7 @@ class EmailOutboxManager:
         if item is None:
             raise KeyError(client_delivery_id)
         exponent = max(0, int(item["attempts"]) - 1)
-        delay = min(EMAIL_BACKOFF_BASE_SECONDS * (2**exponent), EMAIL_BACKOFF_MAX_SECONDS)
+        delay = min(EMAIL_BACKOFF_BASE_SECONDS * (4**exponent), EMAIL_BACKOFF_MAX_SECONDS)
         now = self._clock()
         released = self.store.release_email_outbox(
             client_delivery_id,
@@ -334,6 +365,8 @@ def _has_disallowed_control(value: str, *, allow_newlines: bool) -> bool:
 
 
 def _timestamp(value: float) -> str:
+    if not math.isfinite(value):
+        raise EmailOutboxError("artifact_unavailable")
     total = max(0, int(value))
     hours, remainder = divmod(total, 3600)
     minutes, seconds = divmod(remainder, 60)
@@ -354,7 +387,7 @@ def _load_transcript(library_dir: Path, source_id: str) -> str:
             segments = candidate["segments"]
             break
     if segments is None:
-        raise EmailOutboxError("delivery_unavailable")
+        raise EmailOutboxError("artifact_unavailable")
     if len(segments) > EMAIL_CONTENT_MAX_LINES:
         raise EmailOutboxError("delivery_too_large")
     lines: list[str] = []
@@ -363,13 +396,18 @@ def _load_transcript(library_dir: Path, source_id: str) -> str:
             raise EmailOutboxError("delivery_unavailable")
         start = segment.get("start")
         text = segment.get("text")
-        if not isinstance(start, (int, float)) or not isinstance(text, str):
-            raise EmailOutboxError("delivery_unavailable")
+        if (
+            isinstance(start, bool)
+            or not isinstance(start, (int, float))
+            or not math.isfinite(float(start))
+            or not isinstance(text, str)
+        ):
+            raise EmailOutboxError("artifact_unavailable")
         cleaned = unicodedata.normalize("NFC", text.strip())
         if not cleaned:
             continue
         if _has_disallowed_control(cleaned, allow_newlines=False):
-            raise EmailOutboxError("delivery_unavailable")
+            raise EmailOutboxError("artifact_unavailable")
         lines.append(f"{_timestamp(float(start))} {cleaned}")
     transcript = "\n".join(lines) + "\n"
     if (

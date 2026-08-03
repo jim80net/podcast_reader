@@ -41,8 +41,7 @@ def _capability(**overrides: object) -> dict[str, object]:
     return body
 
 
-def _seed_library(library_dir: Path) -> str:
-    source = "https://example.com/email-api.mp3"
+def _seed_library(library_dir: Path, source: str = "https://example.com/email-api.mp3") -> str:
     source_id = library.source_identity(source)
     directory = library.entry_dir(library_dir, source_id)
     directory.mkdir(parents=True)
@@ -74,6 +73,15 @@ def test_email_routes_are_bearer_gated_exact_and_round_trip(tmp_path: Path) -> N
     try:
         capability_path = "/v1/email/online-capability"
         assert client.put(capability_path, json=_capability()).status_code == 401
+        assert client.put(capability_path, json=_capability(), headers=headers).status_code == 204
+
+        oversized = client.put(
+            capability_path,
+            content=b"x" * 4097,
+            headers={**headers, "Content-Type": "application/json"},
+        )
+        assert oversized.status_code == 400
+        assert not manager.is_available()
         assert client.put(capability_path, json=_capability(), headers=headers).status_code == 204
 
         rejected = client.put(
@@ -110,6 +118,18 @@ def test_email_routes_are_bearer_gated_exact_and_round_trip(tmp_path: Path) -> N
             headers=headers,
         )
         assert created.status_code == 201
+        other_source_id = _seed_library(library_dir, "https://example.com/email-api-other.mp3")
+        conflict = client.post(
+            "/v1/email-outbox/manual",
+            json={
+                "schema_version": 1,
+                "action_id": ACTION_ID,
+                "source_id": other_source_id,
+            },
+            headers=headers,
+        )
+        assert conflict.status_code == 409
+        assert conflict.json() == {"detail": "idempotency_conflict"}
         claim = client.post("/v1/email-outbox/claim", headers=headers)
         assert claim.status_code == 200
         payload = claim.json()
@@ -131,6 +151,15 @@ def test_email_routes_are_bearer_gated_exact_and_round_trip(tmp_path: Path) -> N
         listing = client.get("/v1/email-outbox", headers=headers)
         assert listing.status_code == 200
         assert listing.json() == [completed.json()]
+        assert (
+            client.put(
+                capability_path,
+                json=_capability(subject="usr_other_api"),
+                headers=headers,
+            ).status_code
+            == 204
+        )
+        assert client.get("/v1/email-outbox", headers=headers).json() == []
         assert client.post("/v1/email-outbox/claim", headers=headers).status_code == 204
     finally:
         subscription_store.close()

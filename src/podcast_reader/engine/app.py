@@ -878,10 +878,12 @@ def create_app(
     async def update_email_capability(request: Request) -> None:
         manager = _email_outbox()
         try:
-            raw = await request.body()
-            if len(raw) > 4096:
-                raise ValueError("email capability body is too large")
-            body = EmailCapabilityBody.model_validate_json(raw)
+            raw = bytearray()
+            async for chunk in request.stream():
+                if len(raw) + len(chunk) > 4096:
+                    raise ValueError("email capability body is too large")
+                raw.extend(chunk)
+            body = EmailCapabilityBody.model_validate_json(bytes(raw))
             manager.update_capability(EmailCapabilitySnapshot(**body.model_dump()))
         except (ValidationError, ValueError):
             manager.clear_capability()
@@ -919,6 +921,8 @@ def create_app(
             return _email_outbox().create_manual(action_id=body.action_id, source_id=body.source_id)
         except EmailFeatureUnavailableError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except EmailOutboxError as exc:
+            raise HTTPException(status_code=409, detail=exc.code) from exc
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="transcript not found") from exc
         except ValueError as exc:
@@ -926,7 +930,10 @@ def create_app(
 
     @app.get("/v1/email-outbox")
     def list_email_outbox() -> list[dict[str, object]]:
-        return _email_outbox().list_status()
+        try:
+            return _email_outbox().list_status()
+        except EmailFeatureUnavailableError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     @app.post("/v1/email-outbox/claim", response_model=None)
     def claim_email_outbox() -> dict[str, object] | Response:

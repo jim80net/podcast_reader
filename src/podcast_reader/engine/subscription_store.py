@@ -97,6 +97,10 @@ class BackupProof(TypedDict):
     schema_version: int
 
 
+class EmailIdempotencyConflictError(RuntimeError):
+    """A manual action identifier was replayed for a different transcript."""
+
+
 _SCHEMA = """
 CREATE TABLE subscriptions (
     id TEXT PRIMARY KEY,
@@ -158,7 +162,8 @@ CREATE TABLE email_outbox (
     error_code TEXT CHECK (
         error_code IS NULL OR error_code IN (
             'premium_feature_unavailable', 'delivery_too_large',
-            'idempotency_conflict', 'delivery_unavailable', 'email_not_verified'
+            'idempotency_conflict', 'delivery_unavailable', 'email_not_verified',
+            'artifact_unavailable'
         )
     ),
     claim_generation INTEGER NOT NULL CHECK (claim_generation >= 0),
@@ -213,7 +218,8 @@ CREATE TABLE IF NOT EXISTS email_outbox (
     error_code TEXT CHECK (
         error_code IS NULL OR error_code IN (
             'premium_feature_unavailable', 'delivery_too_large',
-            'idempotency_conflict', 'delivery_unavailable', 'email_not_verified'
+            'idempotency_conflict', 'delivery_unavailable', 'email_not_verified',
+            'artifact_unavailable'
         )
     ),
     claim_generation INTEGER NOT NULL CHECK (claim_generation >= 0),
@@ -819,6 +825,78 @@ class SubscriptionStore:
             ).fetchone()
         return _row_to_preference(row) if row is not None else None
 
+    def completed_email_candidates(self, subject: str) -> list[EpisodeRecord]:
+        """Completed, consent-covered episodes still missing a durable outbox item."""
+        with self._lock:
+            rows = self._connection.execute(
+                """
+                SELECT episodes.* FROM episodes
+                JOIN subscription_email_preferences preference
+                  ON preference.subscription_id = episodes.subscription_id
+                 AND preference.subject = ?
+                 AND preference.disabled_at IS NULL
+                 AND preference.enabled_at <= episodes.updated_at
+                WHERE episodes.state = 'completed' AND episodes.job_id IS NOT NULL
+                  AND NOT EXISTS (
+                      SELECT 1 FROM email_outbox
+                      WHERE email_outbox.subscription_id = episodes.subscription_id
+                        AND email_outbox.job_id = episodes.job_id
+                        AND email_outbox.consent_revision = preference.consent_revision
+                        AND email_outbox.consent_kind = 'subscription_completion'
+                  )
+                ORDER BY episodes.updated_at, episodes.subscription_id, episodes.episode_key
+                """,
+                (subject,),
+            ).fetchall()
+        return [self._episode_from_row(row) for row in rows]
+
+    def insert_reconciled_email(
+        self,
+        *,
+        subscription_id: str,
+        episode_key: str,
+        client_delivery_id: str,
+        subject: str,
+        source_id: str,
+        created_at: str,
+    ) -> str | None:
+        """Insert one recovered completion only while its original consent remains active."""
+        with self._transaction() as connection:
+            inserted = connection.execute(
+                """
+                INSERT OR IGNORE INTO email_outbox (
+                    client_delivery_id, subject, source_id, job_id, subscription_id,
+                    consent_kind, consent_revision, manual_action_id, state, attempts,
+                    next_attempt_at, error_code, claim_generation, claimed_at,
+                    claim_expires_at, server_delivery_id, created_at, updated_at,
+                    delivered_at
+                )
+                SELECT ?, ?, ?, episodes.job_id, episodes.subscription_id,
+                    'subscription_completion', preference.consent_revision, NULL,
+                    'pending', 0, ?, NULL, 0, NULL, NULL, NULL, ?, ?, NULL
+                FROM episodes
+                JOIN subscription_email_preferences preference
+                  ON preference.subscription_id = episodes.subscription_id
+                 AND preference.subject = ?
+                 AND preference.disabled_at IS NULL
+                 AND preference.enabled_at <= episodes.updated_at
+                WHERE episodes.subscription_id = ? AND episodes.episode_key = ?
+                  AND episodes.state = 'completed' AND episodes.job_id IS NOT NULL
+                """,
+                (
+                    client_delivery_id,
+                    subject,
+                    source_id,
+                    created_at,
+                    created_at,
+                    created_at,
+                    subject,
+                    subscription_id,
+                    episode_key,
+                ),
+            )
+        return client_delivery_id if inserted.rowcount == 1 else None
+
     def insert_manual_email(
         self,
         *,
@@ -856,13 +934,24 @@ class SubscriptionStore:
             ).fetchone()
         if row is None:
             raise RuntimeError("manual email action was not persisted")
+        if row["source_id"] != source_id:
+            raise EmailIdempotencyConflictError
         return _row_to_outbox(row)
 
-    def list_email_outbox(self) -> list[EmailOutboxRecord]:
+    def list_email_outbox(self, *, subject: str | None = None) -> list[EmailOutboxRecord]:
         with self._lock:
-            rows = self._connection.execute(
-                "SELECT * FROM email_outbox ORDER BY created_at, client_delivery_id"
-            ).fetchall()
+            if subject is None:
+                rows = self._connection.execute(
+                    "SELECT * FROM email_outbox ORDER BY created_at, client_delivery_id"
+                ).fetchall()
+            else:
+                rows = self._connection.execute(
+                    """
+                    SELECT * FROM email_outbox WHERE subject = ?
+                    ORDER BY created_at, client_delivery_id
+                    """,
+                    (subject,),
+                ).fetchall()
         return [_row_to_outbox(row) for row in rows]
 
     def claim_email_outbox(
@@ -975,7 +1064,12 @@ class SubscriptionStore:
         next_attempt_at: str,
         updated_at: str,
     ) -> EmailOutboxRecord:
-        terminal_errors = {"delivery_too_large", "idempotency_conflict", "email_not_verified"}
+        terminal_errors = {
+            "delivery_too_large",
+            "idempotency_conflict",
+            "email_not_verified",
+            "artifact_unavailable",
+        }
         with self._transaction() as connection:
             row = connection.execute(
                 "SELECT * FROM email_outbox WHERE client_delivery_id = ?",

@@ -204,10 +204,12 @@ def test_subscription_consent_has_no_backfill_and_completion_is_atomic_and_idemp
 
     episode = store.episodes_for_reconciliation()[0]
     assert manager.record_subscription_completion(episode, updated_at=_iso(clock.value)) is None
-    assert manager.list_status() == []
+    assert store.list_email_outbox() == []
 
     manager.update_capability(_capability(clock))
+    clock.advance(seconds=1)
     manager.set_subscription_preference("sub_email", subject=SUBJECT, enabled=True)
+    manager.update_capability(_capability(clock))
     assert manager.record_subscription_completion(episode, updated_at=_iso(clock.value)) is None
     assert manager.list_status() == []
 
@@ -221,6 +223,37 @@ def test_subscription_consent_has_no_backfill_and_completion_is_atomic_and_idemp
     assert delivery_id is not None
     assert manager.record_subscription_completion(new_episode, updated_at=_iso(clock.value)) is None
     assert [item["client_delivery_id"] for item in manager.list_status()] == [delivery_id]
+
+
+def test_capability_refresh_recovers_consent_covered_completion_after_restart(
+    tmp_path: Path, clock: MutableClock
+) -> None:
+    data_dir = tmp_path / "data"
+    library_dir = tmp_path / "library"
+    store = SubscriptionStore(data_dir)
+    manager = EmailOutboxManager(store, library_dir=lambda: library_dir, clock=clock)
+    _seed_library(library_dir)
+    _seed_subscription(store, clock)
+    manager.update_capability(_capability(clock))
+    manager.set_subscription_preference("sub_email", subject=SUBJECT, enabled=True)
+    manager.clear_capability()
+
+    episode = store.episodes_for_reconciliation()[0]
+    manager.record_subscription_completion(episode, updated_at=_iso(clock.value))
+    assert store.list_email_outbox() == []
+    store.close()
+
+    restarted_store = SubscriptionStore(data_dir)
+    restarted = EmailOutboxManager(restarted_store, library_dir=lambda: library_dir, clock=clock)
+    try:
+        restarted.update_capability(_capability(clock))
+        items = restarted_store.list_email_outbox()
+        assert len(items) == 1
+        assert items[0]["job_id"] == "job_1"
+        restarted.update_capability(_capability(clock))
+        assert len(restarted_store.list_email_outbox()) == 1
+    finally:
+        restarted_store.close()
 
 
 def test_manual_action_is_idempotent_and_claim_materializes_only_bounded_content(
@@ -253,6 +286,35 @@ def test_manual_action_is_idempotent_and_claim_materializes_only_bounded_content
         for row in store.raw_connection_for_tests().execute("PRAGMA table_info(email_outbox)")
     }
     assert columns.isdisjoint({"title", "transcript", "transcript_text", "feed_url", "email"})
+
+
+def test_manual_action_reuse_for_different_source_is_an_idempotency_conflict(
+    outbox: tuple[EmailOutboxManager, SubscriptionStore, Path], clock: MutableClock
+) -> None:
+    manager, _, library_dir = outbox
+    first_source = _seed_library(library_dir)
+    second_source = _seed_library(library_dir, "https://example.com/different.mp3")
+    manager.update_capability(_capability(clock))
+    manager.create_manual(action_id=ACTION_ID, source_id=first_source)
+
+    with pytest.raises(EmailOutboxError) as caught:
+        manager.create_manual(action_id=ACTION_ID, source_id=second_source)
+    assert caught.value.code == "idempotency_conflict"
+
+
+def test_status_is_scoped_to_the_current_capability_subject(
+    outbox: tuple[EmailOutboxManager, SubscriptionStore, Path], clock: MutableClock
+) -> None:
+    manager, _, library_dir = outbox
+    source_id = _seed_library(library_dir)
+    manager.update_capability(_capability(clock))
+    first = manager.create_manual(action_id=ACTION_ID, source_id=source_id)
+    manager.update_capability(_capability(clock, subject=OTHER_SUBJECT))
+    second = manager.create_manual(action_id=ACTION_ID, source_id=source_id)
+
+    assert manager.list_status() == [second]
+    manager.update_capability(_capability(clock, subject=SUBJECT, enabled=False))
+    assert manager.list_status() == [first]
 
 
 def test_claim_lease_recovery_completion_replay_and_conflict(
@@ -314,6 +376,7 @@ def test_retry_backoff_caps_and_premium_pause_does_not_consume_attempt(
     assert paused["attempts"] == 0
     assert paused["state"] == "pending"
 
+    saw_cap = False
     for expected_attempt in range(1, 9):
         manager.update_capability(_capability(clock, lifetime_seconds=600))
         claim = manager.claim()
@@ -326,12 +389,14 @@ def test_retry_backoff_caps_and_premium_pause_does_not_consume_attempt(
         assert released["attempts"] == expected_attempt
         if expected_attempt < 8:
             row = store.list_email_outbox()[0]
-            expected_delay = min(60 * (2 ** (expected_attempt - 1)), EMAIL_BACKOFF_MAX_SECONDS)
+            expected_delay = min(60 * (4 ** (expected_attempt - 1)), EMAIL_BACKOFF_MAX_SECONDS)
+            saw_cap = saw_cap or expected_delay == EMAIL_BACKOFF_MAX_SECONDS
             assert row["next_attempt_at"] == _iso(clock.value + timedelta(seconds=expected_delay))
             clock.advance(seconds=expected_delay)
         else:
             assert released["state"] == "failed"
             assert store.list_email_outbox()[0]["next_attempt_at"] is None
+    assert saw_cap
 
 
 def test_revocation_cancels_pending_but_allows_claimed_completion(
@@ -388,6 +453,52 @@ def test_oversized_transcript_fails_terminally_without_returning_content(
     item = store.list_email_outbox()[0]
     assert item["state"] == "failed"
     assert item["error_code"] == "delivery_too_large"
+
+
+@pytest.mark.parametrize("start", [float("nan"), float("inf"), float("-inf"), True])
+def test_non_finite_or_boolean_timestamp_fails_as_stable_artifact_error(
+    outbox: tuple[EmailOutboxManager, SubscriptionStore, Path],
+    clock: MutableClock,
+    start: float | bool,
+) -> None:
+    manager, store, library_dir = outbox
+    source_id = _seed_library(library_dir)
+    directory = library.entry_dir(library_dir, source_id)
+    (directory / "episode.json").write_text(
+        json.dumps({"segments": [{"start": start, "text": "invalid timestamp"}]}),
+        encoding="utf-8",
+    )
+    manager.update_capability(_capability(clock))
+    manager.create_manual(action_id=ACTION_ID, source_id=source_id)
+
+    with pytest.raises(EmailOutboxError) as caught:
+        manager.claim()
+    assert caught.value.code == "artifact_unavailable"
+    item = store.list_email_outbox()[0]
+    assert item["state"] == "failed"
+    assert item["attempts"] == 1
+    assert item["error_code"] == "artifact_unavailable"
+
+
+def test_library_move_fails_once_with_distinct_terminal_artifact_error(
+    outbox: tuple[EmailOutboxManager, SubscriptionStore, Path],
+    clock: MutableClock,
+    tmp_path: Path,
+) -> None:
+    manager, store, library_dir = outbox
+    source_id = _seed_library(library_dir)
+    manager.update_capability(_capability(clock))
+    manager.create_manual(action_id=ACTION_ID, source_id=source_id)
+    moved = EmailOutboxManager(store, library_dir=lambda: tmp_path / "new-library", clock=clock)
+    moved.update_capability(_capability(clock))
+
+    with pytest.raises(EmailOutboxError) as caught:
+        moved.claim()
+    assert caught.value.code == "artifact_unavailable"
+    item = store.list_email_outbox()[0]
+    assert item["state"] == "failed"
+    assert item["attempts"] == 1
+    assert item["next_attempt_at"] is None
 
 
 def test_frozen_email_contract_fixtures_have_exact_v1_shapes() -> None:
