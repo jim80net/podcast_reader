@@ -46,5 +46,7 @@ jobs:
         run: uv run python scripts/check_engine_contract_fixtures.py
       - name: House-ad containment policy
         run: python3 scripts/check_ad_containment.py
+      - name: Frozen ad consumer handoff parity
+        run: python3 scripts/check_ad_contract_handoff.py
       - name: Unit tests, lint, and unsigned release assembly
         run: ./gradlew --no-daemon --stacktrace testDebugUnitTest lintDebug assembleRelease

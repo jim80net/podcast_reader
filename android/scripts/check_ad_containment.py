@@ -74,6 +74,16 @@ def main() -> None:
     require("private fun HouseAdCard" in card, "generic house-ad rendering must not be a public placement surface")
     require("fun LibraryHouseAdSlot" in card and "fun JobsHouseAdSlot" in card, "only designated Android slots may render")
 
+    app = (MAIN / "java/net/jim80/podcastreader/ui/PodcastReaderApp.kt").read_text()
+    require("LibraryHouseAdSlot(state.libraryInventory" in app, "Library must mount only its designated house-ad slot")
+    require("JobsHouseAdSlot(state.jobsInventory" in app, "Jobs must mount only its designated house-ad slot")
+    account_branch = app.split("AppDestination.ACCOUNT ->", maxsplit=1)[1]
+    require("HouseAdSlot" not in account_branch, "Account must never mount a house-ad slot")
+
+    account = (MAIN / "java/net/jim80/podcastreader/ui/account/AccountScreen.kt").read_text()
+    require("FLAG_SECURE" in account, "visible device authorization codes must enable secure-window containment")
+    require("rememberSaveable" not in account, "device authorization UI must never save its visible code")
+
 
 if __name__ == "__main__":
     main()
