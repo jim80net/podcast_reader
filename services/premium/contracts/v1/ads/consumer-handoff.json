@@ -1,0 +1,27 @@
+{
+  "handoff_version": 1,
+  "route": {
+    "method": "GET",
+    "path": "/v1/ads/inventory/{slot}",
+    "authentication": "bearer",
+    "slots": [
+      "library",
+      "reader",
+      "mobile_home"
+    ],
+    "responses": {
+      "eligible": 200,
+      "authenticated_ineligible": 204,
+      "malformed_authentication": 401,
+      "invalid_slot": 404
+    }
+  },
+  "fixture_sha256": {
+    "eligible-library.json": "dc5a21b36068e8ff36e5480c042835b8583637ea20f5d0a44f1b37d2954a090a",
+    "eligible-reader.json": "89ceb195e5a2c6b6a229922f4fa9489c6572ee1921a3922f7664eeed9ad99f7f",
+    "forward-additive.json": "c590ec3674e248dfefa9c006f49047619fc8147e26ab784bc823cc5dfc41d5e7",
+    "hostile-text.json": "d1e58109bc1f53eeaefedfe237882cc3c7d3a1b45544fb2118e6889b7f1a94cf",
+    "malformed.json": "4150d73d40882be043c0f3d87e3403795f489de6da6be0f1e5ad993b22ce17d7",
+    "no-content.json": "51aaa3f71b71f39ce41fc27b6fe95f7f3123f00a87be87783564f6e1445f38b0"
+  }
+}
