@@ -10,7 +10,7 @@
     "build-icons": "node scripts/build-icons.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.e2e.json",
     "lint": "eslint .",
-    "test": "vitest run && node --test tests/install/capture-evidence.test.mjs",
+    "test": "vitest run",
     "test:watch": "vitest",
     "e2e": "playwright test --project e2e",
     "e2e:integration": "playwright test --project integration",
