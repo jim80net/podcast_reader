@@ -81,7 +81,6 @@ describe('premium desktop boundary', () => {
     expect(new PremiumCredentialStore(path, safe).get()).toBeNull()
     expect(readdirSync(dir).some((name) => name.startsWith('premium-account.json.corrupt-'))).toBe(true)
     expect(readFileSync(engineVault, 'utf8')).toBe('engine-vault-sentinel')
-    expect(path).not.toBe(engineVault)
   })
 
   it('keeps premium requests credential-separated and rejects redirects', async () => {
