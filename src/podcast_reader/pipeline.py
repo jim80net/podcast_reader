@@ -13,7 +13,7 @@ import re
 import shutil
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from podcast_reader.caption_cleanup import apply_caption_corrections
 from podcast_reader.chapters import (
@@ -28,12 +28,23 @@ from podcast_reader.html import build_html
 from podcast_reader.providers import PROVIDERS, resolve_provider
 from podcast_reader.tools import run_child
 from podcast_reader.transcribe import transcribe, transcription_engine
+from podcast_reader.types import (
+    JobDoneData,
+    JobDoneEvent,
+    PipelineResult,
+    PipelineRunEvent,
+    StepFinishedData,
+    StepFinishedEvent,
+    StepStartedData,
+    StepStartedEvent,
+    WarningData,
+    WarningEvent,
+)
 
 # PipelineError is re-imported under its own name: an explicit re-export
 # (mypy strict) for the existing `from podcast_reader.pipeline import
 # PipelineError` consumers (CLI, engine job store).
 from podcast_reader.types import PipelineError as PipelineError
-from podcast_reader.types import PipelineResult, PipelineRunEvent
 from podcast_reader.youtube import (
     NoTranscriptError,
     extract_video_id,
@@ -46,7 +57,7 @@ from podcast_reader.ytdlp import download_audio, fetch_title
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from podcast_reader.types import EventKind, PipelineRequest, StepName
+    from podcast_reader.types import PipelineRequest, StepName
 
 
 class InputType(Enum):
@@ -99,7 +110,7 @@ def run_pipeline(
     json_path: Path
     transcript_source: str
 
-    _emit(on_event, "step_started", "resolve", "", {})
+    _emit_step_started(on_event, "resolve", "", {})
 
     if input_type == InputType.YOUTUBE:
         video_id = extract_video_id(source)
@@ -116,23 +127,21 @@ def run_pipeline(
 
         if title is None:
             title = fetch_video_title(video_id)
-            _emit(on_event, "step_finished", "resolve", f"Video: {title}", {})
+            _emit_step_finished(on_event, "resolve", f"Video: {title}", {})
         else:
-            _emit(on_event, "step_finished", "resolve", "", {})
+            _emit_step_finished(on_event, "resolve", "", {})
 
         if _valid_artifact(json_path):
-            _emit(
+            _emit_step_started(
                 on_event,
-                "step_started",
                 "captions",
                 f"Transcript JSON already exists: {json_path} (delete to re-fetch)",
                 {"cached": True},
             )
-            _emit(on_event, "step_finished", "captions", "", {"cached": True})
+            _emit_step_finished(on_event, "captions", "", {"cached": True})
         else:
-            _emit(
+            _emit_step_started(
                 on_event,
-                "step_started",
                 "captions",
                 f"Fetching transcript for {video_id}...",
                 {},
@@ -147,9 +156,8 @@ def run_pipeline(
                 ) from exc
             data = snippets_to_whisper_segments(snippets)
             json_path.write_text(json.dumps(data, indent=2))
-            _emit(
+            _emit_step_finished(
                 on_event,
-                "step_finished",
                 "captions",
                 f"Written {len(data['segments'])} segments to {json_path}",
                 {},
@@ -158,9 +166,8 @@ def run_pipeline(
         if request["diarize"]:
             # Captions are fetched text — there is no audio to diarize. Say
             # so instead of silently ignoring the enabled setting.
-            _emit(
+            _emit_warning(
                 on_event,
-                "warning",
                 "diarize",
                 "Diarization skipped: YouTube captions provide no audio to diarize",
                 {"code": "diarization_skipped"},
@@ -170,30 +177,29 @@ def run_pipeline(
         if title is None:
             try:
                 title = fetch_title(source)
-                _emit(on_event, "step_finished", "resolve", f"Video: {title}", {})
+                _emit_step_finished(on_event, "resolve", f"Video: {title}", {})
             except RuntimeError:
                 title = None  # will derive from stem later
-                _emit(on_event, "step_finished", "resolve", "", {})
+                _emit_step_finished(on_event, "resolve", "", {})
         else:
-            _emit(on_event, "step_finished", "resolve", "", {})
+            _emit_step_finished(on_event, "resolve", "", {})
 
         # Check for a .ytdlp marker left by a previous download (match by URL)
         cached_marker = _find_ytdlp_marker(output_dir, source)
         audio_path: Path
         if cached_marker is not None:
             audio_path = cached_marker.with_suffix(".mp3")
-            _emit(
+            _emit_step_started(
                 on_event,
-                "step_started",
                 "download",
                 f"Audio already exists: {audio_path} (delete to re-download)",
                 {"cached": True},
             )
-            _emit(on_event, "step_finished", "download", "", {"cached": True})
+            _emit_step_finished(on_event, "download", "", {"cached": True})
         else:
-            _emit(on_event, "step_started", "download", "Downloading with yt-dlp...", {})
+            _emit_step_started(on_event, "download", "Downloading with yt-dlp...", {})
             audio_path = download_audio(source, output_dir, cookies=cookies, on_event=on_event)
-            _emit(on_event, "step_finished", "download", "", {})
+            _emit_step_finished(on_event, "download", "", {})
         stem = audio_path.stem
         json_path = output_dir / f"{stem}.json"
         transcript_source = transcription_engine()
@@ -220,7 +226,7 @@ def run_pipeline(
                 "Check the path and try again.",
             )
 
-        _emit(on_event, "step_finished", "resolve", "", {})
+        _emit_step_finished(on_event, "resolve", "", {})
 
         stem = audio_path.stem
         json_path = output_dir / f"{stem}.json"
@@ -247,9 +253,8 @@ def run_pipeline(
     cleanup_completed = False
     cleanup_requested = request["caption_cleanup"] and transcript_source == "youtube-captions"
     if request["caption_cleanup"] and not cleanup_requested:
-        _emit(
+        _emit_warning(
             on_event,
-            "warning",
             "chapters",
             "Caption cleanup applies only to YouTube caption sources; leaving wording unchanged",
             {"code": "caption_cleanup_skipped"},
@@ -258,9 +263,8 @@ def run_pipeline(
     provider = request["chapter_provider"]
     cleanup_cache_ready = not cleanup_requested or _valid_artifact(cleanup_path)
     if _valid_artifact(chapters_path) and cleanup_cache_ready:
-        _emit(
+        _emit_step_started(
             on_event,
-            "step_started",
             "chapters",
             f"Chapters JSON already exists: {chapters_path} (delete to regenerate)",
             {"cached": True},
@@ -269,11 +273,10 @@ def run_pipeline(
         if cleanup_requested:
             caption_corrections = json.loads(cleanup_path.read_text())
             cleanup_completed = True
-        _emit(on_event, "step_finished", "chapters", "", {"cached": True})
+        _emit_step_finished(on_event, "chapters", "", {"cached": True})
     elif request["chapter_api_key"]:
-        _emit(
+        _emit_step_started(
             on_event,
-            "step_started",
             "chapters",
             f"Generating chapter markers via {provider}...",
             {},
@@ -319,18 +322,16 @@ def run_pipeline(
             # provider response fragments (auth-error bodies echo the key),
             # so only the exception class name reaches events and the journal.
             detail = f": {exc}" if isinstance(exc, ChapterError) else f" ({type(exc).__name__})"
-            _emit(
+            _emit_warning(
                 on_event,
-                "warning",
                 "chapters",
                 f"Chapter generation failed via {provider}{detail}; "
                 "rendering a chapterless transcript",
                 {"code": "chapters_failed"},
             )
         else:
-            _emit(
+            _emit_step_finished(
                 on_event,
-                "step_finished",
                 "chapters",
                 f"Written {len(chapters)} chapters to {chapters_path}",
                 {},
@@ -340,27 +341,24 @@ def run_pipeline(
         # cleanup cache takes the first branch): no key means the cleanup pass
         # cannot be regenerated, but the cached chapters are still good —
         # degrade to them with original wording instead of dropping them.
-        _emit(
+        _emit_step_started(
             on_event,
-            "step_started",
             "chapters",
             f"Chapters JSON already exists: {chapters_path} (delete to regenerate)",
             {"cached": True},
         )
         chapters = json.loads(chapters_path.read_text())
-        _emit(
+        _emit_warning(
             on_event,
-            "warning",
             "chapters",
             f"Caption cleanup needs a chapter key ({_chapter_key_hint(provider)}); "
             "keeping original wording",
             {"code": "caption_cleanup_skipped"},
         )
-        _emit(on_event, "step_finished", "chapters", "", {"cached": True})
+        _emit_step_finished(on_event, "chapters", "", {"cached": True})
     else:
-        _emit(
+        _emit_warning(
             on_event,
-            "warning",
             "chapters",
             f"Skipping chapter generation ({_chapter_key_hint(provider)})",
             {"code": "chapters_skipped"},
@@ -377,7 +375,7 @@ def run_pipeline(
     if cleanup_completed:
         segments, cleanup_count = apply_caption_corrections(segments, caption_corrections)
 
-    _emit(on_event, "step_started", "render", "Generating HTML transcript...", {})
+    _emit_step_started(on_event, "render", "Generating HTML transcript...", {})
     html_content = build_html(
         segments,
         title,
@@ -387,9 +385,9 @@ def run_pipeline(
         caption_cleanup=cleanup_completed,
     )
     html_path.write_text(html_content)
-    _emit(on_event, "step_finished", "render", "", {"caption_corrections": cleanup_count})
+    _emit_step_finished(on_event, "render", "", {"caption_corrections": cleanup_count})
 
-    _emit(on_event, "job_done", None, "Done", {})
+    _emit_job_done(on_event, "Done", {})
     return PipelineResult(
         json_path=str(json_path),
         chapters_path=str(chapters_path) if chapters is not None else None,
@@ -398,20 +396,37 @@ def run_pipeline(
     )
 
 
-def _emit(
+def _emit_step_started(
     on_event: Callable[[PipelineRunEvent], None],
-    kind: EventKind,
-    step: StepName | None,
+    step: StepName,
     message: str,
-    data: dict[str, Any],
+    data: StepStartedData,
 ) -> None:
-    """Build and dispatch a PipelineEvent."""
-    on_event(
-        cast(
-            "PipelineRunEvent",
-            {"kind": kind, "step": step, "message": message, "data": data},
-        )
-    )
+    on_event(StepStartedEvent(kind="step_started", step=step, message=message, data=data))
+
+
+def _emit_step_finished(
+    on_event: Callable[[PipelineRunEvent], None],
+    step: StepName,
+    message: str,
+    data: StepFinishedData,
+) -> None:
+    on_event(StepFinishedEvent(kind="step_finished", step=step, message=message, data=data))
+
+
+def _emit_warning(
+    on_event: Callable[[PipelineRunEvent], None],
+    step: StepName,
+    message: str,
+    data: WarningData,
+) -> None:
+    on_event(WarningEvent(kind="warning", step=step, message=message, data=data))
+
+
+def _emit_job_done(
+    on_event: Callable[[PipelineRunEvent], None], message: str, data: JobDoneData
+) -> None:
+    on_event(JobDoneEvent(kind="job_done", step=None, message=message, data=data))
 
 
 def _chapter_key_hint(provider: str) -> str:
@@ -488,18 +503,16 @@ def _transcribe_if_needed(
 ) -> None:
     """Run whisper transcription if a valid JSON output doesn't already exist."""
     if _valid_artifact(json_path):
-        _emit(
+        _emit_step_started(
             on_event,
-            "step_started",
             "transcribe",
             f"Transcript JSON already exists: {json_path} (delete to re-transcribe)",
             {"cached": True},
         )
-        _emit(on_event, "step_finished", "transcribe", "", {"cached": True})
+        _emit_step_finished(on_event, "transcribe", "", {"cached": True})
         return
-    _emit(
+    _emit_step_started(
         on_event,
-        "step_started",
         "transcribe",
         f"Transcribing with {transcription_engine()} "
         f"(model={whisper_model}, lang={whisper_lang}, device={whisper_device})...",
@@ -514,4 +527,4 @@ def _transcribe_if_needed(
         hf_token=hf_token,
         on_event=on_event,
     )
-    _emit(on_event, "step_finished", "transcribe", "", {})
+    _emit_step_finished(on_event, "transcribe", "", {})

@@ -123,5 +123,14 @@ describe('PipelineEvent contract', () => {
       data: { pack_id: 'pack-1', job_id: 'j1', state: 'installed' }
     }
     expect(impossible.kind).toBe('pack_state')
+
+    const explicitlyUndefined: PipelineEvent = {
+      kind: 'pack_state',
+      step: null,
+      message: '',
+      // @ts-expect-error even undefined cannot introduce a job identity key.
+      data: { pack_id: 'pack-1', job_id: undefined, state: 'installed' }
+    }
+    expect(explicitlyUndefined.kind).toBe('pack_state')
   })
 })

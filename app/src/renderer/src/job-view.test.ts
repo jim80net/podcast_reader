@@ -43,7 +43,6 @@ describe('deriveProgress', () => {
     ]
     const progress = deriveProgress(events)
     expect(progress.steps[0]?.warnings).toEqual(['no API key'])
-    expect(progress.warnings).toEqual([])
   })
 
   it('ignores job_done / job_failed events (states come from the record)', () => {
@@ -56,7 +55,7 @@ describe('deriveProgress', () => {
         data: { job_id: 'j1', code: 'failed', hint: '', detail: '' }
       }
     ]
-    expect(deriveProgress(events)).toEqual({ steps: [], warnings: [] })
+    expect(deriveProgress(events)).toEqual({ steps: [] })
   })
 })
 

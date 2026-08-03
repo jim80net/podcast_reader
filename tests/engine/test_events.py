@@ -9,7 +9,7 @@ delegating surface in test_jobs.py; here: the seam contract.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from podcast_reader.engine.events import (
     SUBSCRIBER_FULL_STREAK_LIMIT,
@@ -19,12 +19,13 @@ from podcast_reader.engine.events import (
 from podcast_reader.engine.jobs import JobStore
 from podcast_reader.types import (
     JobDoneEvent,
+    JobStepProgressEvent,
     JobWarningEvent,
     PackProgressEvent,
+    PackStateEvent,
     PipelineEvent,
     PipelineResult,
     PipelineRunEvent,
-    RoutedJobDoneEvent,
     StepStartedEvent,
 )
 
@@ -35,17 +36,15 @@ if TYPE_CHECKING:
     from podcast_reader.types import EventKind, JobRecord
 
 
-def _event(kind: EventKind = "warning", message: str = "m") -> PipelineEvent:
+def _event(
+    kind: Literal["warning", "pack_progress"] = "warning", message: str = "m"
+) -> PipelineEvent:
     if kind == "pack_progress":
         return PackProgressEvent(
             kind="pack_progress",
             step=None,
             message=message,
             data={"pack_id": "fixture", "bytes": 1, "total": 2},
-        )
-    if kind == "job_done":
-        return RoutedJobDoneEvent(
-            kind="job_done", step=None, message=message, data={"job_id": "j1"}
         )
     return JobWarningEvent(
         kind="warning",
@@ -125,8 +124,27 @@ class TestEventKindWidening:
     def test_pack_and_progress_kinds_are_valid_pipeline_events(self) -> None:
         """Task 2.3: EventKind widens to the pack kinds plus step_progress;
         StepName gains diarize (for groups 3/5)."""
+        events: tuple[PipelineEvent, ...] = (
+            PackStateEvent(
+                kind="pack_state",
+                step=None,
+                message="",
+                data={"pack_id": "pack-1", "state": "installed"},
+            ),
+            PackProgressEvent(
+                kind="pack_progress",
+                step=None,
+                message="",
+                data={"pack_id": "pack-1", "bytes": 1, "total": 2},
+            ),
+            JobStepProgressEvent(
+                kind="step_progress",
+                step="transcribe",
+                message="",
+                data={"job_id": "job-1", "seconds": 1.0, "duration": 2.0},
+            ),
+        )
         kinds: tuple[EventKind, ...] = ("pack_state", "pack_progress", "step_progress")
-        for kind in kinds:
-            assert kind in ("pack_state", "pack_progress", "step_progress")
+        assert tuple(event["kind"] for event in events) == kinds
         diarize = StepStartedEvent(kind="step_started", step="diarize", message="", data={})
         assert diarize["step"] == "diarize"

@@ -1,3 +1,4 @@
+import { isJobPipelineEvent } from '../../shared/types'
 import type { JobRecord, PipelineEvent, StepName } from '../../shared/types'
 
 /**
@@ -17,8 +18,6 @@ export interface StepView {
 
 export interface JobProgress {
   steps: StepView[]
-  /** Warnings not attached to any step. */
-  warnings: string[]
 }
 
 export interface JobWarningView {
@@ -40,7 +39,6 @@ export function userFacingJobWarning(warning: string): JobWarningView {
 export function deriveProgress(events: readonly PipelineEvent[]): JobProgress {
   const steps: StepView[] = []
   const byStep = new Map<StepName, StepView>()
-  const warnings: string[] = []
 
   const stepView = (step: StepName): StepView => {
     let view = byStep.get(step)
@@ -53,15 +51,8 @@ export function deriveProgress(events: readonly PipelineEvent[]): JobProgress {
   }
 
   for (const event of events) {
+    if (!isJobPipelineEvent(event)) continue
     if (event.kind === 'job_done' || event.kind === 'job_failed') continue
-    if (
-      event.kind === 'pack_state' ||
-      event.kind === 'pack_progress' ||
-      event.kind === 'media_state' ||
-      event.kind === 'media_progress'
-    ) {
-      continue
-    }
     if (event.kind === 'warning') {
       stepView(event.step).warnings.push(event.message)
       continue
@@ -70,7 +61,7 @@ export function deriveProgress(events: readonly PipelineEvent[]): JobProgress {
     if (event.kind === 'step_finished') view.status = 'done'
     if (event.message !== '') view.detail = event.message
   }
-  return { steps, warnings }
+  return { steps }
 }
 
 /** Newest-created first; non-mutating. */

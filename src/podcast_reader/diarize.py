@@ -20,16 +20,24 @@ import json
 import shutil
 import tempfile
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from podcast_reader.engine import packs
 from podcast_reader.engine.settings import atomic_write_json, data_dir
 from podcast_reader.tools import resolve_tool, run_child
+from podcast_reader.types import (
+    PipelineRunEvent,
+    StepFinishedData,
+    StepFinishedEvent,
+    StepStartedData,
+    StepStartedEvent,
+    WarningData,
+    WarningEvent,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from podcast_reader.types import EventKind, PipelineRunEvent
 
 #: Name of the worker executable inside the diarization pack directory.
 WORKER_NAME = "diarization-worker"
@@ -74,34 +82,31 @@ def diarize_step(
     data = json.loads(json_path.read_text())
     segments: list[dict[str, Any]] = data.get("segments", [])
     if any("speaker" in segment for segment in segments):
-        _emit(
+        _emit_step_started(
             on_event,
-            "step_started",
             f"Speakers already assigned in {json_path} (delete to re-diarize)",
             {"cached": True},
         )
-        _emit(on_event, "step_finished", "", {"cached": True})
+        _emit_step_finished(on_event, "", {"cached": True})
         return
 
     worker, problem = _resolve_worker(data_dir())
     if worker is None:
-        _emit(
+        _emit_warning(
             on_event,
-            "warning",
             f"Diarization skipped: {problem}. {_SKIP_HINT}",
             {"code": "diarization_skipped"},
         )
         return
 
-    _emit(on_event, "step_started", "Diarizing speakers...", {})
+    _emit_step_started(on_event, "Diarizing speakers...", {})
     turns = _run_worker(worker, audio_path, on_event)
     if turns is None:
         return  # _run_worker already emitted the warning
     assigned = assign_speakers(segments, turns)
     atomic_write_json(json_path, data)
-    _emit(
+    _emit_step_finished(
         on_event,
-        "step_finished",
         f"Assigned speakers to {assigned} of {len(segments)} segments",
         {},
     )
@@ -198,23 +203,30 @@ def _warn_failed(on_event: Callable[[PipelineRunEvent], None], summary: str, std
     """Structured ``diarization_failed`` warning with a short stderr tail."""
     tail = "\n".join(stderr.strip().splitlines()[-3:])
     detail = f": {tail}" if tail else ""
-    _emit(
+    _emit_warning(
         on_event,
-        "warning",
         f"Diarization failed ({summary}{detail}); rendering without speakers",
         {"code": "diarization_failed"},
     )
 
 
-def _emit(
+def _emit_step_started(
     on_event: Callable[[PipelineRunEvent], None],
-    kind: EventKind,
     message: str,
-    data: dict[str, Any],
+    data: StepStartedData,
 ) -> None:
-    on_event(
-        cast(
-            "PipelineRunEvent",
-            {"kind": kind, "step": "diarize", "message": message, "data": data},
-        )
-    )
+    on_event(StepStartedEvent(kind="step_started", step="diarize", message=message, data=data))
+
+
+def _emit_step_finished(
+    on_event: Callable[[PipelineRunEvent], None],
+    message: str,
+    data: StepFinishedData,
+) -> None:
+    on_event(StepFinishedEvent(kind="step_finished", step="diarize", message=message, data=data))
+
+
+def _emit_warning(
+    on_event: Callable[[PipelineRunEvent], None], message: str, data: WarningData
+) -> None:
+    on_event(WarningEvent(kind="warning", step="diarize", message=message, data=data))

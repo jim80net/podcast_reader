@@ -151,6 +151,16 @@ export type PipelineEvent =
   | MediaStateEvent
   | MediaProgressEvent
 
+/** Narrow the public stream to events that are valid inside a job record. */
+export function isJobPipelineEvent(event: PipelineEvent): event is JobPipelineEvent {
+  return (
+    event.kind !== 'pack_state' &&
+    event.kind !== 'pack_progress' &&
+    event.kind !== 'media_state' &&
+    event.kind !== 'media_progress'
+  )
+}
+
 // -- src/podcast_reader/types.py:62 (JobError) --
 export interface JobError {
   code: string

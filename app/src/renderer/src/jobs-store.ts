@@ -1,3 +1,4 @@
+import { isJobPipelineEvent } from '../../shared/types'
 import type { JobPipelineEvent, JobRecord, PipelineEvent } from '../../shared/types'
 
 /**
@@ -37,12 +38,7 @@ export function removeJob(jobs: JobsMap, jobId: string): JobsMap {
 }
 
 export function applyPipelineEvent(jobs: JobsMap, event: PipelineEvent): ApplyResult {
-  if (
-    event.kind === 'pack_state' ||
-    event.kind === 'pack_progress' ||
-    event.kind === 'media_state' ||
-    event.kind === 'media_progress'
-  ) {
+  if (!isJobPipelineEvent(event)) {
     return { jobs, jobId: null, known: false }
   }
   const jobId = event.data.job_id

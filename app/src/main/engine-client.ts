@@ -317,12 +317,10 @@ export class EngineClient {
   ): Promise<Response> {
     const headers: Record<string, string> = { authorization: `Bearer ${this.token}` }
     if (body !== undefined) headers['content-type'] = 'application/json'
-    const res = await this.fetchFn(`${this.baseUrl}${path}`, {
-      method,
-      headers,
-      body: body !== undefined ? JSON.stringify(body) : undefined,
-      signal
-    })
+    const init: RequestInit = { method, headers }
+    if (body !== undefined) init.body = JSON.stringify(body)
+    if (signal !== undefined) init.signal = signal
+    const res = await this.fetchFn(`${this.baseUrl}${path}`, init)
     if (!res.ok) throw new EngineRequestError(res.status, await readDetail(res))
     return res
   }

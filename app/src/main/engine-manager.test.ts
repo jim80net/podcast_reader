@@ -390,7 +390,6 @@ describe('EngineManager — unexpected engine exit (respawn supervision)', () =>
         spawnedWorldHandle(childExited),
         new Promise<Partial<EngineHandle>>(() => {}) as never
       ],
-      ensureFailsOnCall: undefined,
       deferSleep: true
     })
     await world.manager.start()
@@ -434,8 +433,7 @@ describe('EngineManager — respawn give-up', () => {
     })
     // First start succeeds with a spawned handle; every respawn ensure() fails.
     const world = makeWorld({
-      handle: spawnedWorldHandle(firstExit),
-      ensureFailsOnCall: undefined
+      handle: spawnedWorldHandle(firstExit)
     })
     // Override: only the initial ensure() (call 0) succeeds; respawns reject.
     const deps = (world.manager as unknown as { deps: ManagerDeps }).deps

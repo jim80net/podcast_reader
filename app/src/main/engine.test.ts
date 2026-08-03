@@ -94,7 +94,11 @@ function makeWorld(opts: {
     devCwd: '/repo',
     platform: 'linux',
     spawnFn: (argv, spawnOpts) => {
-      spawns.push({ argv, env: spawnOpts.env, cwd: spawnOpts.cwd })
+      spawns.push(
+        spawnOpts.cwd === undefined
+          ? { argv, env: spawnOpts.env }
+          : { argv, env: spawnOpts.env, cwd: spawnOpts.cwd }
+      )
       queueMicrotask(() => {
         if (opts.childBehavior === 'exit') {
           child.stderr.write('Traceback: engine exploded\n')

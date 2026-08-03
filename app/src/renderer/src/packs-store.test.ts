@@ -105,6 +105,21 @@ describe('applyPackEvent', () => {
     })
   })
 
+  it('falls back to authoritative refresh for a malformed raw pack event', () => {
+    const malformed = {
+      kind: 'pack_progress',
+      step: null,
+      message: '',
+      data: { pack_id: 'model-small', bytes: 250 }
+    } as unknown as PipelineEvent
+
+    expect(applyPackEvent(packs, malformed)).toEqual({
+      packs,
+      isPackEvent: true,
+      needsRefresh: true
+    })
+  })
+
   it('flags refresh for events about unknown packs', () => {
     const result = applyPackEvent(packs, packState('nope', 'failed'))
     expect(result).toEqual({ packs, isPackEvent: true, needsRefresh: true })

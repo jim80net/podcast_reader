@@ -28,7 +28,7 @@ import { appendFileSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { join } from 'node:path'
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import type { PipelineEvent } from '../../src/shared/types'
+import type { JobPipelineEvent, PipelineEvent } from '../../src/shared/types'
 
 // ---- mirrored payload shapes (kept structurally equal to src/shared/types.ts) --
 
@@ -45,7 +45,7 @@ interface JobRecord {
   title: string | null
   state: string
   error: JobError | null
-  events: PipelineEvent[]
+  events: JobPipelineEvent[]
   result: Record<string, unknown> | null
   overrides: Record<string, unknown> | null
   models: Record<string, unknown> | null
@@ -584,7 +584,7 @@ async function handleControl(
       updated_at: nowSeconds()
     }
     jobs.set(merged.id, merged)
-    for (const event of (body.events as PipelineEvent[] | undefined) ?? []) {
+    for (const event of (body.events as JobPipelineEvent[] | undefined) ?? []) {
       merged.events.push(event)
       broadcast(event)
     }

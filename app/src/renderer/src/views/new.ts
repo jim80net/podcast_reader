@@ -92,7 +92,11 @@ export function mountNew(container: HTMLElement, store: AppStore): ViewCleanup {
     formError.hidden = true
     submitButton.disabled = true
     try {
-      const job = await window.api.submitJob({ source, title, overrides })
+      const job = await window.api.submitJob({
+        source,
+        title,
+        ...(overrides === undefined ? {} : { overrides })
+      })
       if (disposed) return
       store.upsert(job)
       urlInput.value = ''
@@ -288,9 +292,6 @@ export function mountNew(container: HTMLElement, store: AppStore): ViewCleanup {
     }
     if (table.childElementCount > 0) card.append(table)
 
-    for (const warning of progress.warnings) {
-      card.append(warningNode(warning))
-    }
     if (job.state === 'failed' && job.error !== null) {
       card.append(
         el(

@@ -236,10 +236,11 @@ async function spawnEngine(deps: SupervisorDeps): Promise<EngineHandle> {
     platform: deps.platform
   })
   deps.log(`spawning engine (${posture}): ${argv.join(' ')}`)
+  const cwd = posture === 'packaged' ? undefined : (deps.devCwd ?? undefined)
   const child = deps.spawnFn(argv, {
     // Per P9: the child resolves the same data dir the app resolved.
     env: { ...deps.env, PODCAST_READER_DATA_DIR: deps.dataDir },
-    cwd: posture === 'packaged' ? undefined : (deps.devCwd ?? undefined)
+    ...(cwd === undefined ? {} : { cwd })
   })
   const childExited = new Promise<void>((resolve) => {
     child.once('exit', () => resolve())

@@ -400,6 +400,8 @@ class JobStore:
             record = _public_record(self._jobs[job_id])
 
         def on_event(event: PipelineRunEvent) -> None:
+            # TypedDict spread cannot express that adding job_id maps every
+            # run-event member to its routed twin; producers are already exact.
             tagged = cast(
                 "JobPipelineEvent",
                 {**event, "data": {**event["data"], "job_id": job_id}},
