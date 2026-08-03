@@ -37,6 +37,22 @@ class EntitlementContractTest {
     }
 
     @Test
+    fun housePolicyWithinTheFrozenV1ShapeRemainsOnlineFreeAndNotAdFree() {
+        val house = premiumJson.decodeFromString<EntitlementV1Dto>(
+            fixture("entitlements-v1-free.json").replace("\"ad_policy\": \"none\"", "\"ad_policy\": \"house\""),
+        )
+        val state = ProductStateReducer.online(
+            house,
+            expectedSubject = "usr_free_fixture",
+            now = Instant.parse("2026-08-02T00:01:00Z"),
+        )
+
+        assertTrue(state is ProductState.OnlineFree)
+        assertEquals(AdPolicyDto.HOUSE, (state as ProductState.OnlineFree).entitlement.capabilities.adPolicy)
+        assertTrue(!state.entitlement.capabilities.mobileAdFree)
+    }
+
+    @Test
     fun unknownFieldsAndEnumValuesFailClosedAtTheDtoBoundary() {
         val free = fixture("entitlements-v1-free.json")
         val unknownField = free.replaceFirst("{", "{\n  \"client_invented\": true,")

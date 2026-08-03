@@ -11,9 +11,11 @@ backend-owned `services/premium/contracts/entitlements-v1-{free,premium}.json`
 fixtures directly and fails closed to online-unavailable without affecting local
 reading.
 
-Device authorization, token refresh/revocation payloads, and advertising remain
-absent until their backend-owned consumer fixtures land. There are no analytics,
-telemetry, trackers, ad SDKs, or advertising-ID surfaces.
+Premium features consume only their backend-owned consumer fixtures. House
+inventory is memory-only, eligible only
+under fresh online-free truth, and rendered as inert native text in designated
+Android chrome. There are no analytics, telemetry, trackers, ad SDKs, advertising
+IDs, remote images, HTML, scripts, or impression/click reporting surfaces.
 
 ## Requirements
 
@@ -25,6 +27,7 @@ telemetry, trackers, ad SDKs, or advertising-ID surfaces.
 ~~~bash
 ./gradlew --no-daemon testDebugUnitTest lintDebug assembleRelease
 uv run python scripts/check_engine_contract_fixtures.py  # from android/
+python3 scripts/check_ad_containment.py                  # from android/
 ~~~
 
 The first command compiles the API-28+ Compose shell, runs boundary tests,
