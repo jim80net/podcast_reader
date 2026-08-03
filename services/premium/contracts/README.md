@@ -18,6 +18,12 @@ the opaque `id` alone. Email and verification status remain account-presentation
 data: no v1 native consumer needs them, so strict clients are not coupled to or
 required to decode unnecessary personal data.
 
+`v1/boundary-policy/` is the single machine-readable admission policy for data
+movement, retention, logging, public claims, and network-capable product roots.
+Its generated per-surface projections are committed evidence, not independent
+sources of truth; `python -m podcast_reader_premium.boundary_policy --check`
+validates the policy and proves every projection is current.
+
 Any incompatible field, enum, or semantic change requires a new
 `schema_version` and an independent design gate. Additive server behavior must
 remain parseable as one of these strict v1 documents until consumers explicitly

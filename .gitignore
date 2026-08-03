@@ -58,6 +58,7 @@
 !services/premium/contracts/*.json
 !services/premium/contracts/v1/ads/*.json
 !services/premium/contracts/v1/current-user/*.json
+!services/premium/contracts/v1/boundary-policy/*.json
 !services/premium/contracts/v1/email/*.json
 !src/podcast_reader/engine/contracts/v1/subscriptions/*.json
 !src/podcast_reader/engine/contracts/v1/email/*.json

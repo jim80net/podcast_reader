@@ -1,0 +1,659 @@
+{
+  "schema_version": 1,
+  "contract": "podcast-reader-boundary-projection",
+  "policy_revision": 1,
+  "surface": "desktop",
+  "roots": [
+    {
+      "path": "app",
+      "surface": "desktop",
+      "kind": "product-client",
+      "network_capable": true,
+      "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152"
+    }
+  ],
+  "operations": [
+    {
+      "id": "desktop.engine.content",
+      "surface": "desktop",
+      "from_zone": "desktop.main",
+      "to_zone": "local-engine.memory",
+      "transport": "loopback-http",
+      "method": "GET",
+      "route": "/v1/{library-transcript-media-route}",
+      "request_contract": "engine-content-reads-v1",
+      "response_contract": "engine-content-reads-v1",
+      "request_data": [
+        "metadata.job",
+        "secret.engine-bearer"
+      ],
+      "response_data": [
+        "content.transcript-html",
+        "metadata.library",
+        "metadata.public-configuration"
+      ],
+      "destination_persistence": [],
+      "logging": [],
+      "guards": [
+        "bearer-auth",
+        "loopback-only"
+      ],
+      "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152",
+      "enforcement_ids": [
+        "desktop.network-owner-inventory",
+        "desktop.policy-projection"
+      ]
+    },
+    {
+      "id": "desktop.engine.control",
+      "surface": "desktop",
+      "from_zone": "desktop.main",
+      "to_zone": "local-engine.memory",
+      "transport": "loopback-http",
+      "method": "REQUEST",
+      "route": "/v1/{declared-control-route}",
+      "request_contract": "engine-control-v1",
+      "response_contract": "engine-control-v1",
+      "request_data": [
+        "metadata.job",
+        "metadata.public-configuration",
+        "secret.engine-bearer",
+        "secret.provider-api-key"
+      ],
+      "response_data": [
+        "metadata.job",
+        "metadata.public-configuration"
+      ],
+      "destination_persistence": [
+        "metadata.job",
+        "metadata.public-configuration",
+        "secret.provider-api-key"
+      ],
+      "logging": [],
+      "guards": [
+        "bearer-auth",
+        "loopback-only",
+        "strict-route-inventory"
+      ],
+      "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152",
+      "enforcement_ids": [
+        "desktop.network-owner-inventory",
+        "desktop.policy-projection"
+      ]
+    },
+    {
+      "id": "desktop.engine.cookies",
+      "surface": "desktop",
+      "from_zone": "desktop.main",
+      "to_zone": "local-engine.storage",
+      "transport": "loopback-http",
+      "method": "REQUEST",
+      "route": "/v1/cookies/{operation}",
+      "request_contract": "cookie-jar-v1",
+      "response_contract": "cookie-jar-metadata-v1",
+      "request_data": [
+        "metadata.cookie-jar",
+        "secret.cookie-jar",
+        "secret.engine-bearer"
+      ],
+      "response_data": [
+        "metadata.cookie-jar"
+      ],
+      "destination_persistence": [
+        "secret.cookie-jar"
+      ],
+      "logging": [
+        "metadata.cookie-jar"
+      ],
+      "guards": [
+        "bearer-auth",
+        "cookie-values-write-only",
+        "loopback-only"
+      ],
+      "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152",
+      "enforcement_ids": [
+        "desktop.network-owner-inventory",
+        "desktop.policy-projection"
+      ]
+    },
+    {
+      "id": "desktop.engine.email-outbox",
+      "surface": "desktop",
+      "from_zone": "desktop.main",
+      "to_zone": "local-engine.storage",
+      "transport": "loopback-http",
+      "method": "REQUEST",
+      "route": "/v1/{email-capability-outbox-route}",
+      "request_contract": "engine-email-control-v1",
+      "response_contract": "engine-email-control-v1",
+      "request_data": [
+        "identity.account-subject",
+        "metadata.delivery-receipt",
+        "metadata.entitlement",
+        "secret.engine-bearer"
+      ],
+      "response_data": [
+        "content.transcript-plaintext",
+        "identity.account-subject",
+        "metadata.delivery-receipt",
+        "metadata.subscription"
+      ],
+      "destination_persistence": [
+        "metadata.delivery-receipt"
+      ],
+      "logging": [
+        "metadata.delivery-receipt"
+      ],
+      "guards": [
+        "bearer-auth",
+        "consent-revision",
+        "loopback-only",
+        "subject-binding"
+      ],
+      "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152",
+      "enforcement_ids": [
+        "desktop.network-owner-inventory",
+        "desktop.policy-projection"
+      ]
+    },
+    {
+      "id": "desktop.engine.pairing",
+      "surface": "desktop",
+      "from_zone": "desktop.main",
+      "to_zone": "local-engine.memory",
+      "transport": "loopback-http",
+      "method": "POST",
+      "route": "/v1/pair",
+      "request_contract": null,
+      "response_contract": "engine-pair-start-v1",
+      "request_data": [
+        "secret.engine-bearer"
+      ],
+      "response_data": [
+        "secret.device-code"
+      ],
+      "destination_persistence": [],
+      "logging": [],
+      "guards": [
+        "bearer-auth",
+        "loopback-only",
+        "short-lived-code"
+      ],
+      "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152",
+      "enforcement_ids": [
+        "desktop.network-owner-inventory",
+        "desktop.policy-projection"
+      ]
+    },
+    {
+      "id": "desktop.engine.subscriptions",
+      "surface": "desktop",
+      "from_zone": "desktop.main",
+      "to_zone": "local-engine.storage",
+      "transport": "loopback-http",
+      "method": "REQUEST",
+      "route": "/v1/subscriptions/{operation}",
+      "request_contract": "engine-subscription-v1",
+      "response_contract": "engine-subscription-v1",
+      "request_data": [
+        "identity.account-subject",
+        "locator.feed-url",
+        "metadata.entitlement",
+        "metadata.subscription",
+        "secret.engine-bearer"
+      ],
+      "response_data": [
+        "metadata.subscription"
+      ],
+      "destination_persistence": [
+        "locator.feed-url",
+        "metadata.subscription"
+      ],
+      "logging": [
+        "metadata.subscription"
+      ],
+      "guards": [
+        "bearer-auth",
+        "capability-gate",
+        "loopback-only",
+        "subject-binding"
+      ],
+      "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152",
+      "enforcement_ids": [
+        "desktop.network-owner-inventory",
+        "desktop.policy-projection"
+      ]
+    },
+    {
+      "id": "desktop.external-cta.open",
+      "surface": "desktop",
+      "from_zone": "desktop.main",
+      "to_zone": "user.external-browser",
+      "transport": "external-browser",
+      "method": "OPEN",
+      "route": "/house-creative/cta",
+      "request_contract": "house-cta-v1",
+      "response_contract": null,
+      "request_data": [
+        "locator.external-cta-url"
+      ],
+      "response_data": [],
+      "destination_persistence": [],
+      "logging": [],
+      "guards": [
+        "https-only",
+        "owned-inventory-url",
+        "user-gesture"
+      ],
+      "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152",
+      "enforcement_ids": [
+        "desktop.network-owner-inventory",
+        "desktop.policy-projection"
+      ]
+    },
+    {
+      "id": "desktop.premium.credentials-store",
+      "surface": "desktop",
+      "from_zone": "desktop.main",
+      "to_zone": "desktop.credential-store",
+      "transport": "encrypted-storage",
+      "method": "WRITE",
+      "route": "/premium-credentials",
+      "request_contract": "desktop-premium-credentials-v1",
+      "response_contract": null,
+      "request_data": [
+        "secret.premium-access",
+        "secret.premium-refresh"
+      ],
+      "response_data": [],
+      "destination_persistence": [
+        "secret.premium-refresh"
+      ],
+      "logging": [],
+      "guards": [
+        "encrypted-or-session-memory",
+        "exact-versioned-envelope",
+        "main-process-only"
+      ],
+      "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152",
+      "enforcement_ids": [
+        "desktop.policy-projection",
+        "desktop.secret-zone"
+      ]
+    },
+    {
+      "id": "desktop.premium.device-auth",
+      "surface": "desktop",
+      "from_zone": "desktop.main",
+      "to_zone": "premium-service.memory",
+      "transport": "https",
+      "method": "POST",
+      "route": "/v1/{device-token-route}",
+      "request_contract": "native-auth-v1",
+      "response_contract": "native-auth-v1",
+      "request_data": [
+        "identity.device",
+        "secret.device-code",
+        "secret.premium-refresh"
+      ],
+      "response_data": [
+        "secret.device-code",
+        "secret.premium-access",
+        "secret.premium-refresh"
+      ],
+      "destination_persistence": [],
+      "logging": [],
+      "guards": [
+        "bounded-body",
+        "main-process-only",
+        "no-cookies",
+        "no-redirects",
+        "tls"
+      ],
+      "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152",
+      "enforcement_ids": [
+        "desktop.network-owner-inventory",
+        "desktop.policy-projection"
+      ]
+    },
+    {
+      "id": "desktop.premium.email-delivery",
+      "surface": "desktop",
+      "from_zone": "desktop.main",
+      "to_zone": "premium-service.memory",
+      "transport": "https",
+      "method": "POST",
+      "route": "/v1/email-deliveries",
+      "request_contract": "email-delivery-request-v1",
+      "response_contract": "email-delivery-receipt-v1",
+      "request_data": [
+        "content.transcript-plaintext",
+        "identity.account-subject",
+        "metadata.subscription",
+        "secret.premium-access"
+      ],
+      "response_data": [
+        "metadata.delivery-receipt"
+      ],
+      "destination_persistence": [],
+      "logging": [],
+      "guards": [
+        "bounded-content",
+        "explicit-consent",
+        "fresh-email-entitlement",
+        "main-process-only",
+        "no-recipient-field",
+        "subject-binding"
+      ],
+      "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152",
+      "enforcement_ids": [
+        "desktop.network-owner-inventory",
+        "desktop.policy-projection"
+      ]
+    },
+    {
+      "id": "desktop.premium.entitlement",
+      "surface": "desktop",
+      "from_zone": "desktop.main",
+      "to_zone": "premium-service.memory",
+      "transport": "https",
+      "method": "GET",
+      "route": "/v1/me/entitlements",
+      "request_contract": null,
+      "response_contract": "entitlements-v1",
+      "request_data": [
+        "secret.premium-access"
+      ],
+      "response_data": [
+        "identity.account-subject",
+        "metadata.entitlement"
+      ],
+      "destination_persistence": [],
+      "logging": [],
+      "guards": [
+        "access-bearer",
+        "bounded-response",
+        "main-process-only",
+        "subject-binding"
+      ],
+      "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152",
+      "enforcement_ids": [
+        "desktop.network-owner-inventory",
+        "desktop.policy-projection"
+      ]
+    },
+    {
+      "id": "desktop.premium.house-ads",
+      "surface": "desktop",
+      "from_zone": "desktop.main",
+      "to_zone": "premium-service.memory",
+      "transport": "https",
+      "method": "GET",
+      "route": "/v1/ads/inventory/{slot}",
+      "request_contract": "house-ad-slot-v1",
+      "response_contract": "house-ad-inventory-v1",
+      "request_data": [
+        "secret.premium-access"
+      ],
+      "response_data": [
+        "locator.external-cta-url",
+        "metadata.house-creative"
+      ],
+      "destination_persistence": [],
+      "logging": [],
+      "guards": [
+        "access-bearer",
+        "fresh-free-entitlement",
+        "main-process-only",
+        "native-text-only",
+        "no-store"
+      ],
+      "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152",
+      "enforcement_ids": [
+        "desktop.network-owner-inventory",
+        "desktop.policy-projection"
+      ]
+    },
+    {
+      "id": "desktop.renderer.bridge",
+      "surface": "desktop",
+      "from_zone": "desktop.renderer",
+      "to_zone": "desktop.main",
+      "transport": "electron-ipc",
+      "method": "INVOKE",
+      "route": "/window.api/{declared-method}",
+      "request_contract": "podcast-reader-api-v1",
+      "response_contract": "podcast-reader-api-v1",
+      "request_data": [
+        "identity.account-subject",
+        "locator.feed-url",
+        "locator.media-url",
+        "metadata.job",
+        "metadata.public-configuration",
+        "metadata.subscription"
+      ],
+      "response_data": [
+        "content.transcript-html",
+        "identity.account-subject",
+        "locator.external-cta-url",
+        "metadata.cookie-jar",
+        "metadata.delivery-receipt",
+        "metadata.entitlement",
+        "metadata.house-creative",
+        "metadata.job",
+        "metadata.library",
+        "metadata.public-configuration",
+        "metadata.subscription"
+      ],
+      "destination_persistence": [],
+      "logging": [],
+      "guards": [
+        "credential-free",
+        "exact-method-inventory",
+        "payload-only",
+        "sandboxed-renderer"
+      ],
+      "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152",
+      "enforcement_ids": [
+        "desktop.ipc-inventory",
+        "desktop.policy-projection",
+        "desktop.secret-zone"
+      ]
+    },
+    {
+      "id": "desktop.renderer.transcript-frame",
+      "surface": "desktop",
+      "from_zone": "desktop.renderer",
+      "to_zone": "transcript-frame",
+      "transport": "sandboxed-srcdoc",
+      "method": "RENDER",
+      "route": "/reader/transcript-frame",
+      "request_contract": "transcript-html-v1",
+      "response_contract": null,
+      "request_data": [
+        "content.transcript-html"
+      ],
+      "response_data": [],
+      "destination_persistence": [],
+      "logging": [],
+      "guards": [
+        "no-parent-access",
+        "no-preload-bridge",
+        "opaque-origin",
+        "scripts-only-sandbox"
+      ],
+      "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152",
+      "enforcement_ids": [
+        "desktop.policy-projection",
+        "desktop.secret-zone"
+      ]
+    }
+  ],
+  "copy_claims": [
+    {
+      "id": "email.content-stateless",
+      "operation_ids": [
+        "backend.premium.email-delivery",
+        "backend.premium.email-sink",
+        "backend.premium.receipt-persistence",
+        "desktop.premium.email-delivery"
+      ],
+      "surfaces": [
+        "desktop",
+        "premium-readme",
+        "premium-template",
+        "site"
+      ],
+      "canonical_facts": [
+        "Transcript email is an explicit per-item or per-subscription action.",
+        "One bounded plain-text transcript and title enter premium request memory.",
+        "The premium database retains delivery metadata but no transcript, title, audio, feed URL, or recipient.",
+        "The captured DEV Maildir retains delivered development mail and no SMTP provider is configured."
+      ],
+      "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152"
+    },
+    {
+      "id": "local.zero-premium",
+      "operation_ids": [
+        "desktop.premium.device-auth",
+        "desktop.premium.email-delivery",
+        "desktop.premium.entitlement",
+        "desktop.premium.house-ads"
+      ],
+      "surfaces": [
+        "desktop",
+        "premium-readme",
+        "site"
+      ],
+      "canonical_facts": [
+        "Local mode creates no premium-service operation.",
+        "Local is distinct from online free and online premium."
+      ],
+      "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152"
+    },
+    {
+      "id": "tracking.house-only",
+      "operation_ids": [
+        "android.external-cta.open",
+        "android.premium.house-ads",
+        "desktop.external-cta.open",
+        "desktop.premium.house-ads"
+      ],
+      "surfaces": [
+        "android",
+        "desktop",
+        "site"
+      ],
+      "canonical_facts": [
+        "Ads are bounded first-party house text rendered natively.",
+        "No third-party ad SDK, tracker, executable creative, remote creative image, or impression beacon is admitted."
+      ],
+      "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152"
+    }
+  ],
+  "legacy_fences": [
+    {
+      "id": "desktop.ad-dependency-denylist",
+      "path": "services/premium/tests/test_local_product_boundary.py",
+      "assertion": "Known third-party ad dependencies remain absent from desktop and core manifests.",
+      "operation_ids": [
+        "desktop.premium.house-ads"
+      ],
+      "replacement_checker": "desktop.network-owner-inventory",
+      "retained_as_defense_in_depth": true,
+      "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152"
+    },
+    {
+      "id": "desktop.ad-renderer-denylist",
+      "path": "services/premium/tests/test_local_product_boundary.py",
+      "assertion": "Desktop house creative cannot use HTML, webviews, images, scripts, impressions, or analytics.",
+      "operation_ids": [
+        "desktop.external-cta.open",
+        "desktop.premium.house-ads"
+      ],
+      "replacement_checker": "desktop.policy-projection",
+      "retained_as_defense_in_depth": true,
+      "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152"
+    },
+    {
+      "id": "desktop.bridge-exact-methods",
+      "path": "app/tests/e2e/isolation.spec.ts",
+      "assertion": "window.api exposes exactly the reviewed payload-only method set.",
+      "operation_ids": [
+        "desktop.renderer.bridge"
+      ],
+      "replacement_checker": "desktop.ipc-inventory",
+      "retained_as_defense_in_depth": true,
+      "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152"
+    },
+    {
+      "id": "desktop.iframe-isolation",
+      "path": "app/tests/e2e/isolation.spec.ts",
+      "assertion": "Transcript HTML runs in an opaque-origin scripts-only iframe without preload or parent access.",
+      "operation_ids": [
+        "desktop.renderer.transcript-frame"
+      ],
+      "replacement_checker": "desktop.secret-zone",
+      "retained_as_defense_in_depth": true,
+      "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152"
+    },
+    {
+      "id": "desktop.local-premium-dependency-exclusion",
+      "path": "services/premium/tests/test_local_product_boundary.py",
+      "assertion": "Local core and desktop dependency closures exclude the premium service package.",
+      "operation_ids": [
+        "desktop.premium.device-auth",
+        "desktop.premium.email-delivery",
+        "desktop.premium.entitlement",
+        "desktop.premium.house-ads"
+      ],
+      "replacement_checker": "repo.surface-root-completeness",
+      "retained_as_defense_in_depth": true,
+      "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152"
+    },
+    {
+      "id": "desktop.premium-consumer-file-allowlist",
+      "path": "services/premium/tests/test_local_product_boundary.py",
+      "assertion": "Premium vocabulary appears only in reviewed desktop boundary consumers and premium modules cannot import loopback engine code.",
+      "operation_ids": [
+        "desktop.engine.control",
+        "desktop.premium.device-auth",
+        "desktop.premium.email-delivery",
+        "desktop.premium.entitlement",
+        "desktop.premium.house-ads",
+        "desktop.renderer.bridge"
+      ],
+      "replacement_checker": "desktop.policy-projection",
+      "retained_as_defense_in_depth": true,
+      "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152"
+    },
+    {
+      "id": "desktop.renderer-bearer-haystack",
+      "path": "app/tests/e2e/isolation.spec.ts",
+      "assertion": "The engine bearer is absent from renderer-reachable serialized state.",
+      "operation_ids": [
+        "desktop.renderer.bridge"
+      ],
+      "replacement_checker": "desktop.secret-zone",
+      "retained_as_defense_in_depth": true,
+      "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152"
+    },
+    {
+      "id": "desktop.renderer-secret-field-denylist",
+      "path": "services/premium/tests/test_local_product_boundary.py",
+      "assertion": "Renderer IPC declarations contain no access, refresh, authorization, or bearer fields.",
+      "operation_ids": [
+        "desktop.renderer.bridge"
+      ],
+      "replacement_checker": "desktop.secret-zone",
+      "retained_as_defense_in_depth": true,
+      "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152"
+    }
+  ],
+  "checker_ids": [
+    "desktop.ipc-inventory",
+    "desktop.network-owner-inventory",
+    "desktop.policy-projection",
+    "desktop.secret-zone"
+  ]
+}
