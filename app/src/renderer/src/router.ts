@@ -9,12 +9,14 @@ export type Route =
   | { view: 'library' }
   | { view: 'reader'; sourceId: string }
   | { view: 'new' }
+  | { view: 'subscriptions' }
   | { view: 'settings' }
   | { view: 'setup' }
 
 export function parseHash(hash: string): Route {
   const path = hash.replace(/^#\/?/, '')
   if (path === 'new') return { view: 'new' }
+  if (path === 'subscriptions') return { view: 'subscriptions' }
   if (path === 'settings') return { view: 'settings' }
   if (path === 'setup') return { view: 'setup' }
   const readerMatch = /^reader\/(.+)$/.exec(path)
@@ -34,6 +36,8 @@ export function hrefFor(route: Route): string {
       return '#/library'
     case 'new':
       return '#/new'
+    case 'subscriptions':
+      return '#/subscriptions'
     case 'settings':
       return '#/settings'
     case 'setup':

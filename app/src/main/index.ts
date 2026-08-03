@@ -169,7 +169,12 @@ async function start(): Promise<void> {
     createClient: (handle) => new EngineClient(handle.port, handle.token),
     createStream: (client, handlers) => new EventStream(client, handlers),
     vault,
-    send: broadcast,
+    send: (channel, payload) => {
+      broadcast(channel, payload)
+      if (channel === PUSH_CHANNELS.engineStatus && typeof payload === 'object' && payload !== null && (payload as { state?: unknown }).state === 'ready') {
+        void premium.synchronizeCapability()
+      }
+    },
     isAlive: pidIsAlive,
     killPid: supervisorDeps.killPid,
     sleep: supervisorDeps.sleep,
@@ -220,6 +225,14 @@ function setupPremium(): PremiumAccess {
       openExternal: (url) => shell.openExternal(url),
       invalidated: () => broadcast(PUSH_CHANNELS.premiumInvalidated, null),
       stateChanged: (state) => broadcast(PUSH_CHANNELS.premiumState, state),
+      syncCapability: async (snapshot) => {
+        const client = manager?.client
+        if (client !== null && client !== undefined) await client.updateOnlineCapabilities(snapshot)
+      },
+      capabilitySyncFailed: () => {
+        log('online capability synchronization failed; restarting engine fail-closed')
+        void manager?.restart()
+      },
       now: Date.now,
       schedule: (callback, milliseconds) => setTimeout(callback, milliseconds),
       cancel: clearTimeout

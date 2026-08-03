@@ -6,6 +6,7 @@ import type { PremiumAdSlot } from '../shared/ipc'
 import type { SettingsUpdate } from '../shared/types'
 import { disabledPremiumAccess } from './premium/controller'
 import type { PremiumAccess } from './premium/controller'
+import { publicPollResult, publicSubscription, subscriptionError, validateFeedUrlInput, validateSubscriptionId } from './subscriptions'
 
 /**
  * Main-process side of the typed IPC surface (design decision 4): each
@@ -127,6 +128,25 @@ export function registerIpcHandlers(
   ipcMain.handle(CHANNELS.premiumSignOut, () => premium.signOut())
   ipcMain.handle(CHANNELS.premiumInventory, (_e, slot: PremiumAdSlot) => premium.inventory(slot))
   ipcMain.handle(CHANNELS.premiumOpenCta, (_e, slot: PremiumAdSlot, url: string) => premium.openCta(slot, url))
+  ipcMain.handle(CHANNELS.subscriptionsList, async () => {
+    try { return (await client().listSubscriptions()).map(publicSubscription) }
+    catch (error) { throw subscriptionError(error) }
+  })
+  ipcMain.handle(CHANNELS.subscriptionsCreate, async (_e, feedUrl: unknown) => {
+    if (!premium.subscriptionsEnabled()) throw new Error('premium_feature_unavailable')
+    try { return publicSubscription(await client().createSubscription(validateFeedUrlInput(feedUrl))) }
+    catch (error) { throw subscriptionError(error) }
+  })
+  ipcMain.handle(CHANNELS.subscriptionsPoll, async (_e, subscriptionId: unknown) => {
+    if (!premium.subscriptionsEnabled()) throw new Error('premium_feature_unavailable')
+    try { return publicPollResult(await client().pollSubscription(validateSubscriptionId(subscriptionId))) }
+    catch (error) { throw subscriptionError(error) }
+  })
+  ipcMain.handle(CHANNELS.subscriptionsDelete, async (_e, subscriptionId: unknown) => {
+    if (!premium.subscriptionsEnabled()) throw new Error('premium_feature_unavailable')
+    try { await client().deleteSubscription(validateSubscriptionId(subscriptionId)) }
+    catch (error) { throw subscriptionError(error) }
+  })
 
   ipcMain.handle(CHANNELS.updateGetStatus, () => updates.status())
   ipcMain.handle(CHANNELS.updateInstall, () => updates.installNow())

@@ -11,6 +11,14 @@ import { PremiumRequestError } from './transport'
 import type { PremiumTransport } from './transport'
 
 interface CachedInventory extends PremiumAdInventory { generation: number }
+interface PremiumCapabilitySnapshot {
+  schema_version: 1
+  subject: string
+  entitlement_revision: number
+  flags_revision: number
+  podcast_subscriptions: boolean
+  expires_at: string
+}
 const MAX_TIMER_MS = 2_147_483_647
 
 export interface PremiumControllerDeps {
@@ -20,6 +28,8 @@ export interface PremiumControllerDeps {
   openExternal(url: string): Promise<void>
   invalidated(): void
   stateChanged(state: PremiumProductState): void
+  syncCapability?(snapshot: PremiumCapabilitySnapshot): Promise<void>
+  capabilitySyncFailed?(): void
   now(): number
   schedule(callback: () => void, milliseconds: number): ReturnType<typeof setTimeout>
   cancel(timer: ReturnType<typeof setTimeout>): void
@@ -31,6 +41,8 @@ export interface PremiumAccess {
   connect(): Promise<PremiumProductState>
   signOut(): PremiumProductState
   background(): PremiumProductState
+  subscriptionsEnabled(): boolean
+  synchronizeCapability(): Promise<void>
   inventory(slot: PremiumAdSlot): Promise<PremiumAdInventory | null>
   openCta(slot: PremiumAdSlot, url: string): Promise<void>
 }
@@ -46,6 +58,8 @@ export class PremiumController implements PremiumAccess {
   private readonly pending = new Map<PremiumAdSlot, Promise<PremiumAdInventory | null>>()
   private expiryTimer: ReturnType<typeof setTimeout> | null = null
   private refreshPromise: Promise<PremiumProductState> | null = null
+  private lastCapability: PremiumCapabilitySnapshot | null = null
+  private capabilityQueue: Promise<void> = Promise.resolve()
 
   constructor(private readonly deps: PremiumControllerDeps) {}
 
@@ -74,25 +88,30 @@ export class PremiumController implements PremiumAccess {
   }
 
   private async performRefresh(): Promise<PremiumProductState> {
+    this.disableCapability(this.deps.runtime.state)
     this.evict()
     await this.deps.runtime.restore()
     this.armEntitlementExpiry()
+    this.queueCapability(this.deps.runtime.state)
     return this.state()
   }
 
   async connect(): Promise<PremiumProductState> {
+    this.disableCapability(this.deps.runtime.state)
     this.evict()
     const generation = this.generation
     const tokens = await this.deps.deviceFlow.authorize()
     if (generation !== this.generation) return this.state()
     await this.deps.runtime.acceptTokens(tokens)
     this.armEntitlementExpiry()
+    this.queueCapability(this.deps.runtime.state)
     const state = this.state()
     this.deps.stateChanged(state)
     return state
   }
 
   signOut(): PremiumProductState {
+    this.disableCapability(this.deps.runtime.state)
     this.evict()
     this.deps.runtime.signOut()
     const state = this.state()
@@ -101,11 +120,22 @@ export class PremiumController implements PremiumAccess {
   }
 
   background(): PremiumProductState {
+    this.disableCapability(this.deps.runtime.state)
     this.evict()
     this.deps.runtime.background()
     const state = this.state()
     this.deps.stateChanged(state)
     return state
+  }
+
+  subscriptionsEnabled(): boolean {
+    const state = this.deps.runtime.state
+    return state.state === 'online-premium' && state.podcastSubscriptions === true && state.refreshAfter > this.deps.now()
+  }
+
+  synchronizeCapability(): Promise<void> {
+    this.queueCapability(this.deps.runtime.state)
+    return this.capabilityQueue
   }
 
   async inventory(slot: PremiumAdSlot): Promise<PremiumAdInventory | null> {
@@ -185,6 +215,7 @@ export class PremiumController implements PremiumAccess {
   }
 
   private failClosed(): void {
+    this.disableCapability(this.deps.runtime.state)
     this.evict()
     this.deps.runtime.background()
     this.deps.stateChanged(productState(this.deps.runtime.state))
@@ -224,6 +255,7 @@ export class PremiumController implements PremiumAccess {
 
   private expire(): void {
     const state = this.deps.runtime.state
+    this.disableCapability(state)
     this.evict()
     if ((state.state === 'online-free' || state.state === 'online-premium') && state.refreshAfter <= this.deps.now()) {
       this.deps.runtime.background()
@@ -233,6 +265,32 @@ export class PremiumController implements PremiumAccess {
     }
     this.deps.stateChanged(productState(state))
   }
+
+  private disableCapability(state: ProductState): void {
+    const snapshot = capabilitySnapshot(state, false) ?? this.lastCapability
+    if (snapshot === null) return
+    this.lastCapability = { ...snapshot, podcast_subscriptions: false }
+    this.enqueueCapability(this.lastCapability)
+  }
+
+  private queueCapability(state: ProductState): void {
+    const snapshot = capabilitySnapshot(state, this.subscriptionsEnabled())
+    if (snapshot === null) return
+    this.lastCapability = snapshot
+    this.enqueueCapability(snapshot, snapshot.podcast_subscriptions)
+  }
+
+  private enqueueCapability(snapshot: PremiumCapabilitySnapshot, disableFirst = false): void {
+    if (this.deps.syncCapability === undefined) return
+    const sync = this.deps.syncCapability
+    this.capabilityQueue = this.capabilityQueue
+      .catch(() => undefined)
+      .then(async () => {
+        if (disableFirst) await sync({ ...snapshot, podcast_subscriptions: false })
+        await sync(snapshot)
+      })
+      .catch(() => { this.deps.capabilitySyncFailed?.() })
+  }
 }
 
 export const disabledPremiumAccess = (): PremiumAccess => ({
@@ -241,14 +299,29 @@ export const disabledPremiumAccess = (): PremiumAccess => ({
   connect: async () => { throw new Error('premium account service is not configured') },
   signOut: () => ({ state: 'local', available: false }),
   background: () => ({ state: 'local', available: false }),
+  subscriptionsEnabled: () => false,
+  synchronizeCapability: async () => undefined,
   inventory: async () => null,
   openCta: async () => { throw new Error('ad destination is unavailable') }
 })
 
 function productState(state: ProductState): PremiumProductState {
   if (state.state === 'online-free') return { state: state.state, available: true, expiresAt: state.refreshAfter }
-  if (state.state === 'online-premium') return { state: state.state, available: true, expiresAt: state.refreshAfter }
+  if (state.state === 'online-premium') return { state: state.state, available: true, expiresAt: state.refreshAfter, subscriptionsAvailable: state.podcastSubscriptions === true }
   return { state: state.state, available: true }
+}
+
+function capabilitySnapshot(state: ProductState, enabled: boolean): PremiumCapabilitySnapshot | null {
+  if (state.state !== 'online-free' && state.state !== 'online-premium') return null
+  if (!Number.isSafeInteger(state.entitlementRevision) || !Number.isSafeInteger(state.flagsRevision)) return null
+  return {
+    schema_version: 1,
+    subject: state.subject,
+    entitlement_revision: state.entitlementRevision as number,
+    flags_revision: state.flagsRevision as number,
+    podcast_subscriptions: enabled,
+    expires_at: new Date(state.refreshAfter).toISOString().replace('.000Z', 'Z')
+  }
 }
 
 function eligible(state: ProductState, now: number): state is Extract<ProductState, { state: 'online-free' }> {

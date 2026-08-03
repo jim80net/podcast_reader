@@ -94,6 +94,8 @@ describe('registerIpcHandlers', () => {
       connect: async () => { calls.push(['connect']); return { state: 'online-free', available: true, expiresAt: 123 } },
       signOut: () => { calls.push(['signOut']); return { state: 'local', available: true } },
       background: () => ({ state: 'online-unavailable', available: true }),
+      subscriptionsEnabled: () => false,
+      synchronizeCapability: async () => undefined,
       inventory: async (slot) => { calls.push(['inventory', slot]); return null },
       openCta: async (slot, url) => { calls.push(['openCta', slot, url]) }
     }

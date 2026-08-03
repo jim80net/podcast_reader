@@ -26,6 +26,37 @@ import type {
 /** Bound on the shutdown POST — small, so quit falls through to wait/force-kill fast. */
 const SHUTDOWN_TIMEOUT_MS = 2000
 
+export interface OnlineCapabilitySnapshot {
+  schema_version: 1
+  subject: string
+  entitlement_revision: number
+  flags_revision: number
+  podcast_subscriptions: boolean
+  expires_at: string
+}
+
+export interface EngineSubscriptionRecord {
+  id: string
+  feed_url: string
+  enabled: boolean
+  title: string | null
+  normalized_origin: string
+  etag: string | null
+  last_modified: string | null
+  last_checked_at: string | null
+  next_check_at: string | null
+  last_error: string | null
+  last_error_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface EngineSubscriptionPollResult {
+  subscription: EngineSubscriptionRecord
+  discovered_count: number
+  not_modified: boolean
+}
+
 export class EngineRequestError extends Error {
   constructor(
     readonly status: number,
@@ -163,6 +194,26 @@ export class EngineClient {
   // engine/app.py:512 (GET /v1/cookies — metadata only, never jar content)
   listCookieJars(): Promise<CookieJarInfo[]> {
     return this.json('GET', '/v1/cookies')
+  }
+
+  updateOnlineCapabilities(snapshot: OnlineCapabilitySnapshot): Promise<void> {
+    return this.request('PUT', '/v1/online-capabilities', snapshot).then(() => undefined)
+  }
+
+  listSubscriptions(): Promise<EngineSubscriptionRecord[]> {
+    return this.json('GET', '/v1/subscriptions')
+  }
+
+  createSubscription(feedUrl: string): Promise<EngineSubscriptionRecord> {
+    return this.json('POST', '/v1/subscriptions', { feed_url: feedUrl })
+  }
+
+  pollSubscription(subscriptionId: string): Promise<EngineSubscriptionPollResult> {
+    return this.json('POST', `/v1/subscriptions/${encodeURIComponent(subscriptionId)}/poll`)
+  }
+
+  async deleteSubscription(subscriptionId: string): Promise<void> {
+    await this.request('DELETE', `/v1/subscriptions/${encodeURIComponent(subscriptionId)}`)
   }
 
   // engine/app.py:517 (DELETE /v1/cookies/{domain} — 404 when absent)

@@ -13,6 +13,7 @@ import { mountNew } from './views/new'
 import { mountReader } from './views/reader'
 import { mountSettings } from './views/settings'
 import { mountSetup } from './views/setup'
+import { mountSubscriptions } from './views/subscriptions'
 import type { Route } from './router'
 import type { ViewCleanup } from './store'
 import type { EngineStatus, UpdateStatus } from '../../shared/ipc'
@@ -34,6 +35,7 @@ const jobsHydrator = createJobsHydrator(() => window.api.listJobs(), store)
 const navLinks = new Map<Route['view'], HTMLAnchorElement>([
   ['library', el('a', { text: 'Library', attrs: { href: hrefFor({ view: 'library' }) } })],
   ['new', el('a', { text: 'New', attrs: { href: hrefFor({ view: 'new' }) } })],
+  ['subscriptions', el('a', { text: 'Subscriptions', attrs: { href: hrefFor({ view: 'subscriptions' }) } })],
   ['settings', el('a', { text: 'Settings', attrs: { href: hrefFor({ view: 'settings' }) } })]
 ])
 
@@ -250,6 +252,9 @@ function render(route: Route): void {
       break
     case 'new':
       cleanup = mountNew(viewContainer, store)
+      break
+    case 'subscriptions':
+      cleanup = mountSubscriptions(viewContainer)
       break
     case 'settings':
       cleanup = mountSettings(viewContainer)
