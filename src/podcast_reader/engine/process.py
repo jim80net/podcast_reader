@@ -29,6 +29,7 @@ import uvicorn
 from podcast_reader.engine import library
 from podcast_reader.engine.app import create_app
 from podcast_reader.engine.cookies import resolve_jar_for_source
+from podcast_reader.engine.email_outbox import EmailOutboxManager
 from podcast_reader.engine.events import EventBus
 from podcast_reader.engine.jobs import JobStore
 from podcast_reader.engine.managed_tools import (
@@ -362,8 +363,13 @@ def serve_engine(
         cache_max_bytes=lambda: load_settings(base)["media_cache_max_bytes"],
         get_entry=lambda sid: library.get_entry(Path(load_settings(base)["library_dir"]), sid),
     )
+    subscription_store = SubscriptionStore(base)
+    email_outbox_manager = EmailOutboxManager(
+        subscription_store,
+        library_dir=lambda: Path(load_settings(base)["library_dir"]),
+    )
     subscription_manager = SubscriptionManager(
-        SubscriptionStore(base),
+        subscription_store,
         job_store=store,
         library_has_source=lambda source: (
             library.get_entry(
@@ -371,6 +377,7 @@ def serve_engine(
             )
             is not None
         ),
+        email_outbox=email_outbox_manager,
     )
 
     # POST /v1/shutdown hook: the server object is created after the app, so
@@ -389,6 +396,7 @@ def serve_engine(
         pack_manager=pack_manager,
         media_manager=media_manager,
         subscription_manager=subscription_manager,
+        email_outbox_manager=email_outbox_manager,
     )
     # timeout_graceful_shutdown bounds exit even when a client leaves an SSE
     # stream open — an open /v1/events response would otherwise hold graceful

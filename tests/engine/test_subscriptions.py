@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from podcast_reader.engine.email_outbox import EmailCapabilitySnapshot, EmailOutboxManager
 from podcast_reader.engine.jobs import JobStore
 from podcast_reader.engine.subscription_feed import FeedResponse, FeedTemporaryError
 from podcast_reader.engine.subscription_store import SubscriptionStore
@@ -527,6 +528,61 @@ def test_subscription_job_uses_normal_worker_sse_and_terminal_reconciliation(
         assert manager.store.list_episodes(subscription["id"])[1]["state"] == "completed"
     finally:
         job_store.unsubscribe(subscriber)
+        job_store.shutdown()
+        manager.shutdown()
+
+
+def test_completion_reconciliation_atomically_creates_email_outbox_item(tmp_path: Path) -> None:
+    clock = _Clock(datetime(2026, 8, 3, tzinfo=timezone.utc))
+    fetcher = _Fetcher()
+    job_store = JobStore(tmp_path, _job_runner)
+    subscription_store = SubscriptionStore(tmp_path)
+    email_outbox = EmailOutboxManager(
+        subscription_store,
+        library_dir=lambda: tmp_path / "library",
+        clock=clock,
+    )
+    manager = SubscriptionManager(
+        subscription_store,
+        fetcher=fetcher,
+        clock=clock,
+        job_store=job_store,
+        email_outbox=email_outbox,
+    )
+    try:
+        manager.update_capability(_snapshot(clock))
+        subscription = manager.create_subscription("https://93.184.216.34/show.xml")
+        email_outbox.update_capability(
+            EmailCapabilitySnapshot(
+                schema_version=1,
+                subject="usr_test_01",
+                entitlement_revision=7,
+                flags_revision=12,
+                transcript_email=True,
+                expires_at=(clock.now + timedelta(minutes=5)).isoformat(),
+            )
+        )
+        email_outbox.set_subscription_preference(
+            subscription["id"], subject="usr_test_01", enabled=True
+        )
+        fetcher.responses.append(
+            FeedResponse(200, subscription["feed_url"], _FEED_UPDATED, '"v2"', None)
+        )
+        clock.now += timedelta(minutes=1)
+        manager.poll_subscription(subscription["id"])
+        job_store.start_worker()
+        deadline = time.monotonic() + 2
+        while job_store.list_jobs()[0]["state"] != "done" and time.monotonic() < deadline:
+            time.sleep(0.01)
+
+        manager._reconcile_jobs()
+        items = subscription_store.list_email_outbox()
+        assert len(items) == 1
+        assert items[0]["consent_kind"] == "subscription_completion"
+        assert items[0]["subject"] == "usr_test_01"
+        manager._reconcile_jobs()
+        assert len(subscription_store.list_email_outbox()) == 1
+    finally:
         job_store.shutdown()
         manager.shutdown()
 

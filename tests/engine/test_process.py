@@ -45,6 +45,7 @@ if TYPE_CHECKING:
 
     import uvicorn
 
+    from podcast_reader.engine.email_outbox import EmailOutboxManager
     from podcast_reader.engine.media import MediaManager
     from podcast_reader.engine.pack_manager import PackManager
     from podcast_reader.engine.settings import EngineState
@@ -518,8 +519,10 @@ class TestServeKeyStoreWiring:
             pack_manager: PackManager | None = None,
             media_manager: MediaManager | None = None,
             subscription_manager: SubscriptionManager | None = None,
+            email_outbox_manager: EmailOutboxManager | None = None,
         ) -> object:
             captured["app_store"] = key_store
+            captured["email_outbox_manager"] = email_outbox_manager
             return real_create(
                 data_dir,
                 store,
@@ -528,6 +531,7 @@ class TestServeKeyStoreWiring:
                 pack_manager=pack_manager,
                 media_manager=media_manager,
                 subscription_manager=subscription_manager,
+                email_outbox_manager=email_outbox_manager,
             )
 
         monkeypatch.setattr("podcast_reader.engine.process.make_pipeline_runner", spy_make)
@@ -540,6 +544,7 @@ class TestServeKeyStoreWiring:
 
         assert isinstance(captured["runner_store"], dict)
         assert captured["runner_store"] is captured["app_store"]
+        assert captured["email_outbox_manager"] is not None
 
 
 class TestShutdownEndpointLifecycle:

@@ -26,7 +26,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
     from pathlib import Path
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 4
 DATABASE_DIR = "subscriptions"
 DATABASE_FILE = "subscriptions.sqlite3"
 
@@ -60,10 +60,45 @@ class EpisodeRecord(TypedDict):
     updated_at: str
 
 
+class EmailPreferenceRecord(TypedDict):
+    subscription_id: str
+    subject: str
+    enabled_at: str
+    consent_revision: int
+    disabled_at: str | None
+    updated_at: str
+
+
+class EmailOutboxRecord(TypedDict):
+    client_delivery_id: str
+    subject: str
+    source_id: str
+    job_id: str | None
+    subscription_id: str | None
+    consent_kind: str
+    consent_revision: int
+    manual_action_id: str | None
+    state: str
+    attempts: int
+    next_attempt_at: str | None
+    error_code: str | None
+    claim_generation: int
+    claimed_at: str | None
+    claim_expires_at: str | None
+    server_delivery_id: str | None
+    created_at: str
+    updated_at: str
+    delivered_at: str | None
+
+
 class BackupProof(TypedDict):
     integrity_check: str
     row_counts: dict[str, int]
     schema_version: int
+
+
+class EmailIdempotencyConflictError(RuntimeError):
+    """A manual action identifier was replayed for a different transcript."""
 
 
 _SCHEMA = """
@@ -99,6 +134,181 @@ CREATE TABLE episodes (
 );
 CREATE INDEX subscriptions_due_idx ON subscriptions(enabled, next_check_at);
 CREATE INDEX episodes_state_idx ON episodes(subscription_id, state);
+CREATE TABLE subscription_email_preferences (
+    subscription_id TEXT NOT NULL REFERENCES subscriptions(id) ON DELETE CASCADE,
+    subject TEXT NOT NULL,
+    enabled_at TEXT NOT NULL,
+    consent_revision INTEGER NOT NULL CHECK (consent_revision >= 1),
+    disabled_at TEXT,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (subscription_id, subject)
+);
+CREATE TABLE email_outbox (
+    client_delivery_id TEXT PRIMARY KEY,
+    subject TEXT NOT NULL,
+    source_id TEXT NOT NULL CHECK (length(source_id) = 64),
+    job_id TEXT,
+    subscription_id TEXT REFERENCES subscriptions(id) ON DELETE SET NULL,
+    consent_kind TEXT NOT NULL CHECK (
+        consent_kind IN ('subscription_completion', 'manual')
+    ),
+    consent_revision INTEGER NOT NULL CHECK (consent_revision >= 1),
+    manual_action_id TEXT,
+    state TEXT NOT NULL CHECK (
+        state IN ('pending', 'claimed', 'delivered', 'failed', 'cancelled')
+    ),
+    attempts INTEGER NOT NULL CHECK (attempts BETWEEN 0 AND 8),
+    next_attempt_at TEXT,
+    error_code TEXT CHECK (
+        error_code IS NULL OR error_code IN (
+            'premium_feature_unavailable', 'delivery_too_large',
+            'idempotency_conflict', 'delivery_unavailable', 'email_not_verified',
+            'artifact_unavailable'
+        )
+    ),
+    claim_generation INTEGER NOT NULL CHECK (claim_generation >= 0),
+    claimed_at TEXT,
+    claim_expires_at TEXT,
+    server_delivery_id TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    delivered_at TEXT,
+    CHECK (
+        (consent_kind = 'subscription_completion'
+            AND job_id IS NOT NULL AND manual_action_id IS NULL) OR
+        (consent_kind = 'manual' AND manual_action_id IS NOT NULL)
+    )
+);
+CREATE UNIQUE INDEX email_outbox_automatic_unique
+    ON email_outbox(subject, subscription_id, job_id, consent_revision)
+    WHERE consent_kind = 'subscription_completion';
+CREATE UNIQUE INDEX email_outbox_manual_unique
+    ON email_outbox(subject, manual_action_id)
+    WHERE consent_kind = 'manual';
+CREATE INDEX email_outbox_claim_idx
+    ON email_outbox(subject, state, next_attempt_at, claim_expires_at, created_at);
+"""
+
+_EMAIL_SCHEMA = """
+CREATE TABLE IF NOT EXISTS subscription_email_preferences (
+    subscription_id TEXT NOT NULL REFERENCES subscriptions(id) ON DELETE CASCADE,
+    subject TEXT NOT NULL,
+    enabled_at TEXT NOT NULL,
+    consent_revision INTEGER NOT NULL CHECK (consent_revision >= 1),
+    disabled_at TEXT,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (subscription_id, subject)
+);
+CREATE TABLE IF NOT EXISTS email_outbox (
+    client_delivery_id TEXT PRIMARY KEY,
+    subject TEXT NOT NULL,
+    source_id TEXT NOT NULL CHECK (length(source_id) = 64),
+    job_id TEXT,
+    subscription_id TEXT REFERENCES subscriptions(id) ON DELETE SET NULL,
+    consent_kind TEXT NOT NULL CHECK (
+        consent_kind IN ('subscription_completion', 'manual')
+    ),
+    consent_revision INTEGER NOT NULL CHECK (consent_revision >= 1),
+    manual_action_id TEXT,
+    state TEXT NOT NULL CHECK (
+        state IN ('pending', 'claimed', 'delivered', 'failed', 'cancelled')
+    ),
+    attempts INTEGER NOT NULL CHECK (attempts BETWEEN 0 AND 8),
+    next_attempt_at TEXT,
+    error_code TEXT CHECK (
+        error_code IS NULL OR error_code IN (
+            'premium_feature_unavailable', 'delivery_too_large',
+            'idempotency_conflict', 'delivery_unavailable', 'email_not_verified',
+            'artifact_unavailable'
+        )
+    ),
+    claim_generation INTEGER NOT NULL CHECK (claim_generation >= 0),
+    claimed_at TEXT,
+    claim_expires_at TEXT,
+    server_delivery_id TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    delivered_at TEXT,
+    CHECK (
+        (consent_kind = 'subscription_completion'
+            AND job_id IS NOT NULL AND manual_action_id IS NULL) OR
+        (consent_kind = 'manual' AND manual_action_id IS NOT NULL)
+    )
+);
+CREATE UNIQUE INDEX IF NOT EXISTS email_outbox_automatic_unique
+    ON email_outbox(subject, subscription_id, job_id, consent_revision)
+    WHERE consent_kind = 'subscription_completion';
+CREATE UNIQUE INDEX IF NOT EXISTS email_outbox_manual_unique
+    ON email_outbox(subject, manual_action_id)
+    WHERE consent_kind = 'manual';
+CREATE INDEX IF NOT EXISTS email_outbox_claim_idx
+    ON email_outbox(subject, state, next_attempt_at, claim_expires_at, created_at);
+"""
+
+_EMAIL_V4_MIGRATION = """
+BEGIN IMMEDIATE;
+DROP INDEX IF EXISTS email_outbox_automatic_unique;
+DROP INDEX IF EXISTS email_outbox_manual_unique;
+DROP INDEX IF EXISTS email_outbox_claim_idx;
+ALTER TABLE email_outbox RENAME TO email_outbox_v3;
+CREATE TABLE email_outbox (
+    client_delivery_id TEXT PRIMARY KEY,
+    subject TEXT NOT NULL,
+    source_id TEXT NOT NULL CHECK (length(source_id) = 64),
+    job_id TEXT,
+    subscription_id TEXT REFERENCES subscriptions(id) ON DELETE SET NULL,
+    consent_kind TEXT NOT NULL CHECK (
+        consent_kind IN ('subscription_completion', 'manual')
+    ),
+    consent_revision INTEGER NOT NULL CHECK (consent_revision >= 1),
+    manual_action_id TEXT,
+    state TEXT NOT NULL CHECK (
+        state IN ('pending', 'claimed', 'delivered', 'failed', 'cancelled')
+    ),
+    attempts INTEGER NOT NULL CHECK (attempts BETWEEN 0 AND 8),
+    next_attempt_at TEXT,
+    error_code TEXT CHECK (
+        error_code IS NULL OR error_code IN (
+            'premium_feature_unavailable', 'delivery_too_large',
+            'idempotency_conflict', 'delivery_unavailable', 'email_not_verified',
+            'artifact_unavailable'
+        )
+    ),
+    claim_generation INTEGER NOT NULL CHECK (claim_generation >= 0),
+    claimed_at TEXT,
+    claim_expires_at TEXT,
+    server_delivery_id TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    delivered_at TEXT,
+    CHECK (
+        (consent_kind = 'subscription_completion'
+            AND job_id IS NOT NULL AND manual_action_id IS NULL) OR
+        (consent_kind = 'manual' AND manual_action_id IS NOT NULL)
+    )
+);
+INSERT INTO email_outbox (
+    client_delivery_id, subject, source_id, job_id, subscription_id,
+    consent_kind, consent_revision, manual_action_id, state, attempts,
+    next_attempt_at, error_code, claim_generation, claimed_at,
+    claim_expires_at, server_delivery_id, created_at, updated_at, delivered_at
+)
+SELECT
+    client_delivery_id, subject, source_id, job_id, subscription_id,
+    consent_kind, consent_revision, manual_action_id, state, attempts,
+    next_attempt_at, error_code, claim_generation, claimed_at,
+    claim_expires_at, server_delivery_id, created_at, updated_at, delivered_at
+FROM email_outbox_v3;
+DROP TABLE email_outbox_v3;
+CREATE UNIQUE INDEX email_outbox_automatic_unique
+    ON email_outbox(subject, subscription_id, job_id, consent_revision)
+    WHERE consent_kind = 'subscription_completion';
+CREATE UNIQUE INDEX email_outbox_manual_unique
+    ON email_outbox(subject, manual_action_id)
+    WHERE consent_kind = 'manual';
+CREATE INDEX email_outbox_claim_idx
+    ON email_outbox(subject, state, next_attempt_at, claim_expires_at, created_at);
+COMMIT;
 """
 
 
@@ -127,6 +337,41 @@ def _row_to_subscription(row: sqlite3.Row) -> SubscriptionRecord:
         last_error_at=row["last_error_at"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
+    )
+
+
+def _row_to_preference(row: sqlite3.Row) -> EmailPreferenceRecord:
+    return EmailPreferenceRecord(
+        subscription_id=row["subscription_id"],
+        subject=row["subject"],
+        enabled_at=row["enabled_at"],
+        consent_revision=row["consent_revision"],
+        disabled_at=row["disabled_at"],
+        updated_at=row["updated_at"],
+    )
+
+
+def _row_to_outbox(row: sqlite3.Row) -> EmailOutboxRecord:
+    return EmailOutboxRecord(
+        client_delivery_id=row["client_delivery_id"],
+        subject=row["subject"],
+        source_id=row["source_id"],
+        job_id=row["job_id"],
+        subscription_id=row["subscription_id"],
+        consent_kind=row["consent_kind"],
+        consent_revision=row["consent_revision"],
+        manual_action_id=row["manual_action_id"],
+        state=row["state"],
+        attempts=row["attempts"],
+        next_attempt_at=row["next_attempt_at"],
+        error_code=row["error_code"],
+        claim_generation=row["claim_generation"],
+        claimed_at=row["claimed_at"],
+        claim_expires_at=row["claim_expires_at"],
+        server_delivery_id=row["server_delivery_id"],
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+        delivered_at=row["delivered_at"],
     )
 
 
@@ -163,23 +408,31 @@ class SubscriptionStore:
             if version == 0:
                 connection.executescript(_SCHEMA)
                 connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
-            elif version == 1:
-                rows = connection.execute(
-                    "SELECT subscription_id, episode_key, published_at FROM episodes"
-                ).fetchall()
-                for row in rows:
-                    normalized = _normalized_published_at(row["published_at"])
-                    if normalized != row["published_at"]:
-                        connection.execute(
-                            """
-                            UPDATE episodes SET published_at = ?
-                            WHERE subscription_id = ? AND episode_key = ?
-                            """,
-                            (normalized, row["subscription_id"], row["episode_key"]),
-                        )
+            else:
+                if version == 1:
+                    rows = connection.execute(
+                        "SELECT subscription_id, episode_key, published_at FROM episodes"
+                    ).fetchall()
+                    for row in rows:
+                        normalized = _normalized_published_at(row["published_at"])
+                        if normalized != row["published_at"]:
+                            connection.execute(
+                                """
+                                UPDATE episodes SET published_at = ?
+                                WHERE subscription_id = ? AND episode_key = ?
+                                """,
+                                (normalized, row["subscription_id"], row["episode_key"]),
+                            )
+                    version = 2
+                if version == 2:
+                    connection.executescript(_EMAIL_SCHEMA)
+                    version = 4
+                if version == 3:
+                    connection.executescript(_EMAIL_V4_MIGRATION)
+                    version = 4
+                if version != SCHEMA_VERSION:
+                    raise RuntimeError(f"unsupported subscription database schema {version}")
                 connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
-            elif version != SCHEMA_VERSION:
-                raise RuntimeError(f"unsupported subscription database schema {version}")
 
     @contextmanager
     def _transaction(self) -> Iterator[sqlite3.Connection]:
@@ -250,6 +503,15 @@ class SubscriptionStore:
 
     def delete_subscription(self, subscription_id: str) -> None:
         with self._transaction() as connection:
+            now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+            connection.execute(
+                """
+                UPDATE email_outbox SET state = 'cancelled', next_attempt_at = NULL,
+                    error_code = NULL, updated_at = ?
+                WHERE subscription_id = ? AND state = 'pending'
+                """,
+                (now, subscription_id),
+            )
             cursor = connection.execute(
                 "DELETE FROM subscriptions WHERE id = ?", (subscription_id,)
             )
@@ -475,10 +737,16 @@ class SubscriptionStore:
         *,
         state: str,
         updated_at: str,
-    ) -> None:
+        email_subject: str | None = None,
+        client_delivery_id: str | None = None,
+        source_id: str | None = None,
+    ) -> str | None:
         """Record a reconciled job outcome without deleting local episode data."""
         if state not in {"completed", "failed"}:
             raise ValueError("invalid terminal episode state")
+        if email_subject is not None and (client_delivery_id is None or source_id is None):
+            raise ValueError("email completion requires delivery and source identities")
+        inserted_delivery_id: str | None = None
         with self._transaction() as connection:
             cursor = connection.execute(
                 """
@@ -499,6 +767,458 @@ class SubscriptionStore:
                     raise KeyError((subscription_id, episode_key))
                 if row["state"] != state:
                     raise RuntimeError("episode is not queued for reconciliation")
+            elif state == "completed" and email_subject is not None:
+                episode = connection.execute(
+                    """
+                    SELECT job_id FROM episodes
+                    WHERE subscription_id = ? AND episode_key = ?
+                    """,
+                    (subscription_id, episode_key),
+                ).fetchone()
+                preference = connection.execute(
+                    """
+                    SELECT consent_revision FROM subscription_email_preferences
+                    WHERE subscription_id = ? AND subject = ? AND disabled_at IS NULL
+                      AND enabled_at <= ?
+                    """,
+                    (subscription_id, email_subject, updated_at),
+                ).fetchone()
+                if episode is not None and episode["job_id"] is not None and preference is not None:
+                    inserted = connection.execute(
+                        """
+                        INSERT OR IGNORE INTO email_outbox (
+                            client_delivery_id, subject, source_id, job_id, subscription_id,
+                            consent_kind, consent_revision, manual_action_id, state, attempts,
+                            next_attempt_at, error_code, claim_generation, claimed_at,
+                            claim_expires_at, server_delivery_id, created_at, updated_at,
+                            delivered_at
+                        ) VALUES (?, ?, ?, ?, ?, 'subscription_completion', ?, NULL,
+                            'pending', 0, ?, NULL, 0, NULL, NULL, NULL, ?, ?, NULL)
+                        """,
+                        (
+                            client_delivery_id,
+                            email_subject,
+                            source_id,
+                            episode["job_id"],
+                            subscription_id,
+                            preference["consent_revision"],
+                            updated_at,
+                            updated_at,
+                            updated_at,
+                        ),
+                    )
+                    if inserted.rowcount == 1:
+                        inserted_delivery_id = client_delivery_id
+        return inserted_delivery_id
+
+    def set_email_preference(
+        self,
+        subscription_id: str,
+        subject: str,
+        *,
+        enabled: bool,
+        updated_at: str,
+    ) -> EmailPreferenceRecord | None:
+        """Enable/revoke one subject's standing consent for one subscription."""
+        with self._transaction() as connection:
+            subscription = connection.execute(
+                "SELECT id FROM subscriptions WHERE id = ?", (subscription_id,)
+            ).fetchone()
+            if subscription is None:
+                raise KeyError(subscription_id)
+            row = connection.execute(
+                """
+                SELECT * FROM subscription_email_preferences
+                WHERE subscription_id = ? AND subject = ?
+                """,
+                (subscription_id, subject),
+            ).fetchone()
+            if enabled:
+                if row is None:
+                    connection.execute(
+                        """
+                        INSERT INTO subscription_email_preferences (
+                            subscription_id, subject, enabled_at, consent_revision,
+                            disabled_at, updated_at
+                        ) VALUES (?, ?, ?, 1, NULL, ?)
+                        """,
+                        (subscription_id, subject, updated_at, updated_at),
+                    )
+                elif row["disabled_at"] is not None:
+                    connection.execute(
+                        """
+                        UPDATE subscription_email_preferences
+                        SET enabled_at = ?, consent_revision = consent_revision + 1,
+                            disabled_at = NULL, updated_at = ?
+                        WHERE subscription_id = ? AND subject = ?
+                        """,
+                        (updated_at, updated_at, subscription_id, subject),
+                    )
+            elif row is not None and row["disabled_at"] is None:
+                connection.execute(
+                    """
+                    UPDATE subscription_email_preferences
+                    SET disabled_at = ?, updated_at = ?
+                    WHERE subscription_id = ? AND subject = ?
+                    """,
+                    (updated_at, updated_at, subscription_id, subject),
+                )
+                connection.execute(
+                    """
+                    UPDATE email_outbox SET state = 'cancelled', next_attempt_at = NULL,
+                        error_code = NULL, updated_at = ?
+                    WHERE subscription_id = ? AND subject = ?
+                      AND consent_kind = 'subscription_completion' AND state = 'pending'
+                    """,
+                    (updated_at, subscription_id, subject),
+                )
+            result = connection.execute(
+                """
+                SELECT * FROM subscription_email_preferences
+                WHERE subscription_id = ? AND subject = ?
+                """,
+                (subscription_id, subject),
+            ).fetchone()
+        return _row_to_preference(result) if result is not None else None
+
+    def get_email_preference(
+        self, subscription_id: str, subject: str
+    ) -> EmailPreferenceRecord | None:
+        with self._lock:
+            row = self._connection.execute(
+                """
+                SELECT * FROM subscription_email_preferences
+                WHERE subscription_id = ? AND subject = ?
+                """,
+                (subscription_id, subject),
+            ).fetchone()
+        return _row_to_preference(row) if row is not None else None
+
+    def completed_email_candidates(self, subject: str) -> list[EpisodeRecord]:
+        """Completed, consent-covered episodes still missing a durable outbox item."""
+        with self._lock:
+            rows = self._connection.execute(
+                """
+                SELECT episodes.* FROM episodes
+                JOIN subscription_email_preferences preference
+                  ON preference.subscription_id = episodes.subscription_id
+                 AND preference.subject = ?
+                 AND preference.disabled_at IS NULL
+                 AND preference.enabled_at <= episodes.updated_at
+                WHERE episodes.state = 'completed' AND episodes.job_id IS NOT NULL
+                  AND NOT EXISTS (
+                      SELECT 1 FROM email_outbox
+                      WHERE email_outbox.subject = preference.subject
+                        AND email_outbox.subscription_id = episodes.subscription_id
+                        AND email_outbox.job_id = episodes.job_id
+                        AND email_outbox.consent_revision = preference.consent_revision
+                        AND email_outbox.consent_kind = 'subscription_completion'
+                  )
+                ORDER BY episodes.updated_at, episodes.subscription_id, episodes.episode_key
+                """,
+                (subject,),
+            ).fetchall()
+        return [self._episode_from_row(row) for row in rows]
+
+    def insert_reconciled_email(
+        self,
+        *,
+        subscription_id: str,
+        episode_key: str,
+        client_delivery_id: str,
+        subject: str,
+        source_id: str,
+        created_at: str,
+    ) -> str | None:
+        """Insert one recovered completion only while its original consent remains active."""
+        with self._transaction() as connection:
+            inserted = connection.execute(
+                """
+                INSERT OR IGNORE INTO email_outbox (
+                    client_delivery_id, subject, source_id, job_id, subscription_id,
+                    consent_kind, consent_revision, manual_action_id, state, attempts,
+                    next_attempt_at, error_code, claim_generation, claimed_at,
+                    claim_expires_at, server_delivery_id, created_at, updated_at,
+                    delivered_at
+                )
+                SELECT ?, ?, ?, episodes.job_id, episodes.subscription_id,
+                    'subscription_completion', preference.consent_revision, NULL,
+                    'pending', 0, ?, NULL, 0, NULL, NULL, NULL, ?, ?, NULL
+                FROM episodes
+                JOIN subscription_email_preferences preference
+                  ON preference.subscription_id = episodes.subscription_id
+                 AND preference.subject = ?
+                 AND preference.disabled_at IS NULL
+                 AND preference.enabled_at <= episodes.updated_at
+                WHERE episodes.subscription_id = ? AND episodes.episode_key = ?
+                  AND episodes.state = 'completed' AND episodes.job_id IS NOT NULL
+                """,
+                (
+                    client_delivery_id,
+                    subject,
+                    source_id,
+                    created_at,
+                    created_at,
+                    created_at,
+                    subject,
+                    subscription_id,
+                    episode_key,
+                ),
+            )
+        return client_delivery_id if inserted.rowcount == 1 else None
+
+    def insert_manual_email(
+        self,
+        *,
+        client_delivery_id: str,
+        subject: str,
+        source_id: str,
+        action_id: str,
+        created_at: str,
+    ) -> EmailOutboxRecord:
+        with self._transaction() as connection:
+            connection.execute(
+                """
+                INSERT OR IGNORE INTO email_outbox (
+                    client_delivery_id, subject, source_id, job_id, subscription_id,
+                    consent_kind, consent_revision, manual_action_id, state, attempts,
+                    next_attempt_at, error_code, claim_generation, claimed_at,
+                    claim_expires_at, server_delivery_id, created_at, updated_at,
+                    delivered_at
+                ) VALUES (?, ?, ?, NULL, NULL, 'manual', 1, ?, 'pending', 0, ?,
+                    NULL, 0, NULL, NULL, NULL, ?, ?, NULL)
+                """,
+                (
+                    client_delivery_id,
+                    subject,
+                    source_id,
+                    action_id,
+                    created_at,
+                    created_at,
+                    created_at,
+                ),
+            )
+            row = connection.execute(
+                "SELECT * FROM email_outbox WHERE subject = ? AND manual_action_id = ?",
+                (subject, action_id),
+            ).fetchone()
+        if row is None:
+            raise RuntimeError("manual email action was not persisted")
+        if row["source_id"] != source_id:
+            raise EmailIdempotencyConflictError
+        return _row_to_outbox(row)
+
+    def list_email_outbox(self, *, subject: str | None = None) -> list[EmailOutboxRecord]:
+        with self._lock:
+            if subject is None:
+                rows = self._connection.execute(
+                    "SELECT * FROM email_outbox ORDER BY created_at, client_delivery_id"
+                ).fetchall()
+            else:
+                rows = self._connection.execute(
+                    """
+                    SELECT * FROM email_outbox WHERE subject = ?
+                    ORDER BY created_at, client_delivery_id
+                    """,
+                    (subject,),
+                ).fetchall()
+        return [_row_to_outbox(row) for row in rows]
+
+    def claim_email_outbox(
+        self,
+        subject: str,
+        *,
+        claimed_at: str,
+        claim_expires_at: str,
+    ) -> EmailOutboxRecord | None:
+        with self._transaction() as connection:
+            connection.execute(
+                """
+                UPDATE email_outbox SET state = 'cancelled', next_attempt_at = NULL,
+                    error_code = NULL, updated_at = ?
+                WHERE subject = ? AND consent_kind = 'subscription_completion'
+                  AND ((state = 'pending') OR
+                       (state = 'claimed' AND claim_expires_at <= ?))
+                  AND NOT EXISTS (
+                      SELECT 1 FROM subscription_email_preferences preference
+                      WHERE preference.subscription_id = email_outbox.subscription_id
+                        AND preference.subject = email_outbox.subject
+                        AND preference.consent_revision = email_outbox.consent_revision
+                        AND preference.disabled_at IS NULL
+                  )
+                """,
+                (claimed_at, subject, claimed_at),
+            )
+            connection.execute(
+                """
+                UPDATE email_outbox SET state = 'failed', error_code = 'delivery_unavailable',
+                    next_attempt_at = NULL, claimed_at = NULL, claim_expires_at = NULL,
+                    updated_at = ?
+                WHERE subject = ? AND attempts >= 8
+                  AND (state = 'pending' OR (state = 'claimed' AND claim_expires_at <= ?))
+                """,
+                (claimed_at, subject, claimed_at),
+            )
+            row = connection.execute(
+                """
+                SELECT * FROM email_outbox
+                WHERE subject = ? AND attempts < 8 AND (
+                    (state = 'pending' AND next_attempt_at <= ?) OR
+                    (state = 'claimed' AND claim_expires_at <= ?)
+                )
+                ORDER BY created_at, client_delivery_id LIMIT 1
+                """,
+                (subject, claimed_at, claimed_at),
+            ).fetchone()
+            if row is None:
+                return None
+            connection.execute(
+                """
+                UPDATE email_outbox SET state = 'claimed', attempts = attempts + 1,
+                    claim_generation = claim_generation + 1, claimed_at = ?,
+                    claim_expires_at = ?, next_attempt_at = NULL, error_code = NULL,
+                    updated_at = ?
+                WHERE client_delivery_id = ?
+                """,
+                (claimed_at, claim_expires_at, claimed_at, row["client_delivery_id"]),
+            )
+            claimed = connection.execute(
+                "SELECT * FROM email_outbox WHERE client_delivery_id = ?",
+                (row["client_delivery_id"],),
+            ).fetchone()
+        return _row_to_outbox(claimed)
+
+    def complete_email_outbox(
+        self,
+        client_delivery_id: str,
+        *,
+        claim_generation: int,
+        server_delivery_id: str,
+        delivered_at: str,
+        updated_at: str,
+    ) -> EmailOutboxRecord:
+        with self._transaction() as connection:
+            row = connection.execute(
+                "SELECT * FROM email_outbox WHERE client_delivery_id = ?",
+                (client_delivery_id,),
+            ).fetchone()
+            if row is None:
+                raise KeyError(client_delivery_id)
+            if row["state"] == "delivered":
+                if row["server_delivery_id"] != server_delivery_id:
+                    raise RuntimeError("delivery completion conflicts with prior result")
+                return _row_to_outbox(row)
+            if row["state"] != "claimed" or row["claim_generation"] != claim_generation:
+                raise RuntimeError("email claim is no longer current")
+            connection.execute(
+                """
+                UPDATE email_outbox SET state = 'delivered', error_code = NULL,
+                    next_attempt_at = NULL, claimed_at = NULL, claim_expires_at = NULL,
+                    server_delivery_id = ?, delivered_at = ?, updated_at = ?
+                WHERE client_delivery_id = ?
+                """,
+                (server_delivery_id, delivered_at, updated_at, client_delivery_id),
+            )
+            completed = connection.execute(
+                "SELECT * FROM email_outbox WHERE client_delivery_id = ?",
+                (client_delivery_id,),
+            ).fetchone()
+        return _row_to_outbox(completed)
+
+    def release_email_outbox(
+        self,
+        client_delivery_id: str,
+        *,
+        claim_generation: int,
+        error_code: str,
+        next_attempt_at: str,
+        updated_at: str,
+    ) -> EmailOutboxRecord:
+        terminal_errors = {
+            "delivery_too_large",
+            "idempotency_conflict",
+            "email_not_verified",
+            "artifact_unavailable",
+        }
+        with self._transaction() as connection:
+            row = connection.execute(
+                "SELECT * FROM email_outbox WHERE client_delivery_id = ?",
+                (client_delivery_id,),
+            ).fetchone()
+            if row is None:
+                raise KeyError(client_delivery_id)
+            if row["state"] != "claimed" or row["claim_generation"] != claim_generation:
+                raise RuntimeError("email claim is no longer current")
+            preference_active = True
+            if row["consent_kind"] == "subscription_completion":
+                preference_active = (
+                    connection.execute(
+                        """
+                        SELECT 1 FROM subscription_email_preferences
+                        WHERE subscription_id = ? AND subject = ?
+                          AND consent_revision = ? AND disabled_at IS NULL
+                        """,
+                        (row["subscription_id"], row["subject"], row["consent_revision"]),
+                    ).fetchone()
+                    is not None
+                )
+            if not preference_active:
+                state = "cancelled"
+                attempts = row["attempts"]
+                stored_error = None
+                retry_at = None
+            elif error_code == "premium_feature_unavailable":
+                state = "pending"
+                attempts = max(0, int(row["attempts"]) - 1)
+                stored_error = error_code
+                retry_at = updated_at
+            elif error_code in terminal_errors or row["attempts"] >= 8:
+                state = "failed"
+                attempts = row["attempts"]
+                stored_error = error_code
+                retry_at = None
+            else:
+                state = "pending"
+                attempts = row["attempts"]
+                stored_error = error_code
+                retry_at = next_attempt_at
+            connection.execute(
+                """
+                UPDATE email_outbox SET state = ?, attempts = ?, error_code = ?,
+                    next_attempt_at = ?, claimed_at = NULL, claim_expires_at = NULL,
+                    updated_at = ? WHERE client_delivery_id = ?
+                """,
+                (state, attempts, stored_error, retry_at, updated_at, client_delivery_id),
+            )
+            released = connection.execute(
+                "SELECT * FROM email_outbox WHERE client_delivery_id = ?",
+                (client_delivery_id,),
+            ).fetchone()
+        return _row_to_outbox(released)
+
+    def cancel_email_outbox(self, client_delivery_id: str, *, updated_at: str) -> EmailOutboxRecord:
+        with self._transaction() as connection:
+            row = connection.execute(
+                "SELECT * FROM email_outbox WHERE client_delivery_id = ?",
+                (client_delivery_id,),
+            ).fetchone()
+            if row is None:
+                raise KeyError(client_delivery_id)
+            if row["state"] == "claimed":
+                raise RuntimeError("email upload may already be in progress")
+            if row["state"] == "pending":
+                connection.execute(
+                    """
+                    UPDATE email_outbox SET state = 'cancelled', next_attempt_at = NULL,
+                        error_code = NULL, updated_at = ? WHERE client_delivery_id = ?
+                    """,
+                    (updated_at, client_delivery_id),
+                )
+                row = connection.execute(
+                    "SELECT * FROM email_outbox WHERE client_delivery_id = ?",
+                    (client_delivery_id,),
+                ).fetchone()
+        return _row_to_outbox(row)
 
     @staticmethod
     def _episode_from_row(row: sqlite3.Row) -> EpisodeRecord:
@@ -542,7 +1262,12 @@ class SubscriptionStore:
     def _row_counts(connection: sqlite3.Connection) -> dict[str, int]:
         return {
             table: int(connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
-            for table in ("subscriptions", "episodes")
+            for table in (
+                "subscriptions",
+                "episodes",
+                "subscription_email_preferences",
+                "email_outbox",
+            )
         }
 
     def raw_connection_for_tests(self) -> sqlite3.Connection:
