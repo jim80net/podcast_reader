@@ -22,9 +22,13 @@ dependencies = [
 dev = [
   "httpx>=0.28,<1",
   "mypy>=1.17,<2",
+  "podcast-reader",
   "pytest>=8.4,<9",
   "ruff>=0.12,<1",
 ]
+
+[tool.uv.sources]
+podcast-reader = { path = "../..", editable = true }
 
 [project.scripts]
 premium-dev = "podcast_reader_premium.cli:main"
