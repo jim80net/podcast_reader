@@ -73,7 +73,7 @@ class EntitlementContractTest {
             }
             assertEquals(name, vector.getValue("expected_state").jsonPrimitive.content, actual)
         }
-        invalid.forEach { element ->
+        val acceptedInvalidVectors = invalid.mapNotNull { element ->
             val vector = element.jsonObject
             val name = vector.getValue("name").jsonPrimitive.content
             val result = runCatching {
@@ -81,8 +81,9 @@ class EntitlementContractTest {
                     vector.getValue("document"),
                 ).validated(expectedSubject).getOrThrow()
             }
-            assertTrue("$name must fail closed", result.isFailure)
+            name.takeIf { result.isSuccess }
         }
+        assertTrue("invalid vectors accepted: $acceptedInvalidVectors", acceptedInvalidVectors.isEmpty())
     }
 
     @Test
