@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "slot": "reader",
+  "inventory_revision": 18,
+  "expires_at": "2026-08-03T00:05:00Z",
+  "items": [
+    {
+      "id": "ad_fixture_reader",
+      "revision": 1,
+      "kind": "text",
+      "title": "Support Podcast Reader",
+      "body": "Premium keeps every signed-in client ad-free.",
+      "cta_url": "https://example.com/premium"
+    }
+  ]
+}

@@ -19,6 +19,7 @@ from .config import Settings
 from .db import begin_immediate
 from .entitlements import (
     AD_SLOTS,
+    AD_SYSTEM_AUDIENCES,
     FLAG_AUDIENCES,
     FLAG_DEFAULTS,
     EventType,
@@ -425,7 +426,7 @@ def flags_page(
     for flag in flags:
         if flag.key == "ad_system":
             previews[flag.key] = {
-                "free": "house eligible" if flag.audience in {"all", "free"} else "none",
+                "free": "house eligible" if flag.audience == "free" else "none",
                 "premium": "none",
             }
         else:
@@ -457,7 +458,8 @@ def update_flag(
     database: Session = Depends(_database_session),
 ) -> RedirectResponse:
     _require_mutation(request, csrf_token)
-    if key not in FLAG_DEFAULTS or audience not in FLAG_AUDIENCES:
+    valid_audiences = AD_SYSTEM_AUDIENCES if key == "ad_system" else FLAG_AUDIENCES
+    if key not in FLAG_DEFAULTS or audience not in valid_audiences:
         raise HTTPException(422, "Unknown flag or audience")
     try:
         config = json.loads(config_json)
@@ -593,6 +595,8 @@ def _validated_ad(
     clean_body = body.strip()
     if not clean_title or len(clean_title) > 120 or not clean_body or len(clean_body) > 500:
         raise HTTPException(422, "Ad title or body is invalid")
+    if cta_url != cta_url.strip() or any(character.isspace() for character in cta_url):
+        raise HTTPException(422, "Ad CTA must not contain whitespace")
     try:
         parsed = urlsplit(cta_url)
         _ = parsed.port

@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Literal, Self
+from urllib.parse import urlsplit
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 Revision = Annotated[int, Field(ge=0, le=9_223_372_036_854_775_807)]
 OpaqueToken = Annotated[str, Field(min_length=20, max_length=256)]
@@ -86,6 +87,49 @@ class EntitlementV1(BaseModel):
         if self.refresh_after <= self.evaluated_at:
             raise ValueError("refresh_after must be later than evaluated_at")
         return self
+
+
+AdSlot = Literal["library", "reader", "mobile_home"]
+
+
+class AdInventoryItemV1(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    id: Annotated[str, Field(pattern=r"^ad_[A-Za-z0-9_-]+$", min_length=4, max_length=40)]
+    revision: Annotated[int, Field(ge=1, le=9_223_372_036_854_775_807)]
+    kind: Literal["text"]
+    title: Annotated[str, Field(min_length=1, max_length=120)]
+    body: Annotated[str, Field(min_length=1, max_length=500)]
+    cta_url: Annotated[str, Field(pattern=r"^https://", max_length=2048)]
+
+    @field_validator("cta_url")
+    @classmethod
+    def validate_cta_url(cls, value: str) -> str:
+        if value != value.strip() or any(character.isspace() for character in value):
+            raise ValueError("cta_url must not contain whitespace")
+        try:
+            parsed = urlsplit(value)
+            _ = parsed.port
+        except ValueError as exc:
+            raise ValueError("cta_url must be a valid HTTPS URL") from exc
+        if (
+            parsed.scheme != "https"
+            or not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+        ):
+            raise ValueError("cta_url must be HTTPS without credentials")
+        return value
+
+
+class AdInventoryV1(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    schema_version: Literal[1] = 1
+    slot: AdSlot
+    inventory_revision: Revision
+    expires_at: datetime
+    items: Annotated[list[AdInventoryItemV1], Field(min_length=1, max_length=10)]
 
 
 def default_free_entitlement(subject: str, at: datetime | None = None) -> EntitlementV1:

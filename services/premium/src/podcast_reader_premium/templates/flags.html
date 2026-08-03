@@ -7,7 +7,7 @@
 <form class="card" method="post" action="/admin/flags/{{ flag.key }}">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
   <h2>{{ flag.key }}</h2><p>Revision {{ flag.revision }} · Preview: free = {{ previews[flag.key].free }}, premium = {{ previews[flag.key].premium }}</p>
-  <label>Audience <select name="audience">{% for value in ["off", "all", "free", "premium"] %}<option value="{{ value }}"{% if flag.audience == value %} selected{% endif %}>{{ value }}</option>{% endfor %}</select></label>
+  <label>Audience <select name="audience">{% set audiences = ["off", "free"] if flag.key == "ad_system" else ["off", "all", "free", "premium"] %}{% for value in audiences %}<option value="{{ value }}"{% if flag.audience == value %} selected{% endif %}>{{ value }}</option>{% endfor %}</select></label>
   <label>Validated config JSON <input name="config_json" value="{{ flag.config_json }}" maxlength="2048"></label>
   <label>Reason <input name="reason" required minlength="3" maxlength="500"></label>
   <button type="submit">Update flag</button>

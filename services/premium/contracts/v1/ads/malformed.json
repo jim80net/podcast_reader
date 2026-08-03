@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "slot": "library",
+  "inventory_revision": 20,
+  "expires_at": "2026-08-03T00:05:00Z",
+  "items": [
+    {
+      "id": "ad_fixture_malformed",
+      "revision": 1,
+      "kind": "html",
+      "title": "Must be rejected",
+      "body": "Unknown creative kinds grant nothing.",
+      "cta_url": "javascript:alert(1)"
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "slot": "library",
+  "inventory_revision": 19,
+  "expires_at": "2026-08-03T00:05:00Z",
+  "items": [
+    {
+      "id": "ad_fixture_hostile",
+      "revision": 1,
+      "kind": "text",
+      "title": "<script>alert('title')</script>",
+      "body": "<img src=x onerror=alert('body')> & must remain inert text.",
+      "cta_url": "https://example.com/safe-destination"
+    }
+  ]
+}
