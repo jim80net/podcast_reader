@@ -59,6 +59,7 @@ android {
 
     sourceSets {
         getByName("test").resources.directories.add("../../services/premium/contracts")
+        getByName("androidTest").assets.srcDir("../../services/premium/contracts")
     }
 }
 

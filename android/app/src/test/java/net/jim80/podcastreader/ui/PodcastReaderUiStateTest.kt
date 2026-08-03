@@ -5,28 +5,23 @@ import net.jim80.podcastreader.core.ads.HouseAdCreative
 import net.jim80.podcastreader.core.ads.HouseAdCta
 import net.jim80.podcastreader.core.ads.HouseAdPlacement
 import net.jim80.podcastreader.core.ads.HouseInventory
-import net.jim80.podcastreader.core.premium.AdPolicyDto
-import net.jim80.podcastreader.core.premium.EntitlementCapabilitiesDto
-import net.jim80.podcastreader.core.premium.EntitlementProjection
-import net.jim80.podcastreader.core.premium.EntitlementSourceKindDto
-import net.jim80.podcastreader.core.premium.EntitlementTierDto
 import net.jim80.podcastreader.core.premium.OnlineUnavailableReason
-import net.jim80.podcastreader.core.premium.ProductState
+import net.jim80.podcastreader.support.FixtureProductStates
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PodcastReaderUiStateTest {
-    private val now = Instant.parse("2026-08-03T00:00:00Z")
+    private val now = FixtureProductStates.now
 
     @Test
     fun localPremiumAndUnavailableNeverProjectHouseSlots() {
         val inventory = inventory(HouseAdPlacement.LIBRARY)
         listOf(
-            ProductState.Local,
-            ProductState.OnlinePremium(projection(EntitlementTierDto.PREMIUM, AdPolicyDto.NONE, adFree = true)),
-            ProductState.OnlineUnavailable(OnlineUnavailableReason.OFFLINE),
+            FixtureProductStates.local(),
+            FixtureProductStates.premium(),
+            FixtureProductStates.unavailable(OnlineUnavailableReason.OFFLINE),
         ).forEach { productState ->
             val state = PodcastReaderUiState.project(productState, now, true, libraryInventory = inventory)
             assertNull(state.libraryInventory)
@@ -38,7 +33,7 @@ class PodcastReaderUiStateTest {
     fun onlyFreshOnlineFreeHouseInventoryMountsInItsEchoedPlacement() {
         val library = inventory(HouseAdPlacement.LIBRARY)
         val jobs = inventory(HouseAdPlacement.JOBS)
-        val free = ProductState.OnlineFree(projection(EntitlementTierDto.FREE, AdPolicyDto.HOUSE))
+        val free = FixtureProductStates.free(houseAds = true)
 
         val state = PodcastReaderUiState.project(free, now, true, libraryInventory = library, jobsInventory = jobs)
         assertSame(library, state.libraryInventory)
@@ -51,12 +46,10 @@ class PodcastReaderUiStateTest {
 
     @Test
     fun staleTruthAndExpiredInventoryCollapseBeforeCompose() {
-        val stale = ProductState.OnlineFree(
-            projection(EntitlementTierDto.FREE, AdPolicyDto.HOUSE, refreshAfter = now),
-        )
+        val stale = FixtureProductStates.free(houseAds = true, at = Instant.parse("2026-08-02T00:05:00Z"))
         assertNull(PodcastReaderUiState.project(stale, now, true, libraryInventory = inventory()).libraryInventory)
 
-        val fresh = ProductState.OnlineFree(projection(EntitlementTierDto.FREE, AdPolicyDto.HOUSE))
+        val fresh = FixtureProductStates.free(houseAds = true)
         assertNull(
             PodcastReaderUiState.project(
                 fresh,
@@ -69,45 +62,29 @@ class PodcastReaderUiStateTest {
 
     @Test
     fun accountCopyKeepsLocalFreePremiumAndUnavailableDistinct() {
-        assertTrue(PodcastReaderUiState.project(ProductState.Local, now, false).account is AccountUiState.Local)
+        assertTrue(PodcastReaderUiState.project(FixtureProductStates.local(), now, false).account is AccountUiState.Local)
         assertTrue(
             PodcastReaderUiState.project(
-                ProductState.OnlineFree(projection(EntitlementTierDto.FREE, AdPolicyDto.NONE)),
+                FixtureProductStates.free(),
                 now,
                 true,
             ).account is AccountUiState.OnlineFree,
         )
         assertTrue(
             PodcastReaderUiState.project(
-                ProductState.OnlinePremium(projection(EntitlementTierDto.PREMIUM, AdPolicyDto.NONE, adFree = true)),
+                FixtureProductStates.premium(),
                 now,
                 true,
             ).account is AccountUiState.OnlinePremium,
         )
         assertTrue(
             PodcastReaderUiState.project(
-                ProductState.OnlineUnavailable(OnlineUnavailableReason.STALE),
+                FixtureProductStates.unavailable(OnlineUnavailableReason.STALE),
                 now,
                 true,
             ).account is AccountUiState.OnlineUnavailable,
         )
     }
-
-    private fun projection(
-        tier: EntitlementTierDto,
-        adPolicy: AdPolicyDto,
-        adFree: Boolean = false,
-        refreshAfter: Instant = now.plusSeconds(300),
-    ) = EntitlementProjection(
-        subject = "usr_fixture",
-        tier = tier,
-        source = if (tier == EntitlementTierDto.FREE) EntitlementSourceKindDto.NONE else EntitlementSourceKindDto.TEST_PURCHASE,
-        entitlementRevision = 1,
-        capabilities = EntitlementCapabilitiesDto(adPolicy, false, false, adFree, false),
-        flagsRevision = 1,
-        evaluatedAt = now,
-        refreshAfter = refreshAfter,
-    )
 
     private fun inventory(
         placement: HouseAdPlacement = HouseAdPlacement.LIBRARY,

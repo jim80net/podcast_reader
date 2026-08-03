@@ -23,8 +23,8 @@ class EntitlementContractTest {
             now = Instant.parse("2026-08-02T00:01:00Z"),
         )
 
-        assertTrue(state is ProductState.OnlineFree)
-        assertEquals(AdPolicyDto.NONE, (state as ProductState.OnlineFree).entitlement.capabilities.adPolicy)
+        assertEquals("online-free", state.kind())
+        assertEquals(null, state.freeTruth()?.houseAds)
     }
 
     @Test
@@ -36,8 +36,8 @@ class EntitlementContractTest {
             now = Instant.parse("2026-08-02T00:01:00Z"),
         )
 
-        assertTrue(state is ProductState.OnlinePremium)
-        assertTrue((state as ProductState.OnlinePremium).entitlement.capabilities.mobileAdFree)
+        assertEquals("online-premium", state.kind())
+        assertTrue(requireNotNull(state.premiumTruth()).capabilities.mobileAdFree)
     }
 
     @Test
@@ -66,11 +66,7 @@ class EntitlementContractTest {
                 vector.getValue("document"),
             )
             val state = ProductStateReducer.online(dto, expectedSubject, now)
-            val actual = when (state) {
-                is ProductState.OnlineFree -> "online-free"
-                is ProductState.OnlinePremium -> "online-premium"
-                else -> "unavailable"
-            }
+            val actual = state.kind()
             assertEquals(name, vector.getValue("expected_state").jsonPrimitive.content, actual)
         }
         val acceptedInvalidVectors = invalid.mapNotNull { element ->
@@ -97,9 +93,8 @@ class EntitlementContractTest {
             now = Instant.parse("2026-08-02T00:01:00Z"),
         )
 
-        assertTrue(state is ProductState.OnlineFree)
-        assertEquals(AdPolicyDto.HOUSE, (state as ProductState.OnlineFree).entitlement.capabilities.adPolicy)
-        assertTrue(!state.entitlement.capabilities.mobileAdFree)
+        assertEquals("online-free", state.kind())
+        assertTrue(requireNotNull(state.freeTruth()).houseAds != null)
     }
 
     @Test
@@ -121,30 +116,58 @@ class EntitlementContractTest {
         )
 
         assertEquals(
-            ProductState.OnlineUnavailable(OnlineUnavailableReason.INCOMPATIBLE_RESPONSE),
-            ProductStateReducer.online(free, "usr_other", Instant.parse("2026-08-02T00:01:00Z")),
+            OnlineUnavailableReason.INCOMPATIBLE_RESPONSE,
+            ProductStateReducer.online(free, "usr_other", Instant.parse("2026-08-02T00:01:00Z")).reason(),
         )
         assertEquals(
-            ProductState.OnlineUnavailable(OnlineUnavailableReason.STALE),
-            ProductStateReducer.online(free, "usr_free_fixture", Instant.parse("2026-08-02T00:05:00Z")),
+            OnlineUnavailableReason.STALE,
+            ProductStateReducer.online(free, "usr_free_fixture", Instant.parse("2026-08-02T00:05:00Z")).reason(),
         )
         assertEquals(
-            ProductState.OnlineUnavailable(OnlineUnavailableReason.INCOMPATIBLE_RESPONSE),
+            OnlineUnavailableReason.INCOMPATIBLE_RESPONSE,
             ProductStateReducer.online(
                 inconsistent,
                 "usr_free_fixture",
                 Instant.parse("2026-08-02T00:01:00Z"),
-            ),
+            ).reason(),
         )
     }
 
     @Test
     fun onlineFailuresNeverChangeTheLocalState() {
-        assertEquals(ProductState.Local, ProductStateReducer.local())
+        assertEquals("local", ProductStateReducer.local().kind())
         assertEquals(
-            ProductState.OnlineUnavailable(OnlineUnavailableReason.OFFLINE),
-            ProductStateReducer.unavailable(OnlineUnavailableReason.OFFLINE),
+            OnlineUnavailableReason.OFFLINE,
+            ProductStateReducer.unavailable(OnlineUnavailableReason.OFFLINE).reason(),
         )
-        assertEquals(ProductState.Local, ProductStateReducer.local())
+        assertEquals("local", ProductStateReducer.local().kind())
     }
+
+    private fun ProductState.kind(): String = fold(
+        onLocal = { "local" },
+        onOnlineFree = { "online-free" },
+        onOnlinePremium = { "online-premium" },
+        onOnlineUnavailable = { "unavailable" },
+    )
+
+    private fun ProductState.freeTruth(): OnlineFreeTruth? = fold(
+        onLocal = { null },
+        onOnlineFree = { it },
+        onOnlinePremium = { null },
+        onOnlineUnavailable = { null },
+    )
+
+    private fun ProductState.premiumTruth(): OnlinePremiumTruth? = fold(
+        onLocal = { null },
+        onOnlineFree = { null },
+        onOnlinePremium = { it },
+        onOnlineUnavailable = { null },
+    )
+
+    private fun ProductState.reason(): OnlineUnavailableReason? = fold(
+        onLocal = { null },
+        onOnlineFree = { null },
+        onOnlinePremium = { null },
+        onOnlineUnavailable = { it },
+    )
 }
