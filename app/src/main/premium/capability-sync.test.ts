@@ -12,6 +12,7 @@ const premium: ProductState = {
   refreshAfter: Date.parse('2026-08-03T00:05:00Z'),
   entitlementRevision: 7,
   flagsRevision: 12,
+  adPolicy: 'none',
   podcastSubscriptions: true,
   transcriptEmail: true
 }

@@ -63,14 +63,47 @@ function harness(initial: ProductState, inventoryImpl: (slot: 'library' | 'reade
 }
 
 const free = (adPolicy: 'none' | 'house' = 'house'): ProductState => ({
-  state: 'online-free', subject: 'usr_free', refreshAfter: REFRESH_AFTER, adPolicy
+  state: 'online-free',
+  subject: 'usr_free',
+  refreshAfter: REFRESH_AFTER,
+  entitlementRevision: 7,
+  flagsRevision: 12,
+  adPolicy,
+  podcastSubscriptions: false,
+  transcriptEmail: false
 })
 
+const premium: ProductState = {
+  state: 'online-premium',
+  subject: 'usr_premium',
+  refreshAfter: REFRESH_AFTER,
+  entitlementRevision: 7,
+  flagsRevision: 12,
+  adPolicy: 'none',
+  podcastSubscriptions: true,
+  transcriptEmail: true
+}
+
 describe('PremiumController house inventory boundary', () => {
+  it('projects every online authorization variant without optional fallbacks', () => {
+    expect(harness(free(), async () => null).controller.state()).toEqual({
+      state: 'online-free',
+      available: true,
+      expiresAt: REFRESH_AFTER
+    })
+    expect(harness(premium, async () => null).controller.state()).toEqual({
+      state: 'online-premium',
+      available: true,
+      expiresAt: REFRESH_AFTER,
+      subscriptionsAvailable: true,
+      emailAvailable: true
+    })
+  })
+
   it('makes zero inventory calls for Local, premium, unavailable, and free-without-house states', async () => {
     for (const state of [
       { state: 'local' } as ProductState,
-      { state: 'online-premium', subject: 'usr_premium', refreshAfter: REFRESH_AFTER } as ProductState,
+      premium,
       { state: 'online-unavailable' } as ProductState,
       free('none')
     ]) {
