@@ -338,10 +338,25 @@ def validate_surface_inventory(
         discover_network_owner_files(repo_root, "android"),
         {owner: operation_ids[0] for owner, operation_ids in android_network.items()},
     )
+    android_projection = _exact(
+        projections["android"],
+        "projection.android",
+        {
+            "schema_version",
+            "contract",
+            "policy_revision",
+            "surface",
+            "roots",
+            "operations",
+            "copy_claims",
+            "checker_ids",
+            "legacy_fences",
+        },
+    )
     android_operations = {
         operation.get("id")
         for operation in _objects(
-            projections["android"]["operations"], "projection.android.operations"
+            android_projection["operations"], "projection.android.operations"
         )
         if isinstance(operation.get("id"), str)
     }
