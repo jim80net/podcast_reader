@@ -4,16 +4,17 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).parents[3]
+PREMIUM_TEMPLATES = sorted(
+    (ROOT / "services" / "premium" / "src" / "podcast_reader_premium" / "templates").glob("*.html")
+)
+RENDERER_COPY = sorted((ROOT / "app" / "src" / "renderer" / "src").rglob("*.ts"))
+LANDING_COPY = (ROOT / "site" / "index.html",)
 PUBLIC_COPY = (
     ROOT / "README.md",
     ROOT / "services" / "premium" / "README.md",
-    *sorted(
-        (ROOT / "services" / "premium" / "src" / "podcast_reader_premium" / "templates").glob(
-            "*.html"
-        )
-    ),
-    *sorted((ROOT / "apps" / "desktop" / "renderer" / "src").rglob("*.ts")),
-    *sorted((ROOT / "apps" / "desktop" / "renderer" / "src").rglob("*.tsx")),
+    *PREMIUM_TEMPLATES,
+    *RENDERER_COPY,
+    *LANDING_COPY,
 )
 
 CONTRADICTIONS = (
@@ -30,6 +31,9 @@ CONTRADICTIONS = (
 
 
 def test_public_copy_cannot_restore_an_unconditional_local_only_claim() -> None:
+    assert PREMIUM_TEMPLATES
+    assert RENDERER_COPY
+    assert all(path.is_file() for path in LANDING_COPY)
     violations: list[str] = []
     for path in PUBLIC_COPY:
         if not path.is_file():
