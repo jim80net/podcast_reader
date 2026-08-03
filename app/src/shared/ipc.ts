@@ -51,6 +51,10 @@ export const CHANNELS = {
   premiumSignOut: 'premium:sign-out',
   premiumInventory: 'premium:inventory',
   premiumOpenCta: 'premium:open-cta',
+  subscriptionsList: 'subscriptions:list',
+  subscriptionsCreate: 'subscriptions:create',
+  subscriptionsPoll: 'subscriptions:poll',
+  subscriptionsDelete: 'subscriptions:delete',
   pairStart: 'pair:start',
   cookiesList: 'cookies:list',
   cookiesDelete: 'cookies:delete',
@@ -124,7 +128,7 @@ export type PremiumProductState =
   | { state: 'local'; available: boolean }
   | { state: 'online-unavailable'; available: true }
   | { state: 'online-free'; available: true; expiresAt: number }
-  | { state: 'online-premium'; available: true; expiresAt: number }
+  | { state: 'online-premium'; available: true; expiresAt: number; subscriptionsAvailable: boolean }
 
 export type PremiumAdSlot = 'library' | 'reader'
 
@@ -133,6 +137,21 @@ export interface PremiumAdInventory {
   slot: PremiumAdSlot
   expiresAt: number
   creative: { title: string; body: string; ctaUrl: string }
+}
+
+export interface SubscriptionSummary {
+  id: string
+  title: string | null
+  origin: string
+  lastCheckedAt: string | null
+  nextCheckAt: string | null
+  lastErrorCode: string | null
+}
+
+export interface SubscriptionPollSummary {
+  subscription: SubscriptionSummary
+  discoveredCount: number
+  notModified: boolean
 }
 
 /** The `jobs:submit` request — one shared shape for the renderer call and the main handler. */
@@ -201,6 +220,10 @@ export interface PodcastReaderApi {
   signOutPremiumAccount(): Promise<PremiumProductState>
   getPremiumInventory(slot: PremiumAdSlot): Promise<PremiumAdInventory | null>
   openPremiumCta(slot: PremiumAdSlot, url: string): Promise<void>
+  listSubscriptions(): Promise<SubscriptionSummary[]>
+  createSubscription(feedUrl: string): Promise<SubscriptionSummary>
+  pollSubscription(subscriptionId: string): Promise<SubscriptionPollSummary>
+  deleteSubscription(subscriptionId: string): Promise<void>
   /** Mint an extension pairing code (engine `POST /v1/pair`) plus the engine port. */
   startPairing(): Promise<PairingDisplay>
   /** Captured cookie-jar metadata (`GET /v1/cookies`) — domains and dates, never values. */

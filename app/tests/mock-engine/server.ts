@@ -635,6 +635,11 @@ async function handleV1(req: IncomingMessage, res: ServerResponse, path: string)
   }
   record('request', `${req.method} ${path}`)
 
+  if (req.method === 'GET' && path === '/v1/subscriptions') {
+    sendJson(res, 200, [])
+    return
+  }
+
   if (req.method === 'POST' && path === '/v1/pair') {
     // NEVER log the code — only that a mint happened (engine parity).
     record('pair-mint')
