@@ -12,7 +12,7 @@ import time
 from typing import TYPE_CHECKING
 
 from podcast_reader.engine.jobs import JobStore
-from podcast_reader.types import PipelineEvent, PipelineResult
+from podcast_reader.types import JobDoneEvent, PipelineResult, PipelineRunEvent
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -28,8 +28,8 @@ _RESULT = PipelineResult(
 )
 
 
-def _ok_runner(record: JobRecord, on_event: Callable[[PipelineEvent], None]) -> PipelineResult:
-    on_event(PipelineEvent(kind="job_done", step=None, message="Done", data={}))
+def _ok_runner(record: JobRecord, on_event: Callable[[PipelineRunEvent], None]) -> PipelineResult:
+    on_event(JobDoneEvent(kind="job_done", step=None, message="Done", data={}))
     return _RESULT
 
 
@@ -67,7 +67,7 @@ class TestWorkerRestart:
         started = threading.Event()
 
         def blocking(
-            record: JobRecord, on_event: Callable[[PipelineEvent], None]
+            record: JobRecord, on_event: Callable[[PipelineRunEvent], None]
         ) -> PipelineResult:
             started.set()
             assert release.wait(timeout=10)
@@ -108,7 +108,7 @@ class TestWorkerRestart:
         run_order: list[str] = []
 
         def blocking(
-            record: JobRecord, on_event: Callable[[PipelineEvent], None]
+            record: JobRecord, on_event: Callable[[PipelineRunEvent], None]
         ) -> PipelineResult:
             run_order.append(record["source"])
             if record["source"].endswith("/first"):

@@ -20,17 +20,16 @@ import json
 import shutil
 import tempfile
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from podcast_reader.engine import packs
 from podcast_reader.engine.settings import atomic_write_json, data_dir
 from podcast_reader.tools import resolve_tool, run_child
-from podcast_reader.types import PipelineEvent
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from podcast_reader.types import EventKind
+    from podcast_reader.types import EventKind, PipelineRunEvent
 
 #: Name of the worker executable inside the diarization pack directory.
 WORKER_NAME = "diarization-worker"
@@ -64,7 +63,7 @@ def diarize_step(
     *,
     audio_path: Path,
     json_path: Path,
-    on_event: Callable[[PipelineEvent], None],
+    on_event: Callable[[PipelineRunEvent], None],
 ) -> None:
     """Enrich the transcript JSON at *json_path* with speaker labels.
 
@@ -111,7 +110,7 @@ def diarize_step(
 def _run_worker(
     worker: str,
     audio_path: Path,
-    on_event: Callable[[PipelineEvent], None],
+    on_event: Callable[[PipelineRunEvent], None],
 ) -> list[dict[str, Any]] | None:
     """Pre-convert + spawn the worker; the parsed turns, or ``None`` after a warning."""
     with tempfile.TemporaryDirectory(prefix="podcast-reader-diarize-") as staging:
@@ -195,7 +194,7 @@ def _resolve_worker(base: Path) -> tuple[str | None, str]:
     return worker, ""
 
 
-def _warn_failed(on_event: Callable[[PipelineEvent], None], summary: str, stderr: str) -> None:
+def _warn_failed(on_event: Callable[[PipelineRunEvent], None], summary: str, stderr: str) -> None:
     """Structured ``diarization_failed`` warning with a short stderr tail."""
     tail = "\n".join(stderr.strip().splitlines()[-3:])
     detail = f": {tail}" if tail else ""
@@ -208,9 +207,14 @@ def _warn_failed(on_event: Callable[[PipelineEvent], None], summary: str, stderr
 
 
 def _emit(
-    on_event: Callable[[PipelineEvent], None],
+    on_event: Callable[[PipelineRunEvent], None],
     kind: EventKind,
     message: str,
     data: dict[str, Any],
 ) -> None:
-    on_event(PipelineEvent(kind=kind, step="diarize", message=message, data=data))
+    on_event(
+        cast(
+            "PipelineRunEvent",
+            {"kind": kind, "step": "diarize", "message": message, "data": data},
+        )
+    )

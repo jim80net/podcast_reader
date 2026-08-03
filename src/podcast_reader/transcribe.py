@@ -26,7 +26,7 @@ from podcast_reader.tools import (
     run_child,
     run_child_streaming,
 )
-from podcast_reader.types import PipelineError, PipelineEvent
+from podcast_reader.types import PipelineError, PipelineRunEvent, StepProgressEvent, WarningEvent
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -101,7 +101,7 @@ def transcribe(
     lang: str,
     device: str,
     hf_token: str | None = None,
-    on_event: Callable[[PipelineEvent], None] | None = None,
+    on_event: Callable[[PipelineRunEvent], None] | None = None,
 ) -> Path:
     """Transcribe an audio file and return the path to the JSON output.
 
@@ -143,7 +143,7 @@ def _transcribe_via_worker(
     model: str,
     lang: str,
     device: str,
-    on_event: Callable[[PipelineEvent], None] | None,
+    on_event: Callable[[PipelineRunEvent], None] | None,
 ) -> Path:
     """Spawn the bundled whisper worker with streamed per-segment progress.
 
@@ -187,7 +187,7 @@ def _transcribe_via_worker(
         else:
             seconds = value
         on_event(
-            PipelineEvent(
+            StepProgressEvent(
                 kind="step_progress",
                 step="transcribe",
                 message="",
@@ -244,7 +244,7 @@ def _validated_model_dir(base: Path, model: str) -> Path:
 def _effective_device(
     base: Path,
     device: str,
-    on_event: Callable[[PipelineEvent], None] | None,
+    on_event: Callable[[PipelineRunEvent], None] | None,
     platform: str = sys.platform,
 ) -> str:
     """Degrade ``cuda`` to ``cpu`` when CUDA cannot work — warn, don't fail.
@@ -264,7 +264,7 @@ def _effective_device(
         return "cuda"
     if on_event is not None:
         on_event(
-            PipelineEvent(
+            WarningEvent(
                 kind="warning",
                 step="transcribe",
                 message=f"CUDA requested but unavailable ({reason}); transcribing on CPU",

@@ -315,7 +315,12 @@ describe('EngineManager.start', () => {
   it('forwards stream events and hydrations to the renderer', async () => {
     const world = makeWorld()
     await world.manager.start()
-    world.handlers?.onEvent({ kind: 'warning', step: null, message: 'm', data: {} })
+      world.handlers?.onEvent({
+        kind: 'warning',
+        step: 'resolve',
+        message: 'm',
+        data: { job_id: 'j1', code: 'fixture' }
+      })
     world.handlers?.onHydrate([])
     expect(world.sends.map((s) => s.channel)).toContain('engine:event')
     expect(world.sends.map((s) => s.channel)).toContain('jobs:hydrated')

@@ -20,7 +20,7 @@ from podcast_reader.engine.subscriptions import (
     PremiumFeatureUnavailableError,
     SubscriptionManager,
 )
-from podcast_reader.types import PipelineEvent, PipelineResult
+from podcast_reader.types import JobDoneEvent, PipelineResult, PipelineRunEvent
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -92,9 +92,9 @@ def _snapshot(clock: _Clock, *, enabled: bool = True) -> OnlineCapabilitySnapsho
 
 def _job_runner(
     _record: JobRecord,
-    on_event: Callable[[PipelineEvent], None],
+    on_event: Callable[[PipelineRunEvent], None],
 ) -> PipelineResult:
-    on_event(PipelineEvent(kind="job_done", step=None, message="Done", data={}))
+    on_event(JobDoneEvent(kind="job_done", step=None, message="Done", data={}))
     return PipelineResult(
         json_path="/library/episode.json",
         chapters_path=None,

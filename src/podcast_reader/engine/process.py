@@ -63,7 +63,7 @@ if TYPE_CHECKING:
 
     from podcast_reader.engine.jobs import JobRunner
     from podcast_reader.engine.settings import EngineState
-    from podcast_reader.types import JobOverrides, JobRecord, PipelineEvent
+    from podcast_reader.types import JobOverrides, JobRecord, PipelineRunEvent
 
 __all__ = [
     "DiscoveryInfo",
@@ -166,7 +166,7 @@ def make_pipeline_runner(base: Path, key_store: dict[str, str] | None = None) ->
     """
     keys: dict[str, str] = key_store if key_store is not None else {}
 
-    def run(record: JobRecord, on_event: Callable[[PipelineEvent], None]) -> PipelineResult:
+    def run(record: JobRecord, on_event: Callable[[PipelineRunEvent], None]) -> PipelineResult:
         settings = load_settings(base)  # snapshot at dequeue
         library_dir = Path(settings["library_dir"])
         source = record["source"]

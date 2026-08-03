@@ -31,7 +31,7 @@ from podcast_reader.engine.managed_tools import (
 )
 from podcast_reader.engine.settings import data_dir_path
 from podcast_reader.tools import resolve_tool, run_child
-from podcast_reader.types import PipelineError, PipelineEvent
+from podcast_reader.types import PipelineError, PipelineRunEvent, WarningEvent
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -165,7 +165,7 @@ def download_audio(
     url: str,
     output_dir: Path,
     cookies: Path | None = None,
-    on_event: Callable[[PipelineEvent], None] | None = None,
+    on_event: Callable[[PipelineRunEvent], None] | None = None,
 ) -> Path:
     """Download and extract audio as mp3 from a URL.
 
@@ -187,7 +187,7 @@ def download_video(
     url: str,
     output_dir: Path,
     cookies: Path | None = None,
-    on_event: Callable[[PipelineEvent], None] | None = None,
+    on_event: Callable[[PipelineRunEvent], None] | None = None,
 ) -> Path:
     """Download video (or the audio-only fallback) as a single media file.
 
@@ -205,7 +205,7 @@ def download_video(
 
 def _download_with_self_heal(
     attempt: DownloadAttempt,
-    on_event: Callable[[PipelineEvent], None] | None,
+    on_event: Callable[[PipelineRunEvent], None] | None,
 ) -> Path:
     """Run one download *attempt*, with the managed-copy ``-U``-and-retry heal.
 
@@ -226,7 +226,7 @@ def _download_with_self_heal(
             raise
         if on_event is not None:
             on_event(
-                PipelineEvent(
+                WarningEvent(
                     kind="warning",
                     step="download",
                     message=(

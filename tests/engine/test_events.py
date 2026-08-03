@@ -17,7 +17,16 @@ from podcast_reader.engine.events import (
     EventBus,
 )
 from podcast_reader.engine.jobs import JobStore
-from podcast_reader.types import PipelineEvent, PipelineResult
+from podcast_reader.types import (
+    JobDoneEvent,
+    JobWarningEvent,
+    PackProgressEvent,
+    PipelineEvent,
+    PipelineResult,
+    PipelineRunEvent,
+    RoutedJobDoneEvent,
+    StepStartedEvent,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -27,7 +36,23 @@ if TYPE_CHECKING:
 
 
 def _event(kind: EventKind = "warning", message: str = "m") -> PipelineEvent:
-    return PipelineEvent(kind=kind, step=None, message=message, data={})
+    if kind == "pack_progress":
+        return PackProgressEvent(
+            kind="pack_progress",
+            step=None,
+            message=message,
+            data={"pack_id": "fixture", "bytes": 1, "total": 2},
+        )
+    if kind == "job_done":
+        return RoutedJobDoneEvent(
+            kind="job_done", step=None, message=message, data={"job_id": "j1"}
+        )
+    return JobWarningEvent(
+        kind="warning",
+        step="resolve",
+        message=message,
+        data={"job_id": "j1", "code": "fixture"},
+    )
 
 
 class TestEventBus:
@@ -66,8 +91,10 @@ class TestSharedBus:
         """The seam: a bus constructed outside the store carries job events,
         so a second producer (the pack manager) shares the same fan-out."""
 
-        def runner(record: JobRecord, on_event: Callable[[PipelineEvent], None]) -> PipelineResult:
-            on_event(_event(kind="job_done", message="done"))
+        def runner(
+            record: JobRecord, on_event: Callable[[PipelineRunEvent], None]
+        ) -> PipelineResult:
+            on_event(JobDoneEvent(kind="job_done", step=None, message="done", data={}))
             return PipelineResult(json_path="j", chapters_path=None, html_path="h", title="t")
 
         bus = EventBus()
@@ -100,7 +127,6 @@ class TestEventKindWidening:
         StepName gains diarize (for groups 3/5)."""
         kinds: tuple[EventKind, ...] = ("pack_state", "pack_progress", "step_progress")
         for kind in kinds:
-            event = PipelineEvent(kind=kind, step=None, message="", data={})
-            assert event["kind"] == kind
-        diarize = PipelineEvent(kind="step_started", step="diarize", message="", data={})
+            assert kind in ("pack_state", "pack_progress", "step_progress")
+        diarize = StepStartedEvent(kind="step_started", step="diarize", message="", data={})
         assert diarize["step"] == "diarize"

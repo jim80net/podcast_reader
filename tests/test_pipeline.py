@@ -11,7 +11,7 @@ from unittest.mock import ANY, MagicMock, patch
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from podcast_reader.types import CustomProviderConfig, PipelineEvent
+    from podcast_reader.types import CustomProviderConfig, PipelineRunEvent
 
 import pytest
 
@@ -640,7 +640,7 @@ class TestRunPipelineDiarize:
         audio_path.write_text("fake audio")
         json_path = tmp_path / "episode.json"
         json_path.write_text(json.dumps(_SAMPLE_SEGMENTS))
-        events: list[PipelineEvent] = []
+        events: list[PipelineRunEvent] = []
 
         run_pipeline(
             _request(input_arg=str(audio_path), output_dir=tmp_path, diarize=True),
@@ -661,7 +661,7 @@ class TestRunPipelineDiarize:
         audio_path = tmp_path / "episode.mp3"
         audio_path.write_text("fake audio")
         (tmp_path / "episode.json").write_text(json.dumps(_SAMPLE_SEGMENTS))
-        events: list[PipelineEvent] = []
+        events: list[PipelineRunEvent] = []
 
         result = run_pipeline(
             _request(input_arg=str(audio_path), output_dir=tmp_path, diarize=True),
@@ -683,7 +683,7 @@ class TestRunPipelineDiarize:
         mock_fetch.return_value = [
             {"text": "Hello world.", "start": 0.0, "duration": 5.0},
         ]
-        events: list[PipelineEvent] = []
+        events: list[PipelineRunEvent] = []
 
         run_pipeline(
             _request(input_arg=_YT_URL, output_dir=tmp_path, diarize=True),
@@ -884,7 +884,7 @@ class TestRunPipelineChapters:
         chapters_path = tmp_path / "abc123XYZqq_chapters.json"
         chapters_path.write_text(json.dumps(_SAMPLE_CHAPTERS))
 
-        events: list[PipelineEvent] = []
+        events: list[PipelineRunEvent] = []
         run_pipeline(
             _request(input_arg=_YT_URL, output_dir=tmp_path, caption_cleanup=True),
             on_event=events.append,
@@ -947,7 +947,7 @@ class TestChaptersFaultIsolation:
         _w: MagicMock,
         tmp_path: Path,
     ) -> None:
-        events: list[PipelineEvent] = []
+        events: list[PipelineRunEvent] = []
         run_pipeline(
             _request(input_arg=_YT_URL, output_dir=tmp_path, chapter_api_key="test-key"),
             on_event=events.append,
@@ -976,7 +976,7 @@ class TestChaptersKeysAndRedaction:
         _w: MagicMock,
         tmp_path: Path,
     ) -> None:
-        events: list[PipelineEvent] = []
+        events: list[PipelineRunEvent] = []
         run_pipeline(
             _request(input_arg=_YT_URL, output_dir=tmp_path, chapter_provider="deepseek"),
             on_event=events.append,
@@ -1007,7 +1007,7 @@ class TestChaptersKeysAndRedaction:
     ) -> None:
         """Per K4: exception text never reaches events — only a generic message."""
         secret = "sk-test-leaky-key-0123456789"
-        events: list[PipelineEvent] = []
+        events: list[PipelineRunEvent] = []
         with patch(
             "podcast_reader.pipeline.generate_chapters",
             side_effect=RuntimeError(f"401 body said: invalid key {secret}"),
@@ -1061,7 +1061,7 @@ class TestChaptersKeysAndRedaction:
                 **kwargs,  # type: ignore[arg-type]
             )
 
-        events: list[PipelineEvent] = []
+        events: list[PipelineRunEvent] = []
         with patch("podcast_reader.pipeline.generate_chapters", side_effect=via_mock_transport):
             run_pipeline(
                 _request(input_arg=_YT_URL, output_dir=tmp_path, chapter_api_key=key),
@@ -1121,7 +1121,7 @@ class TestChapterErrorDiagnostics:
                 **kwargs,  # type: ignore[arg-type]
             )
 
-        events: list[PipelineEvent] = []
+        events: list[PipelineRunEvent] = []
         with patch("podcast_reader.pipeline.generate_chapters", side_effect=via_mock_transport):
             run_pipeline(
                 _request(input_arg=_YT_URL, output_dir=tmp_path, chapter_api_key="sk-test"),
@@ -1153,7 +1153,7 @@ class TestChapterErrorDiagnostics:
     ) -> None:
         """A missing custom base URL surfaces providers.py's self-authored
         diagnostic, never an opaque '(ValueError)'."""
-        events: list[PipelineEvent] = []
+        events: list[PipelineRunEvent] = []
         run_pipeline(
             _request(
                 input_arg=_YT_URL,
@@ -1191,7 +1191,7 @@ class TestEvents:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-        events: list[PipelineEvent] = []
+        events: list[PipelineRunEvent] = []
         run_pipeline(_request(input_arg=_YT_URL, output_dir=tmp_path), on_event=events.append)
         started = [e["step"] for e in events if e["kind"] == "step_started"]
         assert started[0] == "resolve" and "render" in started
@@ -1211,7 +1211,7 @@ class TestEvents:
         so SSE consumers tracking step lifecycle never see a step stuck open."""
         (tmp_path / "abc123XYZqq.json").write_text(json.dumps(_SAMPLE_SEGMENTS))
         (tmp_path / "abc123XYZqq_chapters.json").write_text(json.dumps(_SAMPLE_CHAPTERS))
-        events: list[PipelineEvent] = []
+        events: list[PipelineRunEvent] = []
         run_pipeline(_request(input_arg=_YT_URL, output_dir=tmp_path), on_event=events.append)
         mock_fetch.assert_not_called()
         started = [e["step"] for e in events if e["kind"] == "step_started"]
@@ -1236,7 +1236,7 @@ class TestEvents:
         (tmp_path / "video_id.mp3").write_text("fake audio")
         (tmp_path / "video_id.ytdlp").write_text(url)
         (tmp_path / "video_id.json").write_text(json.dumps(_SAMPLE_SEGMENTS))
-        events: list[PipelineEvent] = []
+        events: list[PipelineRunEvent] = []
         run_pipeline(_request(input_arg=url, output_dir=tmp_path), on_event=events.append)
         mock_download.assert_not_called()
         mock_transcribe.assert_not_called()
@@ -1344,7 +1344,7 @@ class TestRunPipelineFrozenWorkerPath:
             json_path.write_text(json.dumps(_SAMPLE_SEGMENTS))
             return subprocess.CompletedProcess(args, 0, stdout=str(json_path), stderr="")
 
-        events: list[PipelineEvent] = []
+        events: list[PipelineRunEvent] = []
         with (
             patch(
                 "podcast_reader.transcribe.resolve_bundled_worker",
@@ -1406,7 +1406,7 @@ class TestRunPipelineDownloadSelfHeal:
             (out_dir / "123456.json").write_text(json.dumps(_SAMPLE_SEGMENTS))
 
         mock_transcribe.side_effect = write_json
-        events: list[PipelineEvent] = []
+        events: list[PipelineRunEvent] = []
         with (
             patch("podcast_reader.ytdlp.resolve_tool", return_value=str(binary)),
             patch("podcast_reader.ytdlp.run_child", side_effect=fake_download_run),
@@ -1453,8 +1453,8 @@ class TestRunPipelineYtdlpIntegration:
             audio_path = kwargs["audio_path"]
             assert isinstance(output_dir, type(tmp_path))
             assert isinstance(audio_path, type(tmp_path))
-            json_path = output_dir / f"{audio_path.stem}.json"  # type: ignore[union-attr]
-            json_path.write_text(json.dumps(_SAMPLE_SEGMENTS))  # type: ignore[union-attr]
+            json_path = output_dir / f"{audio_path.stem}.json"
+            json_path.write_text(json.dumps(_SAMPLE_SEGMENTS))
 
         mock_transcribe.side_effect = fake_transcribe
 

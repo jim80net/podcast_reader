@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Literal
 
 # pydantic (FastAPI response models) requires typing_extensions.TypedDict on
 # Python < 3.12; typing.TypedDict raises PydanticUserError there.
-from typing_extensions import TypedDict
+from typing_extensions import NotRequired, TypedDict
 
 StepName = Literal["resolve", "captions", "download", "transcribe", "diarize", "chapters", "render"]
 # step_progress: incremental in-step progress (whisper worker, group 3).
@@ -39,11 +39,233 @@ JOB_STATES: tuple[JobState, ...] = (
 )
 
 
-class PipelineEvent(TypedDict):
-    kind: EventKind
-    step: StepName | None
+class StepStartedData(TypedDict, total=False):
+    cached: bool
+
+
+class StepProgressData(TypedDict):
+    seconds: float
+    duration: float | None
+
+
+class StepFinishedData(TypedDict, total=False):
+    cached: bool
+    caption_corrections: int
+
+
+class WarningData(TypedDict):
+    code: str
+    reason: NotRequired[str]
+
+
+class JobDoneData(TypedDict):
+    pass
+
+
+class JobFailedData(TypedDict):
+    code: str
+    hint: str
+    detail: str
+
+
+class StepStartedEvent(TypedDict):
+    kind: Literal["step_started"]
+    step: StepName
     message: str
-    data: dict[str, Any]
+    data: StepStartedData
+
+
+class StepProgressEvent(TypedDict):
+    kind: Literal["step_progress"]
+    step: StepName
+    message: str
+    data: StepProgressData
+
+
+class StepFinishedEvent(TypedDict):
+    kind: Literal["step_finished"]
+    step: StepName
+    message: str
+    data: StepFinishedData
+
+
+class WarningEvent(TypedDict):
+    kind: Literal["warning"]
+    step: StepName
+    message: str
+    data: WarningData
+
+
+class JobDoneEvent(TypedDict):
+    kind: Literal["job_done"]
+    step: None
+    message: str
+    data: JobDoneData
+
+
+class JobFailedEvent(TypedDict):
+    kind: Literal["job_failed"]
+    step: None
+    message: str
+    data: JobFailedData
+
+
+# Events emitted inside the pipeline are not routable until JobStore attaches
+# their job identity. They never cross the engine's SSE boundary directly.
+PipelineRunEvent = (
+    StepStartedEvent
+    | StepProgressEvent
+    | StepFinishedEvent
+    | WarningEvent
+    | JobDoneEvent
+    | JobFailedEvent
+)
+
+
+class JobStepStartedData(StepStartedData):
+    job_id: str
+
+
+class JobStepProgressData(StepProgressData):
+    job_id: str
+
+
+class JobStepFinishedData(StepFinishedData):
+    job_id: str
+
+
+class JobWarningData(WarningData):
+    job_id: str
+
+
+class RoutedJobDoneData(JobDoneData):
+    job_id: str
+
+
+class RoutedJobFailedData(JobFailedData):
+    job_id: str
+
+
+class JobStepStartedEvent(TypedDict):
+    kind: Literal["step_started"]
+    step: StepName
+    message: str
+    data: JobStepStartedData
+
+
+class JobStepProgressEvent(TypedDict):
+    kind: Literal["step_progress"]
+    step: StepName
+    message: str
+    data: JobStepProgressData
+
+
+class JobStepFinishedEvent(TypedDict):
+    kind: Literal["step_finished"]
+    step: StepName
+    message: str
+    data: JobStepFinishedData
+
+
+class JobWarningEvent(TypedDict):
+    kind: Literal["warning"]
+    step: StepName
+    message: str
+    data: JobWarningData
+
+
+class RoutedJobDoneEvent(TypedDict):
+    kind: Literal["job_done"]
+    step: None
+    message: str
+    data: RoutedJobDoneData
+
+
+class RoutedJobFailedEvent(TypedDict):
+    kind: Literal["job_failed"]
+    step: None
+    message: str
+    data: RoutedJobFailedData
+
+
+class PackInstallEventError(TypedDict):
+    code: str
+    message: str
+
+
+PackEventState = Literal[
+    "not-installed",
+    "resumable",
+    "installing",
+    "installed",
+    "incompatible",
+    "failed",
+    "unavailable",
+]
+
+
+class PackStateEventData(TypedDict):
+    pack_id: str
+    state: PackEventState
+    error: NotRequired[PackInstallEventError]
+
+
+class PackProgressEventData(TypedDict):
+    pack_id: str
+    bytes: int
+    total: int
+
+
+class MediaStateEventData(TypedDict):
+    source_id: str
+    state: Literal["ready", "preparing", "unavailable"]
+
+
+class MediaProgressEventData(TypedDict):
+    source_id: str
+
+
+class PackStateEvent(TypedDict):
+    kind: Literal["pack_state"]
+    step: None
+    message: str
+    data: PackStateEventData
+
+
+class PackProgressEvent(TypedDict):
+    kind: Literal["pack_progress"]
+    step: None
+    message: str
+    data: PackProgressEventData
+
+
+class MediaStateEvent(TypedDict):
+    kind: Literal["media_state"]
+    step: None
+    message: str
+    data: MediaStateEventData
+
+
+class MediaProgressEvent(TypedDict):
+    kind: Literal["media_progress"]
+    step: None
+    message: str
+    data: MediaProgressEventData
+
+
+# The public engine event is a routed sum type: its kind selects one exact
+# identity/data shape, so job, pack, and media identities cannot be combined.
+JobPipelineEvent = (
+    JobStepStartedEvent
+    | JobStepProgressEvent
+    | JobStepFinishedEvent
+    | JobWarningEvent
+    | RoutedJobDoneEvent
+    | RoutedJobFailedEvent
+)
+PipelineEvent = (
+    JobPipelineEvent | PackStateEvent | PackProgressEvent | MediaStateEvent | MediaProgressEvent
+)
 
 
 class PipelineError(Exception):
@@ -129,7 +351,7 @@ class JobRecord(TypedDict):
     title: str | None
     state: JobState
     error: JobError | None
-    events: list[PipelineEvent]
+    events: list[JobPipelineEvent]
     result: PipelineResult | None
     overrides: JobOverrides | None
     models: JobModels | None

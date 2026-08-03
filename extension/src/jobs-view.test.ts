@@ -22,13 +22,11 @@ function record(id: string, state: JobState, overrides: Partial<JobRecord> = {})
   }
 }
 
-function event(jobId: string | undefined, kind: PipelineEvent['kind']): PipelineEvent {
-  return {
-    kind,
-    step: 'download',
-    message: 'downloading',
-    data: jobId === undefined ? {} : { job_id: jobId }
+function event(jobId: string, kind: 'step_started' | 'job_done'): PipelineEvent {
+  if (kind === 'job_done') {
+    return { kind, step: null, message: 'done', data: { job_id: jobId } }
   }
+  return { kind, step: 'download', message: 'downloading', data: { job_id: jobId } }
 }
 
 function tracked(id: string, overrides: Partial<TrackedJob> = {}): TrackedJob {
@@ -67,7 +65,14 @@ describe('applyEvent (hydrate-then-stream merge)', () => {
 
   it('ignores events for untracked jobs and events without job_id (pack events, per Q5)', () => {
     expect(applyEvent(base, event('other', 'step_started')).views.get('j1')?.liveStep).toBeNull()
-    expect(applyEvent(base, event(undefined, 'pack_state')).refreshJobId).toBeNull()
+    expect(
+      applyEvent(base, {
+        kind: 'pack_state',
+        step: null,
+        message: '',
+        data: { pack_id: 'pack-1', state: 'installed' }
+      }).refreshJobId
+    ).toBeNull()
   })
 
   it('never mutates the input map', () => {

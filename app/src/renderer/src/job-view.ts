@@ -54,12 +54,19 @@ export function deriveProgress(events: readonly PipelineEvent[]): JobProgress {
 
   for (const event of events) {
     if (event.kind === 'job_done' || event.kind === 'job_failed') continue
-    if (event.kind === 'warning') {
-      if (event.step === null) warnings.push(event.message)
-      else stepView(event.step).warnings.push(event.message)
+    if (
+      event.kind === 'pack_state' ||
+      event.kind === 'pack_progress' ||
+      event.kind === 'media_state' ||
+      event.kind === 'media_progress'
+    ) {
       continue
     }
-    const view = stepView(event.step as StepName)
+    if (event.kind === 'warning') {
+      stepView(event.step).warnings.push(event.message)
+      continue
+    }
+    const view = stepView(event.step)
     if (event.kind === 'step_finished') view.status = 'done'
     if (event.message !== '') view.detail = event.message
   }

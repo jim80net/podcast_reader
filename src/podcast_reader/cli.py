@@ -15,7 +15,7 @@ from pathlib import Path
 from podcast_reader.engine.settings import data_dir_path, load_settings
 from podcast_reader.pipeline import PipelineError, _wsl_path, run_pipeline
 from podcast_reader.providers import build_provider_registry
-from podcast_reader.types import PipelineEvent, PipelineRequest
+from podcast_reader.types import PipelineRequest, PipelineRunEvent
 
 
 def main() -> None:
@@ -191,7 +191,7 @@ def _cli_hint(exc: PipelineError) -> str:
     return exc.hint
 
 
-def _print_event(event: PipelineEvent) -> None:
+def _print_event(event: PipelineRunEvent) -> None:
     """Print a pipeline event's message to stdout (the CLI's progress face)."""
     if event["message"] and event["kind"] != "job_done":
         print(event["message"])

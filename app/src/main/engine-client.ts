@@ -1,4 +1,5 @@
 import { SseParser } from './sse'
+import { parsePipelineEvent } from '../shared/pipeline-event'
 import {
   validateEmailClaim,
   validateEmailOutboxStatus,
@@ -451,12 +452,14 @@ export class EventStream {
   }
 
   private dispatch(payload: string): void {
-    let event: PipelineEvent
+    let parsed: unknown
     try {
-      event = JSON.parse(payload) as PipelineEvent
+      parsed = JSON.parse(payload) as unknown
     } catch {
       return // a malformed frame is dropped; hydration covers any gap
     }
+    const event = parsePipelineEvent(parsed)
+    if (event === null) return // an incompatible frame is dropped; hydration covers any gap
     this.handlers.onEvent(event)
   }
 }

@@ -28,6 +28,7 @@ import { appendFileSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { join } from 'node:path'
 import type { IncomingMessage, ServerResponse } from 'node:http'
+import type { PipelineEvent } from '../../src/shared/types'
 
 // ---- mirrored payload shapes (kept structurally equal to src/shared/types.ts) --
 
@@ -36,13 +37,6 @@ interface JobError {
   message: string
   hint: string
   detail: string
-}
-
-interface PipelineEvent {
-  kind: string
-  step: string | null
-  message: string
-  data: Record<string, unknown>
 }
 
 interface JobRecord {
@@ -524,7 +518,15 @@ async function handleControl(
     // NEVER job_id, exactly like pack events.
     const body = await readBody(req)
     const sourceId = body.source_id as string
-    const state = body.state as string
+    const requestedState = body.state
+    if (
+      requestedState !== 'ready' &&
+      requestedState !== 'preparing' &&
+      requestedState !== 'unavailable'
+    ) {
+      return detail(res, 400, 'invalid media state')
+    }
+    const state = requestedState
     const entry = media.get(sourceId)
     if (entry !== undefined) {
       entry.info.status = state

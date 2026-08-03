@@ -14,7 +14,7 @@ from podcast_reader.types import PipelineError
 from podcast_reader.ytdlp import build_download_args, build_title_args, download_audio, fetch_title
 
 if TYPE_CHECKING:
-    from podcast_reader.types import PipelineEvent
+    from podcast_reader.types import PipelineRunEvent
 
 
 def _stderr_message(stderr: str) -> str:
@@ -276,7 +276,7 @@ class TestDownloadSelfUpdateRetry:
                 return self._completed(args, stdout="Updated\n")
             return self._completed(args, stdout="2026.06.06\n")
 
-        events: list[PipelineEvent] = []
+        events: list[PipelineRunEvent] = []
         with (
             patch("podcast_reader.ytdlp.resolve_tool", return_value=str(binary)),
             patch("podcast_reader.ytdlp.run_child", side_effect=fake_download_run),
@@ -324,7 +324,7 @@ class TestDownloadSelfUpdateRetry:
         """Q3 residence gate: a PATH-resolved yt-dlp (dev environment) gets
         no -U and no retry — the structured error surfaces immediately."""
         monkeypatch.setenv("PODCAST_READER_DATA_DIR", str(tmp_path / "data"))
-        events: list[PipelineEvent] = []
+        events: list[PipelineRunEvent] = []
         with (
             patch("podcast_reader.ytdlp.resolve_tool", return_value="/usr/bin/yt-dlp"),
             patch(
@@ -347,7 +347,7 @@ class TestDownloadSelfUpdateRetry:
         download_auth_required runs no -U and no retry — a yt-dlp update
         cannot conjure missing credentials, so the error surfaces at once."""
         binary = self._managed_binary(tmp_path, monkeypatch)
-        events: list[PipelineEvent] = []
+        events: list[PipelineRunEvent] = []
         with (
             patch("podcast_reader.ytdlp.resolve_tool", return_value=str(binary)),
             patch(

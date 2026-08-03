@@ -16,22 +16,21 @@ export type StepName =
   | 'chapters'
   | 'render'
 
-// -- src/podcast_reader/types.py:16 (EventKind) --
-// pack_state / pack_progress ride the same SSE stream as job events; they
-// carry data.pack_id and NEVER a job_id (per Q5 — job_id presence is the
-// renderer's job/pack discriminator). media_state / media_progress carry
-// data.source_id and likewise NEVER a job_id (media-playback).
-export type EventKind =
-  | 'step_started'
-  | 'step_progress'
-  | 'step_finished'
-  | 'warning'
-  | 'job_done'
-  | 'job_failed'
-  | 'pack_state'
-  | 'pack_progress'
-  | 'media_state'
-  | 'media_progress'
+// -- src/podcast_reader/types.py:18 (EventKind) --
+export const PIPELINE_EVENT_KINDS = [
+  'step_started',
+  'step_progress',
+  'step_finished',
+  'warning',
+  'job_done',
+  'job_failed',
+  'pack_state',
+  'pack_progress',
+  'media_state',
+  'media_progress'
+] as const
+
+export type EventKind = (typeof PIPELINE_EVENT_KINDS)[number]
 
 // -- src/podcast_reader/types.py:26 (JobState) --
 export type JobState =
@@ -52,13 +51,105 @@ export const JOB_STATES: readonly JobState[] = [
   'interrupted'
 ] as const
 
-// -- src/podcast_reader/types.py:38 (PipelineEvent) --
-export interface PipelineEvent {
-  kind: EventKind
-  step: StepName | null
-  message: string
-  data: Record<string, unknown>
+interface JobIdentity {
+  job_id: string
+  pack_id?: never
+  source_id?: never
 }
+
+interface PackIdentity {
+  pack_id: string
+  job_id?: never
+  source_id?: never
+}
+
+interface MediaIdentity {
+  source_id: string
+  job_id?: never
+  pack_id?: never
+}
+
+interface EventBase {
+  message: string
+}
+
+export interface StepStartedEvent extends EventBase {
+  kind: 'step_started'
+  step: StepName
+  data: JobIdentity & { cached?: boolean }
+}
+
+export interface StepProgressEvent extends EventBase {
+  kind: 'step_progress'
+  step: StepName
+  data: JobIdentity & { seconds: number; duration: number | null }
+}
+
+export interface StepFinishedEvent extends EventBase {
+  kind: 'step_finished'
+  step: StepName
+  data: JobIdentity & { cached?: boolean; caption_corrections?: number }
+}
+
+export interface WarningEvent extends EventBase {
+  kind: 'warning'
+  step: StepName
+  data: JobIdentity & { code: string; reason?: string }
+}
+
+export interface JobDoneEvent extends EventBase {
+  kind: 'job_done'
+  step: null
+  data: JobIdentity
+}
+
+export interface JobFailedEvent extends EventBase {
+  kind: 'job_failed'
+  step: null
+  data: JobIdentity & { code: string; hint: string; detail: string }
+}
+
+export interface PackStateEvent extends EventBase {
+  kind: 'pack_state'
+  step: null
+  data: PackIdentity & { state: PackState; error?: PackInstallError }
+}
+
+export interface PackProgressEvent extends EventBase {
+  kind: 'pack_progress'
+  step: null
+  data: PackIdentity & { bytes: number; total: number }
+}
+
+export interface MediaStateEvent extends EventBase {
+  kind: 'media_state'
+  step: null
+  data: MediaIdentity & { state: 'ready' | 'preparing' | 'unavailable' }
+}
+
+export interface MediaProgressEvent extends EventBase {
+  kind: 'media_progress'
+  step: null
+  data: MediaIdentity
+}
+
+// -- src/podcast_reader/types.py (PipelineEvent) --
+// Public SSE events are routed: each discriminant selects one exact identity
+// and data shape. Untagged pipeline-run events never cross this boundary.
+export type JobPipelineEvent =
+  | StepStartedEvent
+  | StepProgressEvent
+  | StepFinishedEvent
+  | WarningEvent
+  | JobDoneEvent
+  | JobFailedEvent
+
+export type PipelineEvent =
+  | JobPipelineEvent
+  | PackStateEvent
+  | PackProgressEvent
+  | MediaStateEvent
+  | MediaProgressEvent
 
 // -- src/podcast_reader/types.py:62 (JobError) --
 export interface JobError {
@@ -102,7 +193,7 @@ export interface JobRecord {
   title: string | null
   state: JobState
   error: JobError | null
-  events: PipelineEvent[]
+  events: JobPipelineEvent[]
   result: PipelineResult | null
   overrides: JobOverrides | null
   models: JobModels | null

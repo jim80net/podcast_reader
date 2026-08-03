@@ -20,15 +20,19 @@ function job(overrides: Partial<JobRecord> = {}): JobRecord {
   }
 }
 
-function event(overrides: Partial<PipelineEvent> = {}): PipelineEvent {
-  return {
-    kind: 'step_started',
-    step: 'resolve',
-    message: '',
-    data: { job_id: 'j1' },
-    ...overrides
-  }
-}
+const started = (jobId = 'j1', message = ''): PipelineEvent => ({
+  kind: 'step_started',
+  step: 'resolve',
+  message,
+  data: { job_id: jobId }
+})
+
+const finished = (): PipelineEvent => ({
+  kind: 'step_finished',
+  step: 'resolve',
+  message: '',
+  data: { job_id: 'j1' }
+})
 
 describe('hydrateJobs', () => {
   it('replaces all records (records are the source of truth)', () => {
@@ -42,7 +46,7 @@ describe('hydrateJobs', () => {
 describe('applyPipelineEvent', () => {
   it('appends the event to the matching job', () => {
     const jobs = hydrateJobs([job()])
-    const { jobs: next, jobId } = applyPipelineEvent(jobs, event({ message: 'go' }))
+    const { jobs: next, jobId } = applyPipelineEvent(jobs, started('j1', 'go'))
     expect(jobId).toBe('j1')
     expect(next.get('j1')?.events).toHaveLength(1)
     expect(jobs.get('j1')?.events).toHaveLength(0) // input not mutated
@@ -50,17 +54,22 @@ describe('applyPipelineEvent', () => {
 
   it('moves a queued job to running on its first step event', () => {
     const jobs = hydrateJobs([job()])
-    const { jobs: next } = applyPipelineEvent(jobs, event())
+    const { jobs: next } = applyPipelineEvent(jobs, started())
     expect(next.get('j1')?.state).toBe('running')
-    const finished = applyPipelineEvent(jobs, event({ kind: 'step_finished' }))
-    expect(finished.jobs.get('j1')?.state).toBe('running')
+    const result = applyPipelineEvent(jobs, finished())
+    expect(result.jobs.get('j1')?.state).toBe('running')
   })
 
   it('does not infer running from a warning — only step events mean pickup', () => {
     const jobs = hydrateJobs([job()])
     const { jobs: next } = applyPipelineEvent(
       jobs,
-      event({ kind: 'warning', step: null, message: 'chapters skipped' })
+      {
+        kind: 'warning',
+        step: 'chapters',
+        message: 'chapters skipped',
+        data: { job_id: 'j1', code: 'chapters_skipped' }
+      }
     )
     expect(next.get('j1')?.state).toBe('queued')
     expect(next.get('j1')?.events).toHaveLength(1) // still recorded on the timeline
@@ -70,7 +79,7 @@ describe('applyPipelineEvent', () => {
     const jobs = hydrateJobs([job({ state: 'running' })])
     const { jobs: next } = applyPipelineEvent(
       jobs,
-      event({ kind: 'job_done', step: null, message: 'Done' })
+      { kind: 'job_done', step: null, message: 'Done', data: { job_id: 'j1' } }
     )
     expect(next.get('j1')?.state).toBe('done')
   })
@@ -79,12 +88,12 @@ describe('applyPipelineEvent', () => {
     const jobs = hydrateJobs([job({ state: 'running' })])
     const { jobs: next } = applyPipelineEvent(
       jobs,
-      event({
+      {
         kind: 'job_failed',
         step: null,
         message: 'download failed',
         data: { job_id: 'j1', code: 'download', hint: 'check the URL', detail: 'stderr...' }
-      })
+      }
     )
     const record = next.get('j1')
     expect(record?.state).toBe('failed')
@@ -98,21 +107,26 @@ describe('applyPipelineEvent', () => {
 
   it('reports unknown jobs so the caller can re-hydrate', () => {
     const jobs = hydrateJobs([])
-    const result = applyPipelineEvent(jobs, event())
+    const result = applyPipelineEvent(jobs, started())
     expect(result.known).toBe(false)
     expect(result.jobs).toBe(jobs)
   })
 
-  it('ignores events without a string job_id', () => {
+  it('ignores non-job routed events', () => {
     const jobs = hydrateJobs([job()])
-    const result = applyPipelineEvent(jobs, event({ data: {} }))
+    const result = applyPipelineEvent(jobs, {
+      kind: 'media_progress',
+      step: null,
+      message: '',
+      data: { source_id: 'source-1' }
+    })
     expect(result.jobId).toBeNull()
     expect(result.jobs).toBe(jobs)
   })
 
   it('does not regress a terminal state on a late step event', () => {
     const jobs = hydrateJobs([job({ state: 'done' })])
-    const { jobs: next } = applyPipelineEvent(jobs, event({ kind: 'step_finished' }))
+    const { jobs: next } = applyPipelineEvent(jobs, finished())
     expect(next.get('j1')?.state).toBe('done')
   })
 })

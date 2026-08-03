@@ -13,7 +13,7 @@ import re
 import shutil
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from podcast_reader.caption_cleanup import apply_caption_corrections
 from podcast_reader.chapters import (
@@ -33,7 +33,7 @@ from podcast_reader.transcribe import transcribe, transcription_engine
 # (mypy strict) for the existing `from podcast_reader.pipeline import
 # PipelineError` consumers (CLI, engine job store).
 from podcast_reader.types import PipelineError as PipelineError
-from podcast_reader.types import PipelineEvent, PipelineResult
+from podcast_reader.types import PipelineResult, PipelineRunEvent
 from podcast_reader.youtube import (
     NoTranscriptError,
     extract_video_id,
@@ -71,7 +71,7 @@ def classify_input(input_arg: str) -> InputType:
 
 def run_pipeline(
     request: PipelineRequest,
-    on_event: Callable[[PipelineEvent], None],
+    on_event: Callable[[PipelineRunEvent], None],
 ) -> PipelineResult:
     """Run the full transcription pipeline, reporting progress via *on_event*."""
     source = request["source"]
@@ -399,14 +399,19 @@ def run_pipeline(
 
 
 def _emit(
-    on_event: Callable[[PipelineEvent], None],
+    on_event: Callable[[PipelineRunEvent], None],
     kind: EventKind,
     step: StepName | None,
     message: str,
     data: dict[str, Any],
 ) -> None:
     """Build and dispatch a PipelineEvent."""
-    on_event(PipelineEvent(kind=kind, step=step, message=message, data=data))
+    on_event(
+        cast(
+            "PipelineRunEvent",
+            {"kind": kind, "step": step, "message": message, "data": data},
+        )
+    )
 
 
 def _chapter_key_hint(provider: str) -> str:
@@ -479,7 +484,7 @@ def _transcribe_if_needed(
     whisper_lang: str,
     whisper_device: str,
     hf_token: str | None,
-    on_event: Callable[[PipelineEvent], None],
+    on_event: Callable[[PipelineRunEvent], None],
 ) -> None:
     """Run whisper transcription if a valid JSON output doesn't already exist."""
     if _valid_artifact(json_path):

@@ -20,15 +20,12 @@ function job(overrides: Partial<JobRecord> = {}): JobRecord {
   }
 }
 
-function event(overrides: Partial<PipelineEvent> = {}): PipelineEvent {
-  return {
-    kind: 'step_started',
-    step: 'resolve',
-    message: '',
-    data: { job_id: 'j1' },
-    ...overrides
-  }
-}
+const event = (jobId = 'j1'): PipelineEvent => ({
+  kind: 'step_started',
+  step: 'resolve',
+  message: '',
+  data: { job_id: jobId }
+})
 
 describe('AppStore', () => {
   it('exposes engine and jobs as getter-only views — mutation goes through the mutators', () => {
@@ -74,7 +71,7 @@ describe('AppStore', () => {
     store.subscribe(() => {
       notifications += 1
     })
-    expect(store.applyEvent(event({ data: { job_id: 'ghost' } }))).toBe(true)
+    expect(store.applyEvent(event('ghost'))).toBe(true)
     expect(notifications).toBe(0)
   })
 
