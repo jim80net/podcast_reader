@@ -16,7 +16,13 @@ from sqlalchemy.orm import Session
 from podcast_reader_premium.ads import inventory_for_slot
 from podcast_reader_premium.contracts import AdInventoryV1
 from podcast_reader_premium.entitlements import apply_entitlement_event
-from podcast_reader_premium.models import AdConfig, FeatureFlag, HouseAd, User
+from podcast_reader_premium.models import (
+    AdConfig,
+    EntitlementProjection,
+    FeatureFlag,
+    HouseAd,
+    User,
+)
 
 CONTRACTS = Path(__file__).parents[1] / "contracts" / "v1" / "ads"
 
@@ -168,6 +174,24 @@ def test_inventory_is_bearer_only_and_ineligible_states_are_empty(
     unknown = client.get("/v1/ads/inventory/not-a-slot", headers=bearer)
     assert unknown.status_code == 404
     assert unknown.json()["code"] == "invalid_slot"
+
+
+def test_inventory_route_fails_closed_when_projection_disagrees_with_ledger(
+    client: TestClient,
+    account: dict[str, object],
+    browser_auth: dict[str, str],
+) -> None:
+    bearer = _bearer(client, browser_auth)
+    with Session(_app(client).state.engine) as database:
+        projection = database.get(EntitlementProjection, account["id"])
+        assert projection is not None
+        projection.effective_tier = "premium"
+        database.commit()
+
+    response = client.get("/v1/ads/inventory/library", headers=bearer)
+
+    assert response.status_code == 500
+    assert response.json()["code"] == "internal_error"
 
 
 def test_inventory_is_bounded_ordered_scheduled_and_revision_sensitive(

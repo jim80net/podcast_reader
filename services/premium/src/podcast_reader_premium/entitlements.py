@@ -176,7 +176,8 @@ def rebuild_projection(database: Session, user_id: str) -> dict[str, object]:
     }
 
 
-def assert_projection_matches_ledger(database: Session, user_id: str) -> None:
+def _verified_projection(database: Session, user_id: str) -> EntitlementProjection:
+    """Load a projection only after verifying it against the authoritative ledger."""
     projection = database.get(EntitlementProjection, user_id)
     if projection is None:
         raise ValueError("entitlement projection is missing")
@@ -184,6 +185,7 @@ def assert_projection_matches_ledger(database: Session, user_id: str) -> None:
     for key, value in rebuilt.items():
         if getattr(projection, key) != value:
             raise ValueError(f"entitlement projection mismatch for {key}")
+    return projection
 
 
 def repair_projection(database: Session, user_id: str, *, timestamp: int) -> bool:
@@ -219,9 +221,8 @@ def evaluate_entitlements(
     database: Session, user_id: str, *, at: datetime | None = None
 ) -> EntitlementV1:
     evaluated = (at or datetime.now(UTC)).replace(microsecond=0)
-    projection = database.get(EntitlementProjection, user_id)
-    if projection is None:
-        raise ValueError("entitlement projection is missing")
+    # Ratified #119 semantics: the ledger is authoritative and every protected read fails closed.
+    projection = _verified_projection(database, user_id)
     tier: Tier = "premium" if projection.effective_tier == "premium" else "free"
     flag_rows = {item.key: item for item in database.scalars(select(FeatureFlag)).all()}
     unknown = set(flag_rows) - set(FLAG_DEFAULTS)

@@ -19,7 +19,12 @@ from podcast_reader_premium.contracts import (
 )
 from podcast_reader_premium.email_delivery import DevMaildirSink, EmailRelay
 from podcast_reader_premium.entitlements import apply_entitlement_event
-from podcast_reader_premium.models import EmailDeliveryReceipt, FeatureFlag, User
+from podcast_reader_premium.models import (
+    EmailDeliveryReceipt,
+    EntitlementProjection,
+    FeatureFlag,
+    User,
+)
 
 CONTRACTS = Path(__file__).parents[1] / "contracts" / "v1" / "email"
 
@@ -174,6 +179,31 @@ def test_relay_is_entitlement_gated_content_stateless_and_idempotent(
         assert cast("str", request["title"]) not in stored
         assert cast("str", request["transcript_text"]).strip() not in stored
         assert cast("str", account["email"]) not in stored
+
+
+def test_email_route_fails_closed_before_delivery_when_projection_disagrees_with_ledger(
+    client: TestClient,
+    account: dict[str, object],
+    browser_auth: dict[str, str],
+) -> None:
+    bearer = _bearer(client, browser_auth)
+    user_id = cast("str", account["id"])
+    _enable_email(client, user_id)
+    with Session(_app(client).state.engine) as database:
+        projection = database.get(EntitlementProjection, user_id)
+        assert projection is not None
+        projection.effective_tier = "free"
+        database.commit()
+
+    response = client.post(
+        "/v1/email-deliveries", json=_fixture("request-manual.json"), headers=bearer
+    )
+
+    assert response.status_code == 500
+    assert response.json()["code"] == "internal_error"
+    assert list(_app(client).state.settings.email_maildir_path.glob("new/*.eml")) == []
+    with Session(_app(client).state.engine) as database:
+        assert database.scalar(select(EmailDeliveryReceipt)) is None
 
 
 def test_same_client_id_with_different_content_conflicts(
