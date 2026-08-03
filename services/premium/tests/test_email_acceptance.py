@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -41,7 +42,7 @@ from podcast_reader.types import (  # type: ignore[import-untyped]  # noqa: E402
 )
 
 from podcast_reader_premium.entitlements import apply_entitlement_event  # noqa: E402
-from podcast_reader_premium.models import FeatureFlag  # noqa: E402
+from podcast_reader_premium.models import EmailDeliveryReceipt, FeatureFlag  # noqa: E402
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -266,6 +267,10 @@ def test_subscription_and_manual_delivery_cross_real_outbox_relay_and_maildir(
             BytesParser(policy=policy.default).parsebytes(path.read_bytes()) for path in messages
         ]
         assert {message["To"] for message in parsed} == {"dev-mailbox@podcast-reader.invalid"}
+        account_email = cast("str", account["email"]).casefold()
+        assert all(
+            account_email not in path.read_text(encoding="utf-8").casefold() for path in messages
+        )
         bodies = [message.get_body() for message in parsed]
         assert all(body is not None and TRANSCRIPT in body.get_content() for body in bodies)
         assert {item["consent_kind"] for item in outbox.list_status()} == {
@@ -277,7 +282,16 @@ def test_subscription_and_manual_delivery_cross_real_outbox_relay_and_maildir(
         persisted = premium_database.read_bytes()
         assert TRANSCRIPT.encode() not in persisted
         assert b"Acceptance episode" not in persisted
-        assert str(account["email"]).encode() not in persisted
+        with Session(_app(client).state.engine) as database:
+            receipts = database.scalars(select(EmailDeliveryReceipt)).all()
+            receipt_rows = [
+                {
+                    column.name: getattr(receipt, column.name)
+                    for column in EmailDeliveryReceipt.__table__.columns
+                }
+                for receipt in receipts
+            ]
+        assert account_email not in json.dumps(receipt_rows, default=str).casefold()
     finally:
         jobs.shutdown()
         subscriptions.shutdown()
