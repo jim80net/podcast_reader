@@ -56,6 +56,9 @@ internal object PodcastReaderProductionComposition {
         val applicationContext = context.applicationContext
         val engineStore = EngineCredentialStore.create(applicationContext)
         val premiumStore = PremiumCredentialStore.create(applicationContext)
+        val premiumClient by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+            securePremiumHttpClient()
+        }
         val dependencies = RuntimeDependencies(
             workDispatcher = Dispatchers.IO,
             engineRecords = EngineRecordProbe {
@@ -67,12 +70,11 @@ internal object PodcastReaderProductionComposition {
             },
             connectedFactory = ConnectedPremiumSessionFactory { account ->
                 val requests = PremiumRequestFactory(account.origin)
-                val client = securePremiumHttpClient()
                 ProductionPremiumConnectedSession(
                     authorizer = PremiumAccountAuthorizer(premiumStore),
-                    nativeAuth = PremiumNativeAuthTransport(requests, client),
-                    currentUser = PremiumCurrentUserTransport(requests, client),
-                    entitlements = PremiumEntitlementTransport(requests, client),
+                    nativeAuth = PremiumNativeAuthTransport(requests, premiumClient),
+                    currentUser = PremiumCurrentUserTransport(requests, premiumClient),
+                    entitlements = PremiumEntitlementTransport(requests, premiumClient),
                 )
             },
             now = Instant::now,

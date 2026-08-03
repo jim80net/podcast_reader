@@ -57,6 +57,13 @@ class CurrentUserContractTest {
         assertTrue("invalid vectors accepted: $acceptedInvalid", acceptedInvalid.isEmpty())
     }
 
+    @Test
+    fun rejectsInternalWhitespaceRequiredByTheFrozenSubjectPattern() {
+        val dto = premiumJson.decodeFromString<CurrentUserV1Dto>("""{"id":"usr bad"}""")
+
+        assertTrue(dto.validatedSubject().isFailure)
+    }
+
     private fun fixture(name: String): String = requireNotNull(
         javaClass.classLoader?.getResource(name),
     ) { "missing backend-owned fixture $name" }.readText()

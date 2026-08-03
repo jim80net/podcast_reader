@@ -9,7 +9,11 @@ data class CurrentUserV1Dto(
     override fun toString(): String = "CurrentUserV1Dto(redacted)"
 
     internal fun validatedSubject(): Result<String> = runCatching {
-        require(id.isNotBlank() && id == id.trim() && id.length <= MAX_CURRENT_USER_SUBJECT_LENGTH) {
+        require(
+            id.isNotEmpty() &&
+                id.length <= MAX_CURRENT_USER_SUBJECT_LENGTH &&
+                id.none(Char::isWhitespace),
+        ) {
             "invalid current-user subject"
         }
         id

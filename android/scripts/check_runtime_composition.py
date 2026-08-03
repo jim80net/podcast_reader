@@ -33,27 +33,37 @@ def main() -> None:
     for required in (
         "EngineCredentialStore.create(applicationContext)",
         "PremiumCredentialStore.create(applicationContext)",
-        "PremiumNativeAuthTransport(requests, client)",
-        "PremiumCurrentUserTransport(requests, client)",
-        "PremiumEntitlementTransport(requests, client)",
+        "PremiumNativeAuthTransport(requests, premiumClient)",
+        "PremiumCurrentUserTransport(requests, premiumClient)",
+        "PremiumEntitlementTransport(requests, premiumClient)",
     ):
         require(required in composition, f"production runtime dependency missing: {required}")
 
     allowed = COMPOSITION.resolve()
-    definition_files = {
-        "PremiumAccountAuthorizer(": "PremiumAccountAuthorizer.kt",
-        "PremiumNativeAuthTransport(": "PremiumNativeAuthTransport.kt",
-        "PremiumCurrentUserTransport(": "PremiumTransport.kt",
-        "PremiumEntitlementTransport(": "PremiumTransport.kt",
+    definitions = {
+        "PremiumAccountAuthorizer": "PremiumAccountAuthorizer.kt",
+        "PremiumNativeAuthTransport": "PremiumNativeAuthTransport.kt",
+        "PremiumCurrentUserTransport": "PremiumTransport.kt",
+        "PremiumEntitlementTransport": "PremiumTransport.kt",
     }
     kotlin_files = list(MAIN.rglob("*.kt"))
-    for marker, definition_name in definition_files.items():
-        callers = {
-            path.resolve()
-            for path in kotlin_files
-            if path.name != definition_name and marker in path.read_text()
-        }
-        require(callers == {allowed}, f"alternate production constructor for {marker}: {sorted(map(str, callers))}")
+    for class_name, definition_name in definitions.items():
+        marker = f"{class_name}("
+        declaration = f"class {marker}"
+        occurrences = []
+        for path in kotlin_files:
+            source = path.read_text()
+            if path.name == definition_name:
+                require(
+                    source.count(declaration) == 1,
+                    f"expected one declaration for {class_name} in {definition_name}",
+                )
+                source = source.replace(declaration, "", 1)
+            occurrences.extend([path.resolve()] * source.count(marker))
+        require(
+            occurrences == [allowed],
+            f"alternate production constructor for {marker}: {list(map(str, occurrences))}",
+        )
 
 
 if __name__ == "__main__":

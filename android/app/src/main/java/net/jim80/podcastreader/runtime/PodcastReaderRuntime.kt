@@ -99,15 +99,27 @@ internal class PodcastReaderRuntime(
             invalidateLocked()
             signingOut = true
             connected = null
-            publishLocked(PodcastReaderRuntimeSnapshot.local(snapshot.engine))
+            publishLocked(PodcastReaderRuntimeSnapshot.restoring(snapshot.engine))
             activeSession to generation
         }
         scope.launch(workDispatcher) {
-            try {
-                runCatching { session?.signOut("android-runtime-$signOutGeneration-sign-out") }
-                premiumRecords.clear()
-            } finally {
-                synchronized(lock) { signingOut = false }
+            runCatching { session?.signOut("android-runtime-$signOutGeneration-sign-out") }
+            val clearResult = runCatching { premiumRecords.clear().getOrThrow() }
+            synchronized(lock) {
+                signingOut = false
+                if (!isCurrentLocked(signOutGeneration)) return@synchronized
+                val next = clearResult.fold(
+                    onSuccess = { PodcastReaderRuntimeSnapshot.local(snapshot.engine) },
+                    onFailure = {
+                        PodcastReaderRuntimeSnapshot.online(
+                            ProductStateReducer.unavailable(
+                                OnlineUnavailableReason.INCOMPATIBLE_RESPONSE,
+                            ),
+                            snapshot.engine,
+                        )
+                    },
+                )
+                publishLocked(next)
             }
         }
     }

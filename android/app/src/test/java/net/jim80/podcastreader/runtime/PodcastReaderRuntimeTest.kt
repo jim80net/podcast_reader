@@ -3,6 +3,8 @@ package net.jim80.podcastreader.runtime
 import java.time.Instant
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
@@ -98,6 +100,7 @@ class PodcastReaderRuntimeTest {
     @Test
     fun signOutRejectsLateRestoreCompletionAndClearsOnlyPremiumAccess() = runTest {
         val delayed = CompletableDeferred<PremiumRestoreResult>()
+        val delayedSession = DelayedSession(delayed)
         val records = TestPremiumRecords(Result.success(account()))
         val dispatcher = StandardTestDispatcher(testScheduler)
         val runtime = PodcastReaderRuntime(
@@ -105,7 +108,7 @@ class PodcastReaderRuntimeTest {
             workDispatcher = dispatcher,
             engineRecords = EngineRecordProbe { Result.success(true) },
             premiumRecords = records,
-            connectedFactory = ConnectedPremiumSessionFactory { DelayedSession(delayed) },
+            connectedFactory = ConnectedPremiumSessionFactory { delayedSession },
             now = { now },
         )
 
@@ -119,17 +122,50 @@ class PodcastReaderRuntimeTest {
         )
         advanceUntilIdle()
 
+        assertTrue(delayedSession.restoreCompleted)
         assertTrue(runtime.uiState.value.account is AccountUiState.Local)
         assertEquals(1, records.clearCount)
         assertEquals(EngineRuntimeState.PAIRED, runtime.snapshotForTest().engine)
     }
 
     @Test
+    fun signOutClearFailureNeverClaimsTheSurvivingRecordWasRemoved() = runTest {
+        val records = TestPremiumRecords(
+            result = Result.success(account()),
+            clearResult = Result.failure(IllegalStateException("record survived")),
+        )
+        val runtime = PodcastReaderRuntime(
+            scope = this,
+            workDispatcher = StandardTestDispatcher(testScheduler),
+            engineRecords = EngineRecordProbe { Result.success(true) },
+            premiumRecords = records,
+            connectedFactory = ConnectedPremiumSessionFactory {
+                CompletedSession(
+                    PremiumRestoreResult.Online(
+                        ProductStateReducer.unavailable(OnlineUnavailableReason.OFFLINE),
+                    ),
+                )
+            },
+            now = { now },
+        )
+
+        runtime.foreground()
+        testScheduler.runCurrent()
+        runtime.dispatch(PodcastReaderRuntimeEvent.SignOut)
+        assertTrue(runtime.uiState.value.account is AccountUiState.Bootstrapping)
+        advanceUntilIdle()
+
+        assertEquals(1, records.clearCount)
+        assertTrue(runtime.uiState.value.account is AccountUiState.OnlineUnavailable)
+    }
+
+    @Test
     fun backgroundRejectsThePreviousForegroundGeneration() = runTest {
         val delayed = CompletableDeferred<PremiumRestoreResult>()
+        val delayedSession = DelayedSession(delayed)
         val runtime = runtime(
             accountResult = Result.success(account()),
-            factory = ConnectedPremiumSessionFactory { DelayedSession(delayed) },
+            factory = ConnectedPremiumSessionFactory { delayedSession },
         )
 
         runtime.foreground()
@@ -142,6 +178,7 @@ class PodcastReaderRuntimeTest {
         )
         advanceUntilIdle()
 
+        assertTrue(delayedSession.restoreCompleted)
         assertTrue(runtime.uiState.value.account is AccountUiState.Bootstrapping)
     }
 
@@ -166,12 +203,13 @@ class PodcastReaderRuntimeTest {
 
 private class TestPremiumRecords(
     private val result: Result<PremiumAccountCredentials?>,
+    private val clearResult: Result<Unit> = Result.success(Unit),
 ) : PremiumAccountRecordAccess {
     var loadCount = 0
     var clearCount = 0
 
     override fun load(): Result<PremiumAccountCredentials?> = result.also { loadCount += 1 }
-    override fun clear(): Result<Unit> = Result.success(Unit).also { clearCount += 1 }
+    override fun clear(): Result<Unit> = clearResult.also { clearCount += 1 }
 }
 
 private class CompletedSession(
@@ -184,6 +222,14 @@ private class CompletedSession(
 private class DelayedSession(
     private val result: CompletableDeferred<PremiumRestoreResult>,
 ) : ConnectedPremiumSession {
-    override suspend fun restore(now: Instant, requestId: String): PremiumRestoreResult = result.await()
+    var restoreCompleted = false
+        private set
+
+    override suspend fun restore(now: Instant, requestId: String): PremiumRestoreResult {
+        val restored = withContext(NonCancellable) { result.await() }
+        restoreCompleted = true
+        return restored
+    }
+
     override suspend fun signOut(requestId: String) = Unit
 }
