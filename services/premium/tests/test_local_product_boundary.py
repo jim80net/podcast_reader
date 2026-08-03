@@ -61,9 +61,11 @@ def test_premium_service_is_absent_from_local_engine_and_desktop_dependency_clos
     ):
         assert re.search(credential_field, renderer_contract.casefold()) is None
 
-    ad_slot = (desktop_root / "renderer" / "src" / "premium-ad-slot.ts").read_text(
-        encoding="utf-8"
-    ).casefold()
+    ad_slot = (
+        (desktop_root / "renderer" / "src" / "premium-ad-slot.ts")
+        .read_text(encoding="utf-8")
+        .casefold()
+    )
     for forbidden_surface in ("innerhtml", "webview", "<img", "script", "impression", "analytics"):
         assert forbidden_surface not in ad_slot
     manifests_text = "\n".join(path.read_text(encoding="utf-8").casefold() for path in manifests)
