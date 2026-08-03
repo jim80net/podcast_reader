@@ -57,49 +57,8 @@ data class EntitlementV1Dto(
 ) {
     override fun toString(): String = "EntitlementV1Dto(redacted)"
 
-    internal fun validated(expectedSubject: String): Result<EntitlementProjection> = runCatching {
-        require(schemaVersion == 1) { "unsupported entitlement schema" }
-        require(subject == expectedSubject && subject.isNotBlank()) { "entitlement subject mismatch" }
-        require(entitlement.revision in 0..MAX_SAFE_REVISION && flagsRevision in 0..MAX_SAFE_REVISION) {
-            "invalid entitlement revision"
-        }
-        val evaluated = parseCanonicalUtc(evaluatedAt)
-        val refresh = parseCanonicalUtc(refreshAfter)
-        require(refresh.isAfter(evaluated)) { "invalid entitlement refresh window" }
-
-        when (tier) {
-            EntitlementTierDto.FREE -> {
-                require(
-                    entitlement.source == EntitlementSourceKindDto.NONE ||
-                        entitlement.source == EntitlementSourceKindDto.ADMIN,
-                )
-                require(capabilities.adPolicy == AdPolicyDto.NONE || capabilities.adPolicy == AdPolicyDto.HOUSE)
-                require(!capabilities.podcastSubscriptions)
-                require(!capabilities.transcriptEmail)
-                require(!capabilities.mobileAdFree)
-                require(!capabilities.topicCorpus)
-            }
-
-            EntitlementTierDto.PREMIUM -> {
-                require(
-                    entitlement.source == EntitlementSourceKindDto.TEST_PURCHASE ||
-                        entitlement.source == EntitlementSourceKindDto.ADMIN,
-                )
-                require(capabilities.adPolicy == AdPolicyDto.NONE)
-            }
-        }
-
-        EntitlementProjection(
-            subject = subject,
-            tier = tier,
-            source = entitlement.source,
-            entitlementRevision = entitlement.revision,
-            capabilities = capabilities,
-            flagsRevision = flagsRevision,
-            evaluatedAt = evaluated,
-            refreshAfter = refresh,
-        )
-    }
+    internal fun validated(expectedSubject: String): Result<EntitlementProjection> =
+        EntitlementProjection.validated(this, expectedSubject)
 }
 
 @Serializable
@@ -150,7 +109,7 @@ enum class AdPolicyDto {
 
 }
 
-data class EntitlementProjection(
+internal class EntitlementProjection private constructor(
     val subject: String,
     val tier: EntitlementTierDto,
     val source: EntitlementSourceKindDto,
@@ -161,6 +120,52 @@ data class EntitlementProjection(
     val refreshAfter: Instant,
 ) {
     override fun toString(): String = "EntitlementProjection(redacted)"
+
+    companion object {
+        fun validated(dto: EntitlementV1Dto, expectedSubject: String): Result<EntitlementProjection> = runCatching {
+            require(dto.schemaVersion == 1) { "unsupported entitlement schema" }
+            require(dto.subject == expectedSubject && dto.subject.isNotBlank()) { "entitlement subject mismatch" }
+            require(dto.entitlement.revision in 0..MAX_SAFE_REVISION && dto.flagsRevision in 0..MAX_SAFE_REVISION) {
+                "invalid entitlement revision"
+            }
+            val evaluated = parseCanonicalUtc(dto.evaluatedAt)
+            val refresh = parseCanonicalUtc(dto.refreshAfter)
+            require(refresh.isAfter(evaluated)) { "invalid entitlement refresh window" }
+
+            when (dto.tier) {
+                EntitlementTierDto.FREE -> {
+                    require(
+                        dto.entitlement.source == EntitlementSourceKindDto.NONE ||
+                            dto.entitlement.source == EntitlementSourceKindDto.ADMIN,
+                    )
+                    require(dto.capabilities.adPolicy == AdPolicyDto.NONE || dto.capabilities.adPolicy == AdPolicyDto.HOUSE)
+                    require(!dto.capabilities.podcastSubscriptions)
+                    require(!dto.capabilities.transcriptEmail)
+                    require(!dto.capabilities.mobileAdFree)
+                    require(!dto.capabilities.topicCorpus)
+                }
+
+                EntitlementTierDto.PREMIUM -> {
+                    require(
+                        dto.entitlement.source == EntitlementSourceKindDto.TEST_PURCHASE ||
+                            dto.entitlement.source == EntitlementSourceKindDto.ADMIN,
+                    )
+                    require(dto.capabilities.adPolicy == AdPolicyDto.NONE)
+                }
+            }
+
+            EntitlementProjection(
+                subject = dto.subject,
+                tier = dto.tier,
+                source = dto.entitlement.source,
+                entitlementRevision = dto.entitlement.revision,
+                capabilities = dto.capabilities,
+                flagsRevision = dto.flagsRevision,
+                evaluatedAt = evaluated,
+                refreshAfter = refresh,
+            )
+        }
+    }
 }
 
 private fun parseCanonicalUtc(value: String): Instant {

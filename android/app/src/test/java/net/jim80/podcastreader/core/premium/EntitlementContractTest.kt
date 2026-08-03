@@ -5,11 +5,15 @@ import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import net.jim80.podcastreader.core.premium.ProductState.ProductStateReducer
+import net.jim80.podcastreader.support.FixtureProductStates
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class EntitlementContractTest {
+    private val fixtureStates = FixtureProductStates(::fixture)
+
     private fun fixture(name: String): String = requireNotNull(
         javaClass.classLoader?.getResource(name),
     ) { "missing backend-owned fixture $name" }.readText()
@@ -23,8 +27,8 @@ class EntitlementContractTest {
             now = Instant.parse("2026-08-02T00:01:00Z"),
         )
 
-        assertTrue(state is ProductState.OnlineFree)
-        assertEquals(AdPolicyDto.NONE, (state as ProductState.OnlineFree).entitlement.capabilities.adPolicy)
+        assertEquals("online-free", state.kind())
+        assertEquals(null, state.freeTruth()?.houseAds)
     }
 
     @Test
@@ -36,8 +40,8 @@ class EntitlementContractTest {
             now = Instant.parse("2026-08-02T00:01:00Z"),
         )
 
-        assertTrue(state is ProductState.OnlinePremium)
-        assertTrue((state as ProductState.OnlinePremium).entitlement.capabilities.mobileAdFree)
+        assertEquals("online-premium", state.kind())
+        assertTrue(requireNotNull(state.premiumTruth()).capabilities.mobileAdFree)
     }
 
     @Test
@@ -66,11 +70,7 @@ class EntitlementContractTest {
                 vector.getValue("document"),
             )
             val state = ProductStateReducer.online(dto, expectedSubject, now)
-            val actual = when (state) {
-                is ProductState.OnlineFree -> "online-free"
-                is ProductState.OnlinePremium -> "online-premium"
-                else -> "unavailable"
-            }
+            val actual = state.kind()
             assertEquals(name, vector.getValue("expected_state").jsonPrimitive.content, actual)
         }
         val acceptedInvalidVectors = invalid.mapNotNull { element ->
@@ -88,18 +88,10 @@ class EntitlementContractTest {
 
     @Test
     fun housePolicyWithinTheFrozenV1ShapeRemainsOnlineFreeAndNotAdFree() {
-        val house = premiumJson.decodeFromString<EntitlementV1Dto>(
-            fixture("entitlements-v1-free.json").replace("\"ad_policy\": \"none\"", "\"ad_policy\": \"house\""),
-        )
-        val state = ProductStateReducer.online(
-            house,
-            expectedSubject = "usr_free_fixture",
-            now = Instant.parse("2026-08-02T00:01:00Z"),
-        )
+        val state = fixtureStates.free(houseAds = true)
 
-        assertTrue(state is ProductState.OnlineFree)
-        assertEquals(AdPolicyDto.HOUSE, (state as ProductState.OnlineFree).entitlement.capabilities.adPolicy)
-        assertTrue(!state.entitlement.capabilities.mobileAdFree)
+        assertEquals("online-free", state.kind())
+        assertTrue(requireNotNull(state.freeTruth()).houseAds != null)
     }
 
     @Test
@@ -121,30 +113,58 @@ class EntitlementContractTest {
         )
 
         assertEquals(
-            ProductState.OnlineUnavailable(OnlineUnavailableReason.INCOMPATIBLE_RESPONSE),
-            ProductStateReducer.online(free, "usr_other", Instant.parse("2026-08-02T00:01:00Z")),
+            OnlineUnavailableReason.INCOMPATIBLE_RESPONSE,
+            ProductStateReducer.online(free, "usr_other", Instant.parse("2026-08-02T00:01:00Z")).reason(),
         )
         assertEquals(
-            ProductState.OnlineUnavailable(OnlineUnavailableReason.STALE),
-            ProductStateReducer.online(free, "usr_free_fixture", Instant.parse("2026-08-02T00:05:00Z")),
+            OnlineUnavailableReason.STALE,
+            ProductStateReducer.online(free, "usr_free_fixture", Instant.parse("2026-08-02T00:05:00Z")).reason(),
         )
         assertEquals(
-            ProductState.OnlineUnavailable(OnlineUnavailableReason.INCOMPATIBLE_RESPONSE),
+            OnlineUnavailableReason.INCOMPATIBLE_RESPONSE,
             ProductStateReducer.online(
                 inconsistent,
                 "usr_free_fixture",
                 Instant.parse("2026-08-02T00:01:00Z"),
-            ),
+            ).reason(),
         )
     }
 
     @Test
     fun onlineFailuresNeverChangeTheLocalState() {
-        assertEquals(ProductState.Local, ProductStateReducer.local())
+        assertEquals("local", ProductStateReducer.local().kind())
         assertEquals(
-            ProductState.OnlineUnavailable(OnlineUnavailableReason.OFFLINE),
-            ProductStateReducer.unavailable(OnlineUnavailableReason.OFFLINE),
+            OnlineUnavailableReason.OFFLINE,
+            ProductStateReducer.unavailable(OnlineUnavailableReason.OFFLINE).reason(),
         )
-        assertEquals(ProductState.Local, ProductStateReducer.local())
+        assertEquals("local", ProductStateReducer.local().kind())
     }
+
+    private fun ProductState.kind(): String = fold(
+        onLocal = { "local" },
+        onOnlineFree = { "online-free" },
+        onOnlinePremium = { "online-premium" },
+        onOnlineUnavailable = { "unavailable" },
+    )
+
+    private fun ProductState.freeTruth(): OnlineFreeTruth? = fold(
+        onLocal = { null },
+        onOnlineFree = { it },
+        onOnlinePremium = { null },
+        onOnlineUnavailable = { null },
+    )
+
+    private fun ProductState.premiumTruth(): OnlinePremiumTruth? = fold(
+        onLocal = { null },
+        onOnlineFree = { null },
+        onOnlinePremium = { it },
+        onOnlineUnavailable = { null },
+    )
+
+    private fun ProductState.reason(): OnlineUnavailableReason? = fold(
+        onLocal = { null },
+        onOnlineFree = { null },
+        onOnlinePremium = { null },
+        onOnlineUnavailable = { it },
+    )
 }

@@ -3,7 +3,6 @@ package net.jim80.podcastreader.ui
 import java.time.Instant
 import net.jim80.podcastreader.core.ads.HouseAdPlacement
 import net.jim80.podcastreader.core.ads.HouseInventory
-import net.jim80.podcastreader.core.premium.AdPolicyDto
 import net.jim80.podcastreader.core.premium.DeviceAuthorizationSession
 import net.jim80.podcastreader.core.premium.OnlineUnavailableReason
 import net.jim80.podcastreader.core.premium.ProductState
@@ -51,18 +50,18 @@ class PodcastReaderUiState private constructor(
             val activeAuthorization = authorization?.takeIf { now.isBefore(it.expiresAt) }
             val account = activeAuthorization?.let {
                 AccountUiState.Authorizing(it.userCode, it.expiresAt)
-            } ?: when (productState) {
-                ProductState.Local -> AccountUiState.Local
-                is ProductState.OnlineFree -> AccountUiState.OnlineFree
-                is ProductState.OnlinePremium -> AccountUiState.OnlinePremium
-                is ProductState.OnlineUnavailable -> AccountUiState.OnlineUnavailable(productState.reason)
-            }
-            val adsEligible = (productState as? ProductState.OnlineFree)?.entitlement?.let { entitlement ->
-                entitlement.capabilities.adPolicy == AdPolicyDto.HOUSE &&
-                    !entitlement.capabilities.mobileAdFree &&
-                    !now.isBefore(entitlement.evaluatedAt) &&
-                    now.isBefore(entitlement.refreshAfter)
-            } == true
+            } ?: productState.fold(
+                onLocal = { AccountUiState.Local },
+                onOnlineFree = { AccountUiState.OnlineFree },
+                onOnlinePremium = { AccountUiState.OnlinePremium },
+                onOnlineUnavailable = { AccountUiState.OnlineUnavailable(it) },
+            )
+            val adsEligible = productState.fold(
+                onLocal = { false },
+                onOnlineFree = { truth -> truth.houseAds?.isActiveAt(now) == true },
+                onOnlinePremium = { false },
+                onOnlineUnavailable = { false },
+            )
             return PodcastReaderUiState(
                 account = account,
                 accountServiceConfigured = accountServiceConfigured,

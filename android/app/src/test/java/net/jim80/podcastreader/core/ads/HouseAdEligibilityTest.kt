@@ -1,30 +1,27 @@
 package net.jim80.podcastreader.core.ads
 
 import java.time.Instant
-import net.jim80.podcastreader.core.premium.AdPolicyDto
-import net.jim80.podcastreader.core.premium.EntitlementCapabilitiesDto
-import net.jim80.podcastreader.core.premium.EntitlementProjection
-import net.jim80.podcastreader.core.premium.EntitlementSourceKindDto
-import net.jim80.podcastreader.core.premium.EntitlementTierDto
 import net.jim80.podcastreader.core.premium.PremiumFailure
 import net.jim80.podcastreader.core.premium.PremiumFailureCategory
-import net.jim80.podcastreader.core.premium.ProductState
+import net.jim80.podcastreader.core.premium.OnlineUnavailableReason
+import net.jim80.podcastreader.support.FixtureProductStates
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class HouseAdEligibilityTest {
-    private val now = Instant.parse("2026-08-03T00:00:00Z")
+    private val fixtures = FixtureProductStates(::fixture)
+    private val now = fixtures.now
 
     @Test
     fun localPremiumUnavailableAndIneligibleFreeNeverConstructTheRepository() {
         val states = listOf(
-            ProductState.Local,
-            ProductState.OnlinePremium(projection(EntitlementTierDto.PREMIUM, AdPolicyDto.NONE, adFree = true)),
-            ProductState.OnlineUnavailable(net.jim80.podcastreader.core.premium.OnlineUnavailableReason.OFFLINE),
-            ProductState.OnlineFree(projection(EntitlementTierDto.FREE, AdPolicyDto.NONE)),
-            ProductState.OnlineFree(projection(EntitlementTierDto.FREE, AdPolicyDto.HOUSE, refreshAfter = now)),
+            fixtures.local(),
+            fixtures.premium(),
+            fixtures.unavailable(OnlineUnavailableReason.OFFLINE),
+            fixtures.free(),
+            fixtures.free(houseAds = true, at = Instant.parse("2026-08-02T00:05:00Z")),
         )
         var constructions = 0
 
@@ -37,14 +34,14 @@ class HouseAdEligibilityTest {
     @Test
     fun onlyFreshOnlineFreeHouseTruthConstructsOnce() {
         var constructions = 0
-        val state = ProductState.OnlineFree(projection(EntitlementTierDto.FREE, AdPolicyDto.HOUSE))
+        val state = fixtures.free(houseAds = true)
 
         val marker = HouseAdRuntimeGate.create(state, now) { eligibility ->
             constructions += 1
             eligibility.validUntil
         }
 
-        assertEquals(now.plusSeconds(300), marker)
+        assertEquals(Instant.parse("2026-08-02T00:05:00Z"), marker)
         assertEquals(1, constructions)
     }
 
@@ -70,22 +67,6 @@ class HouseAdEligibilityTest {
         assertEquals(3, api.calls)
     }
 
-    private fun projection(
-        tier: EntitlementTierDto,
-        adPolicy: AdPolicyDto,
-        adFree: Boolean = false,
-        refreshAfter: Instant = now.plusSeconds(300),
-    ) = EntitlementProjection(
-        subject = "usr_fixture",
-        tier = tier,
-        source = if (tier == EntitlementTierDto.FREE) EntitlementSourceKindDto.NONE else EntitlementSourceKindDto.TEST_PURCHASE,
-        entitlementRevision = 1,
-        capabilities = EntitlementCapabilitiesDto(adPolicy, false, false, adFree, false),
-        flagsRevision = 1,
-        evaluatedAt = now,
-        refreshAfter = refreshAfter,
-    )
-
     private fun successInventory() = HouseInventoryResult.Success(
         HouseInventory(
             HouseAdPlacement.LIBRARY,
@@ -94,6 +75,10 @@ class HouseAdEligibilityTest {
             listOf(HouseAdCreative("ad_test", 1, "Title", "Body", HouseAdCta.fromContract("https://example.com").getOrThrow())),
         ),
     )
+
+    private fun fixture(name: String): String = requireNotNull(javaClass.classLoader?.getResource(name)) {
+        "missing backend-owned fixture $name"
+    }.readText()
 }
 
 private class RecordingInventoryApi(initial: HouseInventoryResult) : HouseInventoryApi {

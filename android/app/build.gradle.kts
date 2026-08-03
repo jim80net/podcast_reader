@@ -58,7 +58,14 @@ android {
     }
 
     sourceSets {
-        getByName("test").resources.directories.add("../../services/premium/contracts")
+        getByName("test") {
+            kotlin.directories.add("src/sharedTest/java")
+            resources.directories.add("../../services/premium/contracts")
+        }
+        getByName("androidTest") {
+            kotlin.directories.add("src/sharedTest/java")
+            assets.srcDir("../../services/premium/contracts")
+        }
     }
 }
 
