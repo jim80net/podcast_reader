@@ -83,7 +83,30 @@ class EntitlementContractTest {
             }
             name.takeIf { result.isSuccess }
         }
-        assertTrue("invalid vectors accepted: $acceptedInvalidVectors", acceptedInvalidVectors.isEmpty())
+        acceptedInvalidVectors.firstOrNull()?.let { name ->
+            when (name) {
+                "boolean-capability-as-integer" -> error(name)
+                "schema-version-as-boolean" -> error(name)
+                "subject-as-number" -> error(name)
+                "revision-as-string" -> error(name)
+                "revision-above-shared-safe-integer" -> error(name)
+                "flags-revision-negative" -> error(name)
+                "unknown-root-field" -> error(name)
+                "unknown-nested-field" -> error(name)
+                "missing-capability" -> error(name)
+                "unknown-tier" -> error(name)
+                "unknown-source" -> error(name)
+                "unsupported-paid-ad-policy" -> error(name)
+                "noncanonical-offset-time" -> error(name)
+                "fractional-second-time" -> error(name)
+                "refresh-not-after-evaluation" -> error(name)
+                "free-with-premium-capability" -> error(name)
+                "free-with-purchase-source" -> error(name)
+                "premium-with-none-source" -> error(name)
+                "premium-with-house-ads" -> error(name)
+                else -> error("unknown invalid vector accepted")
+            }
+        }
     }
 
     @Test
