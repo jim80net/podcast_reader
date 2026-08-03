@@ -48,6 +48,7 @@ if TYPE_CHECKING:
     from podcast_reader.engine.media import MediaManager
     from podcast_reader.engine.pack_manager import PackManager
     from podcast_reader.engine.settings import EngineState
+    from podcast_reader.engine.subscriptions import SubscriptionManager
 
 
 @pytest.fixture(autouse=True)
@@ -516,6 +517,7 @@ class TestServeKeyStoreWiring:
             on_shutdown: Callable[[], None] | None = None,
             pack_manager: PackManager | None = None,
             media_manager: MediaManager | None = None,
+            subscription_manager: SubscriptionManager | None = None,
         ) -> object:
             captured["app_store"] = key_store
             return real_create(
@@ -525,6 +527,7 @@ class TestServeKeyStoreWiring:
                 on_shutdown=on_shutdown,
                 pack_manager=pack_manager,
                 media_manager=media_manager,
+                subscription_manager=subscription_manager,
             )
 
         monkeypatch.setattr("podcast_reader.engine.process.make_pipeline_runner", spy_make)
