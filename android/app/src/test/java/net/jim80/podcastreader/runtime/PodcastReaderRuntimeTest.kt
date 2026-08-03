@@ -194,6 +194,40 @@ class PodcastReaderRuntimeTest {
     }
 
     @Test
+    fun olderSignOutCompletionCannotOverwriteTheLatestAttempt() = runTest {
+        val firstSignOut = CompletableDeferred<Unit>()
+        val session = DelayedSignOutSession(firstSignOut)
+        val records = SequencedPremiumRecords(
+            account = account(),
+            clearResults = mutableListOf(
+                Result.failure(IllegalStateException("latest clear failed")),
+                Result.success(Unit),
+            ),
+        )
+        val runtime = PodcastReaderRuntime(
+            scope = this,
+            workDispatcher = StandardTestDispatcher(testScheduler),
+            engineRecords = EngineRecordProbe { Result.success(true) },
+            premiumRecords = records,
+            connectedFactory = ConnectedPremiumSessionFactory { session },
+            now = { now },
+        )
+
+        runtime.foreground()
+        advanceUntilIdle()
+        runtime.dispatch(PodcastReaderRuntimeEvent.SignOut)
+        testScheduler.runCurrent()
+        runtime.dispatch(PodcastReaderRuntimeEvent.SignOut)
+        testScheduler.runCurrent()
+        firstSignOut.complete(Unit)
+        advanceUntilIdle()
+
+        assertEquals(2, records.clearCount)
+        val unavailable = runtime.uiState.value.account as AccountUiState.OnlineUnavailable
+        assertEquals(OnlineUnavailableReason.LOCAL_CREDENTIAL_STORAGE, unavailable.reason)
+    }
+
+    @Test
     fun backgroundRejectsThePreviousForegroundGeneration() = runTest {
         val delayed = CompletableDeferred<PremiumRestoreResult>()
         val delayedSession = DelayedSession(delayed)
@@ -251,6 +285,33 @@ private class CompletedSession(
 ) : ConnectedPremiumSession {
     override suspend fun restore(now: Instant, requestId: String): PremiumRestoreResult = result
     override suspend fun signOut(requestId: String) = Unit
+}
+
+private class SequencedPremiumRecords(
+    private val account: PremiumAccountCredentials,
+    private val clearResults: MutableList<Result<Unit>>,
+) : PremiumAccountRecordAccess {
+    var clearCount = 0
+
+    override fun load(): Result<PremiumAccountCredentials?> = Result.success(account)
+
+    override fun clear(): Result<Unit> {
+        clearCount += 1
+        return clearResults.removeAt(0)
+    }
+}
+
+private class DelayedSignOutSession(
+    private val signOutRelease: CompletableDeferred<Unit>,
+) : ConnectedPremiumSession {
+    override suspend fun restore(now: Instant, requestId: String): PremiumRestoreResult =
+        PremiumRestoreResult.Online(
+            ProductStateReducer.unavailable(OnlineUnavailableReason.OFFLINE),
+        )
+
+    override suspend fun signOut(requestId: String) {
+        withContext(NonCancellable) { signOutRelease.await() }
+    }
 }
 
 private class DelayedSession(

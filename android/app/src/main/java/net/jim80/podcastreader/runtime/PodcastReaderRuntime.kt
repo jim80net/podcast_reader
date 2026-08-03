@@ -51,6 +51,7 @@ internal class PodcastReaderRuntime(
     private var foreground = false
     private var signingOut = false
     private var signOutClearFailed = false
+    private var signOutAttempt = 0L
     private var operation: Job? = null
     private var connected: ConnectedPremiumSession? = null
     private var snapshot = PodcastReaderRuntimeSnapshot.bootstrapping()
@@ -102,19 +103,21 @@ internal class PodcastReaderRuntime(
     }
 
     private fun signOut() {
-        val (session, signOutGeneration) = synchronized(lock) {
+        val (session, signOutAttemptId) = synchronized(lock) {
             val activeSession = connected
             invalidateLocked()
+            signOutAttempt += 1
             signingOut = true
             signOutClearFailed = false
             connected = null
             publishLocked(PodcastReaderRuntimeSnapshot.restoring(snapshot.engine))
-            activeSession to generation
+            activeSession to signOutAttempt
         }
         scope.launch(workDispatcher) {
-            runCatching { session?.signOut("android-runtime-$signOutGeneration-sign-out") }
+            runCatching { session?.signOut("android-runtime-$signOutAttemptId-sign-out") }
             val clearResult = runCatching { premiumRecords.clear().getOrThrow() }
             synchronized(lock) {
+                if (signOutAttemptId != signOutAttempt) return@synchronized
                 signingOut = false
                 signOutClearFailed = clearResult.isFailure
                 if (!foreground) return@synchronized
