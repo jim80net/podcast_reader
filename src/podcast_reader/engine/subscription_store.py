@@ -12,7 +12,7 @@ import sqlite3
 import sys
 import threading
 from contextlib import contextmanager
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from typing import TYPE_CHECKING, TypedDict
 
@@ -570,5 +570,5 @@ def _normalized_published_at(value: str | None) -> str | None:
         except (TypeError, ValueError, OverflowError):
             return None
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=UTC)
-    return parsed.astimezone(UTC).isoformat().replace("+00:00", "Z")
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
