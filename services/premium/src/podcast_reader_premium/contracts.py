@@ -38,6 +38,13 @@ def _canonical_utc(value: object) -> datetime:
 CanonicalUtc = Annotated[datetime, BeforeValidator(_canonical_utc)]
 
 
+class CurrentUserV1(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    # Opaque to consumers: only non-blank and bounded by the backing column.
+    id: Annotated[str, Field(pattern=r"^\S{1,40}$", min_length=1, max_length=40)]
+
+
 class DeviceAuthorizationStartV1(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 

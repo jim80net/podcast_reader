@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "contract": "current-user-v1",
+  "valid": [
+    {
+      "name": "opaque-subject",
+      "document": {
+        "id": "usr_current_fixture"
+      }
+    },
+    {
+      "name": "opaque-subject-without-format-semantics",
+      "document": {
+        "id": "subject-opaque-v2"
+      }
+    }
+  ],
+  "invalid": [
+    {
+      "name": "missing-subject",
+      "document": {}
+    },
+    {
+      "name": "subject-is-null",
+      "document": {
+        "id": null
+      }
+    },
+    {
+      "name": "subject-is-integer",
+      "document": {
+        "id": 123
+      }
+    },
+    {
+      "name": "subject-is-empty",
+      "document": {
+        "id": ""
+      }
+    },
+    {
+      "name": "subject-is-blank",
+      "document": {
+        "id": "   "
+      }
+    },
+    {
+      "name": "subject-exceeds-storage-bound",
+      "document": {
+        "id": "12345678901234567890123456789012345678901"
+      }
+    },
+    {
+      "name": "email-is-not-a-consumer-field",
+      "document": {
+        "id": "usr_current_fixture",
+        "email": "reader@example.test"
+      }
+    },
+    {
+      "name": "verification-is-not-a-consumer-field",
+      "document": {
+        "id": "usr_current_fixture",
+        "verification": "verified"
+      }
+    }
+  ]
+}

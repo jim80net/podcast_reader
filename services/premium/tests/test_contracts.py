@@ -7,6 +7,7 @@ import pytest
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from podcast_reader_premium.contracts import (
+    CurrentUserV1,
     DeviceAuthorizationStartV1,
     EntitlementV1,
     NativeAuthErrorV1,
@@ -16,6 +17,30 @@ from podcast_reader_premium.contracts import (
 
 CONTRACTS = Path(__file__).parents[1] / "contracts"
 ENTITLEMENT_CONFORMANCE = CONTRACTS / "v1" / "entitlements" / "conformance-v1.json"
+CURRENT_USER_CONFORMANCE = CONTRACTS / "v1" / "current-user" / "conformance-v1.json"
+
+
+def test_v1_current_user_fixture_is_strict_and_round_trips() -> None:
+    path = CONTRACTS / "v1" / "current-user" / "current-user-v1.json"
+    source = json.loads(path.read_text(encoding="utf-8"))
+    parsed = CurrentUserV1.model_validate(source)
+    assert parsed.model_dump(mode="json") == source
+
+
+def test_shared_current_user_conformance_vectors() -> None:
+    vectors = json.loads(CURRENT_USER_CONFORMANCE.read_text(encoding="utf-8"))
+    assert set(vectors) == {"schema_version", "contract", "valid", "invalid"}
+    assert vectors["schema_version"] == 1
+    assert vectors["contract"] == "current-user-v1"
+    names = [item["name"] for group in ("valid", "invalid") for item in vectors[group]]
+    assert len(names) == len(set(names))
+    assert "email-is-not-a-consumer-field" in names
+
+    for vector in vectors["valid"]:
+        CurrentUserV1.model_validate(vector["document"])
+    for vector in vectors["invalid"]:
+        with pytest.raises(ValidationError, match=".+"):
+            CurrentUserV1.model_validate(vector["document"])
 
 
 @pytest.mark.parametrize("name", ["entitlements-v1-free.json", "entitlements-v1-premium.json"])
