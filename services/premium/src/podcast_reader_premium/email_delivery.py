@@ -20,6 +20,7 @@ from .models import EmailDeliveryReceipt
 from .security import now_epoch, record_id
 
 PROCESSING_LEASE_SECONDS = 30
+EMAIL_DELIVERY_MAX_ATTEMPTS = 8
 DEV_SENDER = "transcripts@podcast-reader.invalid"
 DEV_RECIPIENT = "dev-mailbox@podcast-reader.invalid"
 
@@ -162,6 +163,14 @@ class EmailRelay:
                 raise EmailDeliveryError(
                     503, "delivery_unavailable", "Transcript email could not be delivered"
                 )
+            if receipt.attempts >= EMAIL_DELIVERY_MAX_ATTEMPTS:
+                receipt.state = "failed"
+                receipt.error_code = "delivery_unavailable"
+                receipt.updated_at = timestamp
+                database.commit()
+                raise EmailDeliveryError(
+                    503, "delivery_unavailable", "Transcript email could not be delivered"
+                )
             receipt.state = "processing"
             receipt.error_code = None
             receipt.attempts += 1
@@ -213,7 +222,8 @@ class EmailRelay:
             )
         delivered.state = "delivered"
         delivered.error_code = None
-        delivered.updated_at = timestamp
-        delivered.delivered_at = timestamp
+        completed_at = now_epoch()
+        delivered.updated_at = completed_at
+        delivered.delivered_at = completed_at
         database.commit()
         return self._response(delivered)

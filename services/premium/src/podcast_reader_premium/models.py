@@ -319,9 +319,10 @@ class EmailDeliveryReceipt(Base):
             "AND error_code = 'delivery_unavailable')",
             name="ck_email_receipts_state_fields",
         ),
-        CheckConstraint("attempts >= 1", name="ck_email_receipts_attempts"),
+        CheckConstraint("attempts BETWEEN 1 AND 8", name="ck_email_receipts_attempts"),
         UniqueConstraint("user_id", "client_delivery_id", name="uq_email_receipts_user_client"),
         Index("ix_email_receipts_state_updated", "state", "updated_at"),
+        Index("ix_email_receipts_created_id", "created_at", "id"),
     )
 
 

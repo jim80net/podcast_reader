@@ -19,7 +19,7 @@ PUBLIC_COPY = (
 
 CONTRADICTIONS = (
     re.compile(
-        r"premium (?:service|api).{0,80}(?:has no|never (?:receives|gets)).{0,40}transcript",
+        r"\b(?:service|api)\b.{0,80}(?:has no|never (?:receives|gets)).{0,40}\btranscript\b",
         re.I | re.S,
     ),
     re.compile(r"transcript text never reaches (?:our|the) (?:service|server)", re.I),
@@ -59,5 +59,5 @@ def test_premium_copy_discloses_the_approved_content_stateless_boundary() -> Non
 
 
 def test_copy_fence_has_a_negative_proof() -> None:
-    contradiction = "The premium service has no transcript fields."
+    contradiction = "Its API has no transcript, audio, source URL, or library-content fields."
     assert any(pattern.search(contradiction) for pattern in CONTRADICTIONS)

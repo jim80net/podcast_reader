@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 from typing import Any, cast
@@ -10,12 +11,13 @@ from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import inspect, select
 from sqlalchemy.orm import Session
 
+from podcast_reader_premium import email_delivery
 from podcast_reader_premium.contracts import (
     EmailDeliveryErrorV1,
     EmailDeliveryRequestV1,
     EmailDeliveryV1,
 )
-from podcast_reader_premium.email_delivery import DevMaildirSink
+from podcast_reader_premium.email_delivery import DevMaildirSink, EmailRelay
 from podcast_reader_premium.entitlements import apply_entitlement_event
 from podcast_reader_premium.models import EmailDeliveryReceipt, FeatureFlag, User
 
@@ -231,6 +233,102 @@ def test_sink_failure_is_bounded_and_retry_recovers_without_duplicate(
     with Session(_app(client).state.engine) as database:
         receipt = database.scalar(select(EmailDeliveryReceipt))
         assert receipt is not None and receipt.attempts == 2 and receipt.error_code is None
+
+
+def test_relay_enforces_its_own_terminal_eight_attempt_cap(
+    client: TestClient,
+    account: dict[str, object],
+    browser_auth: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bearer = _bearer(client, browser_auth)
+    _enable_email(client, cast("str", account["id"]))
+    request = _fixture("request-manual.json")
+    sink_calls = 0
+
+    def fail(*_args: object, **_kwargs: object) -> None:
+        nonlocal sink_calls
+        sink_calls += 1
+        raise OSError("sink unavailable")
+
+    monkeypatch.setattr(DevMaildirSink, "deliver", fail)
+    for _ in range(9):
+        failed = client.post("/v1/email-deliveries", json=request, headers=bearer)
+        assert failed.status_code == 503
+        assert failed.json()["code"] == "delivery_unavailable"
+
+    assert sink_calls == 8
+    with Session(_app(client).state.engine) as database:
+        receipt = database.scalar(select(EmailDeliveryReceipt))
+        assert receipt is not None
+        assert (receipt.state, receipt.error_code, receipt.attempts) == (
+            "failed",
+            "delivery_unavailable",
+            8,
+        )
+
+
+def test_route_delivers_off_the_event_loop_with_a_worker_session(
+    client: TestClient,
+    account: dict[str, object],
+    browser_auth: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bearer = _bearer(client, browser_auth)
+    _enable_email(client, cast("str", account["id"]))
+    original = EmailRelay.deliver
+    observed: dict[str, object] = {}
+
+    def inspect_worker(
+        self: EmailRelay,
+        database: Session,
+        user_id: str,
+        payload: EmailDeliveryRequestV1,
+    ) -> EmailDeliveryV1:
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            observed["off_event_loop"] = True
+        observed["database"] = database
+        return original(self, database, user_id, payload)
+
+    monkeypatch.setattr(EmailRelay, "deliver", inspect_worker)
+    response = client.post(
+        "/v1/email-deliveries", json=_fixture("request-manual.json"), headers=bearer
+    )
+    assert response.status_code == 200
+    assert observed["off_event_loop"] is True
+    assert isinstance(observed["database"], Session)
+
+
+def test_delivered_timestamp_is_captured_after_the_sink_returns(
+    client: TestClient,
+    account: dict[str, object],
+    browser_auth: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bearer = _bearer(client, browser_auth)
+    _enable_email(client, cast("str", account["id"]))
+    timestamps = iter((100, 200))
+    monkeypatch.setattr(email_delivery, "now_epoch", lambda: next(timestamps))
+
+    response = client.post(
+        "/v1/email-deliveries", json=_fixture("request-manual.json"), headers=bearer
+    )
+    assert response.status_code == 200
+    with Session(_app(client).state.engine) as database:
+        receipt = database.scalar(select(EmailDeliveryReceipt))
+        assert receipt is not None
+        assert receipt.created_at == 100
+        assert receipt.delivered_at == receipt.updated_at == 200
+
+
+def test_receipt_health_order_has_a_matching_pagination_index(client: TestClient) -> None:
+    indexes = {
+        item["name"]: item["column_names"]
+        for item in inspect(_app(client).state.engine).get_indexes("email_delivery_receipts")
+    }
+    assert indexes["ix_email_receipts_created_id"] == ["created_at", "id"]
 
 
 def test_admin_health_contains_receipts_but_not_message_content(

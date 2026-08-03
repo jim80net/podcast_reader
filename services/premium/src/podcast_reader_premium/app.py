@@ -138,6 +138,16 @@ def _database_session(request: Request) -> Iterator[Session]:
         yield database
 
 
+def _deliver_email_with_session(
+    relay: EmailRelay,
+    factory: sessionmaker[Session],
+    user_id: str,
+    payload: EmailDeliveryRequestV1,
+) -> EmailDeliveryV1:
+    with factory() as database:
+        return relay.deliver(database, user_id, payload)
+
+
 def _browser_user(
     request: Request,
     database: Session = Depends(_database_session),
@@ -922,13 +932,12 @@ def create_app(
     async def create_email_delivery(
         request: Request,
         user: User = Depends(_bearer_user),
-        database: Session = Depends(_database_session),
     ) -> EmailDeliveryV1:
         body = bytearray()
         async for chunk in request.stream():
-            body.extend(chunk)
-            if len(body) > EMAIL_REQUEST_MAX_BYTES:
+            if len(body) + len(chunk) > EMAIL_REQUEST_MAX_BYTES:
                 raise ApiError(413, "delivery_too_large", "Transcript email content is too large")
+            body.extend(chunk)
         try:
             payload = EmailDeliveryRequestV1.model_validate_json(bytes(body))
         except ValidationError as exc:
@@ -942,7 +951,13 @@ def create_app(
                 ) from exc
             raise ApiError(422, "invalid_request", "Request data is invalid") from exc
         try:
-            return email_relay.deliver(database, user.id, payload)
+            return await asyncio.to_thread(
+                _deliver_email_with_session,
+                email_relay,
+                _session_factory(request),
+                user.id,
+                payload,
+            )
         except EmailDeliveryError as exc:
             raise ApiError(exc.status, exc.code, exc.message) from exc
 

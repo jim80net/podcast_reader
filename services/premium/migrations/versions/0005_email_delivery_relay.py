@@ -52,7 +52,7 @@ def upgrade() -> None:
             "AND error_code = 'delivery_unavailable')",
             name="ck_email_receipts_state_fields",
         ),
-        sa.CheckConstraint("attempts >= 1", name="ck_email_receipts_attempts"),
+        sa.CheckConstraint("attempts BETWEEN 1 AND 8", name="ck_email_receipts_attempts"),
         sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("user_id", "client_delivery_id", name="uq_email_receipts_user_client"),
@@ -62,8 +62,14 @@ def upgrade() -> None:
         "email_delivery_receipts",
         ["state", "updated_at"],
     )
+    op.create_index(
+        "ix_email_receipts_created_id",
+        "email_delivery_receipts",
+        ["created_at", "id"],
+    )
 
 
 def downgrade() -> None:
+    op.drop_index("ix_email_receipts_created_id", table_name="email_delivery_receipts")
     op.drop_index("ix_email_receipts_state_updated", table_name="email_delivery_receipts")
     op.drop_table("email_delivery_receipts")
