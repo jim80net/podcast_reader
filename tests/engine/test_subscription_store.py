@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from podcast_reader.engine import subscription_store
 from podcast_reader.engine.subscription_store import (
     SCHEMA_VERSION,
     SubscriptionStore,
@@ -166,3 +167,52 @@ def test_version_three_migration_preserves_outbox_and_subject_scopes_automatic_i
         )
     finally:
         migrated.close()
+
+
+def test_version_three_migration_rolls_back_destructive_rewrite_on_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = SubscriptionStore(tmp_path)
+    store.insert_manual_email(
+        client_delivery_id="eml_AAAAAAAAAAAAAAAAAAAAAAAA",
+        subject="usr_migration",
+        source_id="a" * 64,
+        action_id="act_BBBBBBBBBBBBBBBBBBBBBBBB",
+        created_at="2026-08-03T00:00:00Z",
+    )
+    connection = store.raw_connection_for_tests()
+    connection.execute("DROP INDEX email_outbox_automatic_unique")
+    connection.execute(
+        """
+        CREATE UNIQUE INDEX email_outbox_automatic_unique
+        ON email_outbox(subscription_id, job_id, consent_revision)
+        WHERE consent_kind = 'subscription_completion'
+        """
+    )
+    connection.execute("PRAGMA user_version = 3")
+    connection.commit()
+    database_path = store.path
+    store.close()
+
+    failing_migration = subscription_store._EMAIL_V4_MIGRATION.replace(
+        "COMMIT;", "SELECT definitely_missing_migration_function();\nCOMMIT;"
+    )
+    monkeypatch.setattr(subscription_store, "_EMAIL_V4_MIGRATION", failing_migration)
+    with pytest.raises(sqlite3.OperationalError, match="definitely_missing_migration_function"):
+        SubscriptionStore(tmp_path)
+
+    with sqlite3.connect(database_path) as recovered:
+        assert recovered.execute("PRAGMA user_version").fetchone()[0] == 3
+        tables = {
+            row[0]
+            for row in recovered.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            ).fetchall()
+        }
+        assert "email_outbox" in tables
+        assert "email_outbox_v3" not in tables
+        assert recovered.execute("SELECT COUNT(*) FROM email_outbox").fetchone()[0] == 1
+        index_columns = [
+            row[2] for row in recovered.execute("PRAGMA index_info(email_outbox_automatic_unique)")
+        ]
+        assert index_columns == ["subscription_id", "job_id", "consent_revision"]

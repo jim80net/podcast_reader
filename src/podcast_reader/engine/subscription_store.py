@@ -246,6 +246,7 @@ CREATE INDEX IF NOT EXISTS email_outbox_claim_idx
 """
 
 _EMAIL_V4_MIGRATION = """
+BEGIN IMMEDIATE;
 DROP INDEX IF EXISTS email_outbox_automatic_unique;
 DROP INDEX IF EXISTS email_outbox_manual_unique;
 DROP INDEX IF EXISTS email_outbox_claim_idx;
@@ -307,6 +308,7 @@ CREATE UNIQUE INDEX email_outbox_manual_unique
     WHERE consent_kind = 'manual';
 CREATE INDEX email_outbox_claim_idx
     ON email_outbox(subject, state, next_attempt_at, claim_expires_at, created_at);
+COMMIT;
 """
 
 
