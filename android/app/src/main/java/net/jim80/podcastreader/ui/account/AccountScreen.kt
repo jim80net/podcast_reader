@@ -38,6 +38,10 @@ fun AccountScreen(
             style = MaterialTheme.typography.bodyLarge,
         )
         when (state) {
+            AccountUiState.Bootstrapping -> {
+                Text("Checking account status", style = MaterialTheme.typography.titleMedium)
+                Text("Local reading remains available while the account record is checked.")
+            }
             AccountUiState.Local -> LocalAccount(accountServiceConfigured, onConnect)
             is AccountUiState.Authorizing -> AuthorizingAccount(state, onCancelConnect)
             AccountUiState.OnlineFree -> ConnectedAccount(
@@ -104,6 +108,8 @@ private fun OnlineUnavailableReason.readerMessage(): String = when (this) {
     OnlineUnavailableReason.UNAUTHORIZED -> "The account session ended. Reconnect to use online features."
     OnlineUnavailableReason.STALE -> "The last account status expired. It is not treated as free or premium."
     OnlineUnavailableReason.INCOMPATIBLE_RESPONSE -> "The premium service returned an unsupported response."
+    OnlineUnavailableReason.LOCAL_CREDENTIAL_STORAGE ->
+        "The saved account could not be removed from secure storage. You are not signed out yet."
 }
 
 @Composable

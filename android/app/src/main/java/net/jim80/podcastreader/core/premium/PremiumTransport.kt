@@ -12,6 +12,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
 
 sealed class PremiumRoute protected constructor(internal val path: String) {
+    data object CurrentUser : PremiumRoute("/v1/me")
     data object Entitlements : PremiumRoute("/v1/me/entitlements")
     data object DeviceStart : PremiumRoute("/v1/device-authorizations")
     data object DeviceToken : PremiumRoute("/v1/device-authorizations/token")
@@ -83,6 +84,45 @@ sealed interface EntitlementFetchResult {
     data class Failure(val failure: PremiumFailure) : EntitlementFetchResult
 }
 
+sealed interface CurrentUserFetchResult {
+    data class Success(val subject: String) : CurrentUserFetchResult {
+        override fun toString(): String = "CurrentUserFetchResult.Success(redacted)"
+    }
+
+    data class Failure(val failure: PremiumFailure) : CurrentUserFetchResult
+}
+
+interface PremiumCurrentUserApi {
+    fun fetch(token: PremiumAccessToken, requestId: String): CurrentUserFetchResult
+}
+
+class PremiumCurrentUserTransport(
+    private val requestFactory: PremiumRequestFactory,
+    private val client: OkHttpClient = securePremiumHttpClient(),
+) : PremiumCurrentUserApi {
+    override fun fetch(token: PremiumAccessToken, requestId: String): CurrentUserFetchResult = try {
+        client.newCall(requestFactory.authenticatedGet(PremiumRoute.CurrentUser, token)).execute().use { response ->
+            if (response.code != 200) {
+                CurrentUserFetchResult.Failure(PremiumFailureMapper.fromHttp(response.code, requestId))
+            } else {
+                val body = requireNotNull(response.body) { "missing response" }
+                premiumJson.decodeFromString<CurrentUserV1Dto>(body.readBounded())
+                    .validatedSubject()
+                    .fold(
+                        onSuccess = { CurrentUserFetchResult.Success(it) },
+                        onFailure = { incompatibleCurrentUser(requestId) },
+                    )
+            }
+        }
+    } catch (_: IOException) {
+        CurrentUserFetchResult.Failure(
+            PremiumFailure(PremiumFailureCategory.NETWORK, requestId = requestId),
+        )
+    } catch (_: RuntimeException) {
+        incompatibleCurrentUser(requestId)
+    }
+}
+
 interface PremiumEntitlementApi {
     fun fetch(token: PremiumAccessToken, requestId: String): EntitlementFetchResult
 }
@@ -124,6 +164,10 @@ object PremiumFailureMapper {
         requestId = requestId,
     )
 }
+
+private fun incompatibleCurrentUser(requestId: String) = CurrentUserFetchResult.Failure(
+    PremiumFailure(PremiumFailureCategory.INCOMPATIBLE_RESPONSE, requestId = requestId),
+)
 
 internal fun ResponseBody.readBounded(): String {
     val declaredLength = contentLength()
