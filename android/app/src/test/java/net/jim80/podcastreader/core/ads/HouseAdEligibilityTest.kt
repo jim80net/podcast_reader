@@ -11,16 +11,17 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class HouseAdEligibilityTest {
-    private val now = FixtureProductStates.now
+    private val fixtures = FixtureProductStates(::fixture)
+    private val now = fixtures.now
 
     @Test
     fun localPremiumUnavailableAndIneligibleFreeNeverConstructTheRepository() {
         val states = listOf(
-            FixtureProductStates.local(),
-            FixtureProductStates.premium(),
-            FixtureProductStates.unavailable(OnlineUnavailableReason.OFFLINE),
-            FixtureProductStates.free(),
-            FixtureProductStates.free(houseAds = true, at = Instant.parse("2026-08-02T00:05:00Z")),
+            fixtures.local(),
+            fixtures.premium(),
+            fixtures.unavailable(OnlineUnavailableReason.OFFLINE),
+            fixtures.free(),
+            fixtures.free(houseAds = true, at = Instant.parse("2026-08-02T00:05:00Z")),
         )
         var constructions = 0
 
@@ -33,7 +34,7 @@ class HouseAdEligibilityTest {
     @Test
     fun onlyFreshOnlineFreeHouseTruthConstructsOnce() {
         var constructions = 0
-        val state = FixtureProductStates.free(houseAds = true)
+        val state = fixtures.free(houseAds = true)
 
         val marker = HouseAdRuntimeGate.create(state, now) { eligibility ->
             constructions += 1
@@ -74,6 +75,10 @@ class HouseAdEligibilityTest {
             listOf(HouseAdCreative("ad_test", 1, "Title", "Body", HouseAdCta.fromContract("https://example.com").getOrThrow())),
         ),
     )
+
+    private fun fixture(name: String): String = requireNotNull(javaClass.classLoader?.getResource(name)) {
+        "missing backend-owned fixture $name"
+    }.readText()
 }
 
 private class RecordingInventoryApi(initial: HouseInventoryResult) : HouseInventoryApi {

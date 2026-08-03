@@ -6,11 +6,14 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import net.jim80.podcastreader.core.premium.ProductState.ProductStateReducer
+import net.jim80.podcastreader.support.FixtureProductStates
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class EntitlementContractTest {
+    private val fixtureStates = FixtureProductStates(::fixture)
+
     private fun fixture(name: String): String = requireNotNull(
         javaClass.classLoader?.getResource(name),
     ) { "missing backend-owned fixture $name" }.readText()
@@ -85,14 +88,7 @@ class EntitlementContractTest {
 
     @Test
     fun housePolicyWithinTheFrozenV1ShapeRemainsOnlineFreeAndNotAdFree() {
-        val house = premiumJson.decodeFromString<EntitlementV1Dto>(
-            fixture("entitlements-v1-free.json").replace("\"ad_policy\": \"none\"", "\"ad_policy\": \"house\""),
-        )
-        val state = ProductStateReducer.online(
-            house,
-            expectedSubject = "usr_free_fixture",
-            now = Instant.parse("2026-08-02T00:01:00Z"),
-        )
+        val state = fixtureStates.free(houseAds = true)
 
         assertEquals("online-free", state.kind())
         assertTrue(requireNotNull(state.freeTruth()).houseAds != null)

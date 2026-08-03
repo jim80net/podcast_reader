@@ -13,15 +13,16 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PodcastReaderUiStateTest {
-    private val now = FixtureProductStates.now
+    private val fixtures = FixtureProductStates(::fixture)
+    private val now = fixtures.now
 
     @Test
     fun localPremiumAndUnavailableNeverProjectHouseSlots() {
         val inventory = inventory(HouseAdPlacement.LIBRARY)
         listOf(
-            FixtureProductStates.local(),
-            FixtureProductStates.premium(),
-            FixtureProductStates.unavailable(OnlineUnavailableReason.OFFLINE),
+            fixtures.local(),
+            fixtures.premium(),
+            fixtures.unavailable(OnlineUnavailableReason.OFFLINE),
         ).forEach { productState ->
             val state = PodcastReaderUiState.project(productState, now, true, libraryInventory = inventory)
             assertNull(state.libraryInventory)
@@ -33,7 +34,7 @@ class PodcastReaderUiStateTest {
     fun onlyFreshOnlineFreeHouseInventoryMountsInItsEchoedPlacement() {
         val library = inventory(HouseAdPlacement.LIBRARY)
         val jobs = inventory(HouseAdPlacement.JOBS)
-        val free = FixtureProductStates.free(houseAds = true)
+        val free = fixtures.free(houseAds = true)
 
         val state = PodcastReaderUiState.project(free, now, true, libraryInventory = library, jobsInventory = jobs)
         assertSame(library, state.libraryInventory)
@@ -46,10 +47,10 @@ class PodcastReaderUiStateTest {
 
     @Test
     fun staleTruthAndExpiredInventoryCollapseBeforeCompose() {
-        val stale = FixtureProductStates.free(houseAds = true, at = Instant.parse("2026-08-02T00:05:00Z"))
+        val stale = fixtures.free(houseAds = true, at = Instant.parse("2026-08-02T00:05:00Z"))
         assertNull(PodcastReaderUiState.project(stale, now, true, libraryInventory = inventory()).libraryInventory)
 
-        val fresh = FixtureProductStates.free(houseAds = true)
+        val fresh = fixtures.free(houseAds = true)
         assertNull(
             PodcastReaderUiState.project(
                 fresh,
@@ -62,24 +63,24 @@ class PodcastReaderUiStateTest {
 
     @Test
     fun accountCopyKeepsLocalFreePremiumAndUnavailableDistinct() {
-        assertTrue(PodcastReaderUiState.project(FixtureProductStates.local(), now, false).account is AccountUiState.Local)
+        assertTrue(PodcastReaderUiState.project(fixtures.local(), now, false).account is AccountUiState.Local)
         assertTrue(
             PodcastReaderUiState.project(
-                FixtureProductStates.free(),
+                fixtures.free(),
                 now,
                 true,
             ).account is AccountUiState.OnlineFree,
         )
         assertTrue(
             PodcastReaderUiState.project(
-                FixtureProductStates.premium(),
+                fixtures.premium(),
                 now,
                 true,
             ).account is AccountUiState.OnlinePremium,
         )
         assertTrue(
             PodcastReaderUiState.project(
-                FixtureProductStates.unavailable(OnlineUnavailableReason.STALE),
+                fixtures.unavailable(OnlineUnavailableReason.STALE),
                 now,
                 true,
             ).account is AccountUiState.OnlineUnavailable,
@@ -103,4 +104,8 @@ class PodcastReaderUiStateTest {
             ),
         ),
     )
+
+    private fun fixture(name: String): String = requireNotNull(javaClass.classLoader?.getResource(name)) {
+        "missing backend-owned fixture $name"
+    }.readText()
 }

@@ -8,17 +8,13 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.platform.app.InstrumentationRegistry
-import java.time.Instant
 import net.jim80.podcastreader.core.ads.HouseAdCreative
 import net.jim80.podcastreader.core.ads.HouseAdCta
 import net.jim80.podcastreader.core.ads.HouseAdPlacement
 import net.jim80.podcastreader.core.ads.HouseInventory
-import net.jim80.podcastreader.core.premium.EntitlementV1Dto
 import net.jim80.podcastreader.core.premium.OnlineUnavailableReason
-import net.jim80.podcastreader.core.premium.ProductState
-import net.jim80.podcastreader.core.premium.ProductState.ProductStateReducer
 import net.jim80.podcastreader.core.premium.UserCode
-import net.jim80.podcastreader.core.premium.premiumJson
+import net.jim80.podcastreader.support.FixtureProductStates
 import net.jim80.podcastreader.ui.AccountUiState
 import net.jim80.podcastreader.ui.PodcastReaderActions
 import net.jim80.podcastreader.ui.PodcastReaderApp
@@ -33,6 +29,9 @@ import org.junit.Test
 class PremiumUiInstrumentedTest {
     @get:Rule
     val compose = createAndroidComposeRule<ComponentActivity>()
+
+    private val fixtures = FixtureProductStates(::fixture)
+    private val now by lazy { fixtures.now }
 
     @Test
     fun authorizingCodeIsVisibleOnlyWhileTheWindowIsSecure() {
@@ -60,7 +59,7 @@ class PremiumUiInstrumentedTest {
     @Test
     fun freshOnlineFreeMountsOnlyItsPlacementMatchedNativeText() {
         val state = PodcastReaderUiState.project(
-            productState = fixtureState("entitlements-v1-free.json", "usr_free_fixture", houseAds = true),
+            productState = fixtures.free(houseAds = true),
             now = now,
             accountServiceConfigured = true,
             libraryInventory = inventory(HouseAdPlacement.LIBRARY, "Library acceptance message"),
@@ -82,8 +81,8 @@ class PremiumUiInstrumentedTest {
     fun unavailableAndPremiumStatesNeverMountRemoteInventory() {
         val inventory = inventory(HouseAdPlacement.LIBRARY, "Must stay absent")
         listOf(
-            ProductStateReducer.unavailable(OnlineUnavailableReason.OFFLINE),
-            fixtureState("entitlements-v1-premium.json", "usr_premium_fixture"),
+            fixtures.unavailable(OnlineUnavailableReason.OFFLINE),
+            fixtures.premium(),
         ).forEach { productState ->
             val state = PodcastReaderUiState.project(productState, now, true, libraryInventory = inventory)
             assertTrue(state.libraryInventory == null)
@@ -93,7 +92,7 @@ class PremiumUiInstrumentedTest {
             PodcastReaderTheme {
                 PodcastReaderApp(
                     PodcastReaderUiState.project(
-                        ProductStateReducer.unavailable(OnlineUnavailableReason.OFFLINE),
+                        fixtures.unavailable(OnlineUnavailableReason.OFFLINE),
                         now,
                         true,
                         libraryInventory = inventory,
@@ -111,23 +110,10 @@ class PremiumUiInstrumentedTest {
     private fun ComponentActivity.isSecure(): Boolean =
         window.attributes.flags.and(WindowManager.LayoutParams.FLAG_SECURE) != 0
 
-    private fun fixtureState(
-        fixture: String,
-        expectedSubject: String,
-        houseAds: Boolean = false,
-    ): ProductState {
-        val text = InstrumentationRegistry.getInstrumentation().context.assets.open(fixture)
+    private fun fixture(name: String): String =
+        InstrumentationRegistry.getInstrumentation().context.assets.open(name)
             .bufferedReader()
             .use { it.readText() }
-            .let {
-                if (houseAds) it.replace("\"ad_policy\": \"none\"", "\"ad_policy\": \"house\"") else it
-            }
-        return ProductStateReducer.online(
-            premiumJson.decodeFromString<EntitlementV1Dto>(text),
-            expectedSubject,
-            now,
-        )
-    }
 
     private fun inventory(placement: HouseAdPlacement, title: String) = HouseInventory(
         placement = placement,
@@ -145,7 +131,6 @@ class PremiumUiInstrumentedTest {
     )
 
     private companion object {
-        val now: Instant = Instant.parse("2026-08-02T00:01:00Z")
         val noOpActions = PodcastReaderActions({}, {}, {}, {}, {})
     }
 }
