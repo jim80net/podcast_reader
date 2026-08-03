@@ -17,3 +17,6 @@ adopt a later contract.
 
 `v1/ads/` freezes the house-only inventory response, empty-204 meaning, hostile
 text handling, malformed fail-closed input, and forward-additive consumer case.
+
+`v1/email/` freezes the bounded recipient-free relay request, DEV Maildir
+success, byte-identical idempotent replay, and fixed delivery error envelopes.

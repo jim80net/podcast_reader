@@ -12,7 +12,7 @@ test('Local ordinary views make no subscription calls and the explicit view is r
   expect(requests.some((request) => request.includes('/v1/online-capabilities'))).toBe(false)
 
   await window.getByRole('link', { name: 'Subscriptions' }).click()
-  await expect(window.getByText('Connect a premium account to add or poll subscriptions.')).toBeVisible()
+  await expect(window.getByText('Account service is not configured for this build. Local subscriptions remain visible.')).toBeVisible()
   await expect(window.getByRole('button', { name: 'Add podcast' })).toBeDisabled()
   requests = (await mock.log()).filter((entry) => entry.kind === 'request').map((entry) => entry.detail)
   expect(requests.filter((request) => request === 'GET /v1/subscriptions')).toHaveLength(1)

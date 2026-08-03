@@ -24,6 +24,8 @@ def settings(tmp_path: Path) -> Settings:
         build_sha="test-sha",
         device_poll_interval_seconds=5,
         stripe_price_id="price_test_premium",
+        email_maildir_path=tmp_path / "maildir",
+        email_delivery_hmac_key=b"test-email-delivery-hmac-key-is-long-enough",
     )
 
 

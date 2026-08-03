@@ -271,15 +271,24 @@ def _prepare(args: argparse.Namespace) -> None:
     _atomic_private_text(baseline, json.dumps(status, sort_keys=True, separators=(",", ":")) + "\n")
     service_env = config_dir / "service.env"
     pepper = secrets.token_urlsafe(48)
+    email_hmac_key = secrets.token_urlsafe(48)
     if service_env.exists():
         for line in service_env.read_text(encoding="utf-8").splitlines():
             if line.startswith("PREMIUM_USER_CODE_PEPPER="):
                 pepper = line.partition("=")[2]
+            elif line.startswith("PREMIUM_EMAIL_DELIVERY_HMAC_KEY="):
+                email_hmac_key = line.partition("=")[2]
     if len(pepper) < 32 or any(character.isspace() for character in pepper):
         raise SystemExit("existing user-code pepper is malformed; refusing to replace it")
+    if len(email_hmac_key) < 32 or any(character.isspace() for character in email_hmac_key):
+        raise SystemExit("existing email HMAC key is malformed; refusing to replace it")
+    maildir = data_dir / "maildir"
     _atomic_private_text(
         service_env,
-        f"PREMIUM_USER_CODE_PEPPER={pepper}\nPREMIUM_BUILD_SHA={args.build_sha}\n",
+        f"PREMIUM_USER_CODE_PEPPER={pepper}\n"
+        f"PREMIUM_EMAIL_DELIVERY_HMAC_KEY={email_hmac_key}\n"
+        f"PREMIUM_EMAIL_MAILDIR={maildir}\n"
+        f"PREMIUM_BUILD_SHA={args.build_sha}\n",
     )
 
     stripe = tools_dir / "stripe"
@@ -307,6 +316,7 @@ def _prepare(args: argparse.Namespace) -> None:
         "build_sha": args.build_sha,
         "database": str(data_dir / "premium.sqlite3"),
         "loopback_target": f"http://127.0.0.1:{args.loopback_port}",
+        "maildir": str(maildir),
         "public_origin": origin,
         "serve_baseline_sha256": hashlib.sha256(baseline.read_bytes()).hexdigest(),
         "serve_listener_conflict": False,

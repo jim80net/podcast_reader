@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "client_delivery_id": "eml_BBBBBBBBBBBBBBBBBBBBBBBB",
+  "consent_kind": "manual",
+  "title": "Fixture episode",
+  "transcript_text": "00:00 Welcome to the fixture episode.\n00:05 The relay stays bounded.\n",
+  "content_sha256": "5e5015470f1751ac072c04e98cdd142019ade662bf9b263d6202ac4dd9b7d415"
+}

@@ -34,6 +34,12 @@ def _settings(args: argparse.Namespace) -> Settings:
         stripe_webhook_secret=os.environ.get("STRIPE_WEBHOOK_SECRET"),
         premium_currency=os.environ.get("PREMIUM_PRICE_CURRENCY", "usd"),
         premium_unit_amount=int(os.environ.get("PREMIUM_PRICE_UNIT_AMOUNT", "999")),
+        email_maildir_path=(
+            Path(value) if (value := os.environ.get("PREMIUM_EMAIL_MAILDIR")) else None
+        ),
+        email_delivery_hmac_key=(
+            value.encode() if (value := os.environ.get("PREMIUM_EMAIL_DELIVERY_HMAC_KEY")) else None
+        ),
     )
 
 

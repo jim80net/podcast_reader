@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}Email delivery · Premium admin{% endblock %}
+{% block content %}
+<h1>Content-free email delivery health</h1>
+<p>Delivered: {{ totals.get("delivered", 0) }} · Processing: {{ totals.get("processing", 0) }} · Failed: {{ totals.get("failed", 0) }}</p>
+<table><thead><tr><th>Delivery</th><th>User</th><th>Consent</th><th>Bytes</th><th>State</th><th>Error</th><th>Attempts</th><th>Updated</th></tr></thead><tbody>
+{% for item in rows %}<tr><td>{{ item.id }}</td><td>{{ item.user_id }}</td><td>{{ item.consent_kind }}</td><td>{{ item.content_bytes }}</td><td>{{ item.state }}</td><td>{{ item.error_code or "—" }}</td><td>{{ item.attempts }}</td><td>{{ item.updated_at }}</td></tr>
+{% else %}<tr><td colspan="8">No email deliveries.</td></tr>{% endfor %}</tbody></table>
+<nav class="pager" aria-label="Pages">{% if page > 1 %}<a href="?page={{ page - 1 }}">Previous</a>{% endif %}<span>Page {{ page }}</span>{% if has_next %}<a href="?page={{ page + 1 }}">Next</a>{% endif %}</nav>
+{% endblock %}
