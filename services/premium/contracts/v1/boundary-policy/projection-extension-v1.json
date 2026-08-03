@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "contract": "podcast-reader-boundary-projection",
-  "policy_revision": 1,
+  "policy_revision": 2,
   "surface": "extension",
   "roots": [
     {
@@ -72,6 +72,34 @@
         "bearer-auth",
         "loopback-only",
         "popup-lifetime"
+      ],
+      "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152",
+      "enforcement_ids": [
+        "extension.policy-projection",
+        "extension.route-inventory"
+      ]
+    },
+    {
+      "id": "extension.engine.health",
+      "surface": "extension",
+      "from_zone": "extension.runtime",
+      "to_zone": "local-engine.memory",
+      "transport": "loopback-http",
+      "method": "GET",
+      "route": "/v1/health",
+      "request_contract": null,
+      "response_contract": "engine-health-v1",
+      "request_data": [
+        "secret.engine-bearer"
+      ],
+      "response_data": [
+        "metadata.public-configuration"
+      ],
+      "destination_persistence": [],
+      "logging": [],
+      "guards": [
+        "bearer-auth",
+        "loopback-only"
       ],
       "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152",
       "enforcement_ids": [
@@ -186,6 +214,7 @@
       "operation_ids": [
         "extension.engine.cookies",
         "extension.engine.events",
+        "extension.engine.health",
         "extension.engine.jobs",
         "extension.engine.pairing"
       ],

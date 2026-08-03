@@ -1,0 +1,1087 @@
+{
+  "schema_version": 1,
+  "contract": "podcast-reader-boundary-inventory-bindings",
+  "policy_revision": 2,
+  "backend": {
+    "route_sources": [
+      {
+        "path": "services/premium/src/podcast_reader_premium/admin.py",
+        "prefix": "/admin"
+      },
+      {
+        "path": "services/premium/src/podcast_reader_premium/app.py",
+        "prefix": ""
+      },
+      {
+        "path": "src/podcast_reader/engine/app.py",
+        "prefix": ""
+      }
+    ],
+    "routes": [
+      {
+        "item": "DELETE /v1/browser-sessions/current",
+        "operation_id": "backend.premium.account-control"
+      },
+      {
+        "item": "DELETE /v1/cookies/{domain}",
+        "operation_id": "desktop.engine.cookies"
+      },
+      {
+        "item": "DELETE /v1/email-outbox/{client_delivery_id}",
+        "operation_id": "desktop.engine.email-outbox"
+      },
+      {
+        "item": "DELETE /v1/jobs/{job_id}",
+        "operation_id": "extension.engine.jobs"
+      },
+      {
+        "item": "DELETE /v1/packs/{pack_id}",
+        "operation_id": "desktop.engine.control"
+      },
+      {
+        "item": "DELETE /v1/subscriptions/{subscription_id}",
+        "operation_id": "desktop.engine.subscriptions"
+      },
+      {
+        "item": "GET /account",
+        "operation_id": "backend.premium.account-control"
+      },
+      {
+        "item": "GET /account/billing/cancel",
+        "operation_id": "backend.premium.billing-control"
+      },
+      {
+        "item": "GET /account/billing/success",
+        "operation_id": "backend.premium.billing-control"
+      },
+      {
+        "item": "GET /admin/",
+        "operation_id": "backend.premium.admin-control"
+      },
+      {
+        "item": "GET /admin/ads",
+        "operation_id": "backend.premium.admin-control"
+      },
+      {
+        "item": "GET /admin/audit",
+        "operation_id": "backend.premium.admin-control"
+      },
+      {
+        "item": "GET /admin/email-deliveries",
+        "operation_id": "backend.premium.admin-control"
+      },
+      {
+        "item": "GET /admin/flags",
+        "operation_id": "backend.premium.admin-control"
+      },
+      {
+        "item": "GET /admin/login",
+        "operation_id": "backend.premium.admin-control"
+      },
+      {
+        "item": "GET /admin/users/{user_id}",
+        "operation_id": "backend.premium.admin-control"
+      },
+      {
+        "item": "GET /device",
+        "operation_id": "backend.premium.account-control"
+      },
+      {
+        "item": "GET /healthz",
+        "operation_id": "backend.premium.health"
+      },
+      {
+        "item": "GET /v1/ads/inventory/{slot}",
+        "operation_id": "desktop.premium.house-ads"
+      },
+      {
+        "item": "GET /v1/cookies",
+        "operation_id": "desktop.engine.cookies"
+      },
+      {
+        "item": "GET /v1/email-outbox",
+        "operation_id": "desktop.engine.email-outbox"
+      },
+      {
+        "item": "GET /v1/embed/{video_id}",
+        "operation_id": "desktop.engine.content"
+      },
+      {
+        "item": "GET /v1/events",
+        "operation_id": "extension.engine.events"
+      },
+      {
+        "item": "GET /v1/health",
+        "operation_id": "extension.engine.health"
+      },
+      {
+        "item": "GET /v1/jobs",
+        "operation_id": "extension.engine.jobs"
+      },
+      {
+        "item": "GET /v1/jobs/{job_id}",
+        "operation_id": "extension.engine.jobs"
+      },
+      {
+        "item": "GET /v1/library",
+        "operation_id": "desktop.engine.content"
+      },
+      {
+        "item": "GET /v1/me",
+        "operation_id": "backend.premium.account-control"
+      },
+      {
+        "item": "GET /v1/me/entitlements",
+        "operation_id": "desktop.premium.entitlement"
+      },
+      {
+        "item": "GET /v1/media/{source_id}",
+        "operation_id": "desktop.engine.content"
+      },
+      {
+        "item": "GET /v1/media/{source_id}/info",
+        "operation_id": "desktop.engine.content"
+      },
+      {
+        "item": "GET /v1/packs",
+        "operation_id": "desktop.engine.control"
+      },
+      {
+        "item": "GET /v1/providers",
+        "operation_id": "desktop.engine.control"
+      },
+      {
+        "item": "GET /v1/settings",
+        "operation_id": "desktop.engine.control"
+      },
+      {
+        "item": "GET /v1/subscriptions",
+        "operation_id": "desktop.engine.subscriptions"
+      },
+      {
+        "item": "GET /v1/subscriptions/{subscription_id}/email-preference",
+        "operation_id": "desktop.engine.subscriptions"
+      },
+      {
+        "item": "GET /v1/transcripts/{source_id}.html",
+        "operation_id": "desktop.engine.content"
+      },
+      {
+        "item": "GET /web/",
+        "operation_id": "private-web.session"
+      },
+      {
+        "item": "GET /web/api/library",
+        "operation_id": "private-web.library"
+      },
+      {
+        "item": "GET /web/api/transcripts/{source_id}.html",
+        "operation_id": "private-web.transcript"
+      },
+      {
+        "item": "GET /web/assets/app.css",
+        "operation_id": "private-web.session"
+      },
+      {
+        "item": "GET /web/assets/app.js",
+        "operation_id": "private-web.session"
+      },
+      {
+        "item": "POST /account/billing/checkout",
+        "operation_id": "backend.premium.billing-control"
+      },
+      {
+        "item": "POST /admin/ads/config",
+        "operation_id": "backend.premium.admin-control"
+      },
+      {
+        "item": "POST /admin/ads/house",
+        "operation_id": "backend.premium.admin-control"
+      },
+      {
+        "item": "POST /admin/ads/house/{ad_id}",
+        "operation_id": "backend.premium.admin-control"
+      },
+      {
+        "item": "POST /admin/ads/house/{ad_id}/delete",
+        "operation_id": "backend.premium.admin-control"
+      },
+      {
+        "item": "POST /admin/flags/{key}",
+        "operation_id": "backend.premium.admin-control"
+      },
+      {
+        "item": "POST /admin/login",
+        "operation_id": "backend.premium.admin-control"
+      },
+      {
+        "item": "POST /admin/users/{user_id}/override",
+        "operation_id": "backend.premium.admin-control"
+      },
+      {
+        "item": "POST /admin/users/{user_id}/sessions/revoke",
+        "operation_id": "backend.premium.admin-control"
+      },
+      {
+        "item": "POST /admin/users/{user_id}/status",
+        "operation_id": "backend.premium.admin-control"
+      },
+      {
+        "item": "POST /device/approve",
+        "operation_id": "backend.premium.account-control"
+      },
+      {
+        "item": "POST /device/login",
+        "operation_id": "backend.premium.account-control"
+      },
+      {
+        "item": "POST /v1/accounts",
+        "operation_id": "backend.premium.account-control"
+      },
+      {
+        "item": "POST /v1/billing/checkout-sessions",
+        "operation_id": "backend.premium.billing-control"
+      },
+      {
+        "item": "POST /v1/browser-sessions",
+        "operation_id": "backend.premium.account-control"
+      },
+      {
+        "item": "POST /v1/device-authorizations",
+        "operation_id": "backend.premium.account-control"
+      },
+      {
+        "item": "POST /v1/device-authorizations/approve",
+        "operation_id": "backend.premium.account-control"
+      },
+      {
+        "item": "POST /v1/device-authorizations/token",
+        "operation_id": "backend.premium.account-control"
+      },
+      {
+        "item": "POST /v1/email-deliveries",
+        "operation_id": "backend.premium.email-delivery"
+      },
+      {
+        "item": "POST /v1/email-outbox/claim",
+        "operation_id": "desktop.engine.email-outbox"
+      },
+      {
+        "item": "POST /v1/email-outbox/complete",
+        "operation_id": "desktop.engine.email-outbox"
+      },
+      {
+        "item": "POST /v1/email-outbox/manual",
+        "operation_id": "desktop.engine.email-outbox"
+      },
+      {
+        "item": "POST /v1/email-outbox/release",
+        "operation_id": "desktop.engine.email-outbox"
+      },
+      {
+        "item": "POST /v1/jobs",
+        "operation_id": "extension.engine.jobs"
+      },
+      {
+        "item": "POST /v1/jobs/{job_id}/confirm",
+        "operation_id": "extension.engine.jobs"
+      },
+      {
+        "item": "POST /v1/keys/test",
+        "operation_id": "desktop.engine.control"
+      },
+      {
+        "item": "POST /v1/packs/{pack_id}/install",
+        "operation_id": "desktop.engine.control"
+      },
+      {
+        "item": "POST /v1/pair",
+        "operation_id": "desktop.engine.pairing"
+      },
+      {
+        "item": "POST /v1/pair/claim",
+        "operation_id": "extension.engine.pairing"
+      },
+      {
+        "item": "POST /v1/search",
+        "operation_id": "desktop.engine.content"
+      },
+      {
+        "item": "POST /v1/shutdown",
+        "operation_id": "desktop.engine.control"
+      },
+      {
+        "item": "POST /v1/subscriptions",
+        "operation_id": "desktop.engine.subscriptions"
+      },
+      {
+        "item": "POST /v1/subscriptions/{subscription_id}/poll",
+        "operation_id": "desktop.engine.subscriptions"
+      },
+      {
+        "item": "POST /v1/tokens/refresh",
+        "operation_id": "backend.premium.account-control"
+      },
+      {
+        "item": "POST /v1/tokens/revoke",
+        "operation_id": "backend.premium.account-control"
+      },
+      {
+        "item": "POST /v1/webhooks/stripe",
+        "operation_id": "backend.premium.billing-control"
+      },
+      {
+        "item": "POST /web/api/logout",
+        "operation_id": "private-web.session"
+      },
+      {
+        "item": "POST /web/api/pair/claim",
+        "operation_id": "private-web.pairing"
+      },
+      {
+        "item": "POST /web/api/search",
+        "operation_id": "private-web.search"
+      },
+      {
+        "item": "POST /web/api/session",
+        "operation_id": "private-web.session"
+      },
+      {
+        "item": "PUT /v1/cookies",
+        "operation_id": "desktop.engine.cookies"
+      },
+      {
+        "item": "PUT /v1/email/online-capability",
+        "operation_id": "desktop.engine.email-outbox"
+      },
+      {
+        "item": "PUT /v1/keys",
+        "operation_id": "desktop.engine.control"
+      },
+      {
+        "item": "PUT /v1/online-capabilities",
+        "operation_id": "desktop.engine.control"
+      },
+      {
+        "item": "PUT /v1/settings",
+        "operation_id": "desktop.engine.control"
+      },
+      {
+        "item": "PUT /v1/subscriptions/{subscription_id}/email-preference",
+        "operation_id": "desktop.engine.subscriptions"
+      }
+    ],
+    "network_owners": [
+      {
+        "item": "services/premium/src/podcast_reader_premium/billing.py",
+        "operation_id": "backend.premium.billing-control"
+      },
+      {
+        "item": "src/podcast_reader/chapters.py",
+        "operation_id": "backend.engine.model-provider"
+      },
+      {
+        "item": "src/podcast_reader/engine/managed_tools.py",
+        "operation_id": "backend.engine.pack-download"
+      },
+      {
+        "item": "src/podcast_reader/engine/pack_manager.py",
+        "operation_id": "backend.engine.pack-download"
+      },
+      {
+        "item": "src/podcast_reader/engine/subscription_feed.py",
+        "operation_id": "backend.engine.feed-fetch"
+      },
+      {
+        "item": "src/podcast_reader/youtube.py",
+        "operation_id": "backend.engine.youtube"
+      },
+      {
+        "item": "src/podcast_reader/ytdlp.py",
+        "operation_id": "backend.engine.media-fetch"
+      }
+    ],
+    "persistence": {
+      "path": "services/premium/src/podcast_reader_premium/models.py",
+      "model": "EmailDeliveryReceipt",
+      "fields": [
+        "attempts",
+        "client_delivery_id",
+        "consent_kind",
+        "content_bytes",
+        "created_at",
+        "delivered_at",
+        "error_code",
+        "id",
+        "payload_hmac",
+        "sink",
+        "state",
+        "updated_at",
+        "user_id"
+      ],
+      "operation_id": "backend.premium.receipt-persistence"
+    }
+  },
+  "desktop": {
+    "channel_source": "app/src/shared/ipc.ts",
+    "request_channels": [
+      {
+        "item": "cookies:delete",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "cookies:list",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "email:manual-create",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "email:outbox-list",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "email:preference-get",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "email:preference-set",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "engine:get-status",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "engine:restart",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "first-run:complete",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "first-run:get",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "jobs:confirm",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "jobs:dismiss",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "jobs:get",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "jobs:list",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "jobs:submit",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "keys:put",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "keys:storage-mode",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "keys:test",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "library:list",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "library:search",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "library:transcript",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "media:info",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "media:youtube-embed-url",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "packs:install",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "packs:list",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "packs:uninstall",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "pair:start",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "premium:connect",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "premium:get-state",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "premium:inventory",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "premium:open-cta",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "premium:sign-out",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "private-web:get-status",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "private-web:set-enabled",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "providers:list",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "settings:get",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "settings:put",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "subscriptions:create",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "subscriptions:delete",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "subscriptions:list",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "subscriptions:poll",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "update:get-status",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "update:install",
+        "operation_id": "desktop.renderer.bridge"
+      }
+    ],
+    "push_channels": [
+      {
+        "item": "engine:event",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "engine:status",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "jobs:hydrated",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "premium:invalidated",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "premium:state",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "private-web:status",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "protocol:request",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "update:status",
+        "operation_id": "desktop.renderer.bridge"
+      }
+    ],
+    "preload_source": "app/src/preload/index.ts",
+    "api_methods": [
+      {
+        "item": "confirmJob",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "connectPremiumAccount",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "createManualEmail",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "createSubscription",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "deleteCookieJar",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "deleteSubscription",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "dismissJob",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "engineRestart",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "getEngineStatus",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "getJob",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "getPathForFile",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "getPremiumInventory",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "getPremiumState",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "getPrivateWebStatus",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "getSettings",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "getSubscriptionEmailPreference",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "getUpdateStatus",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "installPack",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "installUpdate",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "isFirstRunComplete",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "keyStorageMode",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "listCookieJars",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "listEmailDeliveries",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "listJobs",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "listLibrary",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "listPacks",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "listProviders",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "listSubscriptions",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "markFirstRunComplete",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "mediaInfo",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "onEngineStatus",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "onJobsHydrated",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "onPipelineEvent",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "onPremiumInvalidated",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "onPremiumState",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "onPrivateWebStatus",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "onProtocolRequest",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "onUpdateStatus",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "openPremiumCta",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "pollSubscription",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "putKey",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "putSettings",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "searchLibrary",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "setPrivateWebEnabled",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "setSubscriptionEmailPreference",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "signOutPremiumAccount",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "startPairing",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "submitJob",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "testKey",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "transcriptHtml",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "uninstallPack",
+        "operation_id": "desktop.renderer.bridge"
+      },
+      {
+        "item": "youtubeEmbedUrl",
+        "operation_id": "desktop.renderer.bridge"
+      }
+    ],
+    "network_owners": [
+      {
+        "item": "app/src/main/index.ts",
+        "operation_id": "desktop.external-cta.open"
+      },
+      {
+        "item": "app/src/main/media-protocol.ts",
+        "operation_id": "desktop.engine.content"
+      }
+    ],
+    "persistence_owners": [
+      {
+        "item": "app/src/main/premium/credentials.ts",
+        "operation_id": "desktop.premium.credentials-store"
+      },
+      {
+        "item": "app/src/main/vault.ts",
+        "operation_id": "desktop.engine.control"
+      }
+    ]
+  },
+  "extension": {
+    "manifest_path": "extension/public/manifest.json",
+    "manifest": {
+      "permissions": [
+        "storage",
+        "alarms",
+        "notifications",
+        "contextMenus",
+        "activeTab"
+      ],
+      "host_permissions": [
+        "http://127.0.0.1/*"
+      ],
+      "optional_permissions": [
+        "cookies"
+      ],
+      "optional_host_permissions": [
+        "https://*/*"
+      ]
+    },
+    "client_source": "extension/src/client.ts",
+    "routes": [
+      {
+        "item": "/v1/cookies",
+        "operation_id": "extension.engine.cookies"
+      },
+      {
+        "item": "/v1/events",
+        "operation_id": "extension.engine.events"
+      },
+      {
+        "item": "/v1/health",
+        "operation_id": "extension.engine.health"
+      },
+      {
+        "item": "/v1/jobs",
+        "operation_id": "extension.engine.jobs"
+      },
+      {
+        "item": "/v1/jobs/{parameter}",
+        "operation_id": "extension.engine.jobs"
+      },
+      {
+        "item": "/v1/pair/claim",
+        "operation_id": "extension.engine.pairing"
+      }
+    ],
+    "network_owners": [
+      {
+        "item": "extension/src/client.ts",
+        "operation_id": "extension.engine.jobs"
+      }
+    ],
+    "storage_areas": [
+      {
+        "item": "local",
+        "operation_id": "extension.storage.local"
+      }
+    ]
+  },
+  "private_web": {
+    "route_sources": [
+      {
+        "path": "src/podcast_reader/engine/app.py",
+        "prefix": ""
+      }
+    ],
+    "routes": [
+      {
+        "item": "GET /web/",
+        "operation_id": "private-web.session"
+      },
+      {
+        "item": "GET /web/api/library",
+        "operation_id": "private-web.library"
+      },
+      {
+        "item": "GET /web/api/transcripts/{source_id}.html",
+        "operation_id": "private-web.transcript"
+      },
+      {
+        "item": "GET /web/assets/app.css",
+        "operation_id": "private-web.session"
+      },
+      {
+        "item": "GET /web/assets/app.js",
+        "operation_id": "private-web.session"
+      },
+      {
+        "item": "POST /web/api/logout",
+        "operation_id": "private-web.session"
+      },
+      {
+        "item": "POST /web/api/pair/claim",
+        "operation_id": "private-web.pairing"
+      },
+      {
+        "item": "POST /web/api/search",
+        "operation_id": "private-web.search"
+      },
+      {
+        "item": "POST /web/api/session",
+        "operation_id": "private-web.session"
+      }
+    ],
+    "browser_source": "src/podcast_reader/web_assets/app.js",
+    "browser_routes": [
+      {
+        "item": "/web/",
+        "operation_id": "private-web.session"
+      },
+      {
+        "item": "/web/api/library",
+        "operation_id": "private-web.library"
+      },
+      {
+        "item": "/web/api/logout",
+        "operation_id": "private-web.session"
+      },
+      {
+        "item": "/web/api/pair/claim",
+        "operation_id": "private-web.pairing"
+      },
+      {
+        "item": "/web/api/search",
+        "operation_id": "private-web.search"
+      },
+      {
+        "item": "/web/api/session",
+        "operation_id": "private-web.session"
+      },
+      {
+        "item": "/web/api/transcripts/{parameter}.html",
+        "operation_id": "private-web.transcript"
+      }
+    ],
+    "network_owners": [
+      {
+        "item": "src/podcast_reader/web_assets/app.js",
+        "operation_id": "private-web.session"
+      }
+    ]
+  },
+  "copy": {
+    "surfaces": [
+      {
+        "id": "desktop",
+        "claim_ids": [
+          "email.content-stateless",
+          "local.zero-premium",
+          "private-web.session-scoped",
+          "tracking.house-only"
+        ],
+        "files": [
+          {
+            "path": "app/src/renderer/src/premium-ad-slot.ts",
+            "fragments": [
+              "Native, text-only house-ad mount."
+            ]
+          },
+          {
+            "path": "app/src/renderer/src/views/premium-account-section.ts",
+            "fragments": [
+              "Local use stays private and ad-free."
+            ]
+          },
+          {
+            "path": "app/src/renderer/src/views/private-web-section.ts",
+            "fragments": [
+              "Podcast Reader uses Tailscale Serve only—never public Funnel access."
+            ]
+          },
+          {
+            "path": "app/src/renderer/src/views/reader.ts",
+            "fragments": [
+              "The Captured DEV mailbox retains the resulting email.",
+              "uploaded to the premium relay for this delivery only"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "premium-readme",
+        "claim_ids": [
+          "email.content-stateless",
+          "tracking.house-only"
+        ],
+        "files": [
+          {
+            "path": "services/premium/README.md",
+            "fragments": [
+              "DEV Maildir destination, which retains",
+              "explicitly requests transcript email",
+              "keeps no transcript copy",
+              "no SMTP or provider configuration",
+              "one bounded plain-text transcript",
+              "only plain-text house inventory"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "site",
+        "claim_ids": [
+          "local.zero-premium",
+          "tracking.house-only"
+        ],
+        "files": [
+          {
+            "path": "site/index.html",
+            "fragments": [
+              "No analytics · No trackers",
+              "Private transcription for Windows",
+              "text is sent to a chapter provider only if you configure one."
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

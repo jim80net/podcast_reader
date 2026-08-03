@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "contract": "podcast-reader-boundary-projection",
-  "policy_revision": 1,
+  "policy_revision": 2,
   "surface": "backend",
   "roots": [
     {
@@ -204,6 +204,129 @@
       ]
     },
     {
+      "id": "backend.premium.account-control",
+      "surface": "backend",
+      "from_zone": "premium-service.memory",
+      "to_zone": "premium-service.database",
+      "transport": "https",
+      "method": "REQUEST",
+      "route": "/account/{declared-operation}",
+      "request_contract": "premium-account-control-v1",
+      "response_contract": "premium-account-control-v1",
+      "request_data": [
+        "identity.account-subject",
+        "identity.device",
+        "metadata.entitlement",
+        "secret.device-code",
+        "secret.premium-access",
+        "secret.premium-refresh"
+      ],
+      "response_data": [
+        "identity.account-subject",
+        "metadata.entitlement",
+        "secret.device-code",
+        "secret.premium-access",
+        "secret.premium-refresh"
+      ],
+      "destination_persistence": [
+        "identity.account-subject",
+        "metadata.entitlement"
+      ],
+      "logging": [],
+      "guards": [
+        "authenticated-subject",
+        "bounded-request",
+        "strict-schema"
+      ],
+      "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152",
+      "enforcement_ids": [
+        "backend.persistence-inventory",
+        "backend.policy-projection",
+        "backend.route-inventory"
+      ]
+    },
+    {
+      "id": "backend.premium.admin-control",
+      "surface": "backend",
+      "from_zone": "premium-service.memory",
+      "to_zone": "premium-service.database",
+      "transport": "https",
+      "method": "REQUEST",
+      "route": "/admin/{declared-operation}",
+      "request_contract": "premium-admin-control-v1",
+      "response_contract": "premium-admin-control-v1",
+      "request_data": [
+        "identity.account-subject",
+        "metadata.delivery-receipt",
+        "metadata.entitlement",
+        "metadata.house-creative",
+        "metadata.public-configuration"
+      ],
+      "response_data": [
+        "identity.account-subject",
+        "metadata.delivery-receipt",
+        "metadata.entitlement",
+        "metadata.house-creative",
+        "metadata.public-configuration"
+      ],
+      "destination_persistence": [
+        "identity.account-subject",
+        "metadata.delivery-receipt",
+        "metadata.entitlement",
+        "metadata.house-creative",
+        "metadata.public-configuration"
+      ],
+      "logging": [
+        "identity.account-subject",
+        "metadata.public-configuration"
+      ],
+      "guards": [
+        "admin-session",
+        "csrf",
+        "origin-binding"
+      ],
+      "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152",
+      "enforcement_ids": [
+        "backend.persistence-inventory",
+        "backend.policy-projection",
+        "backend.route-inventory"
+      ]
+    },
+    {
+      "id": "backend.premium.billing-control",
+      "surface": "backend",
+      "from_zone": "premium-service.memory",
+      "to_zone": "approved.billing-provider",
+      "transport": "https",
+      "method": "REQUEST",
+      "route": "/billing/{declared-operation}",
+      "request_contract": "premium-billing-control-v1",
+      "response_contract": "premium-billing-control-v1",
+      "request_data": [
+        "identity.account-subject",
+        "metadata.entitlement"
+      ],
+      "response_data": [
+        "metadata.entitlement",
+        "metadata.public-configuration"
+      ],
+      "destination_persistence": [],
+      "logging": [
+        "identity.account-subject"
+      ],
+      "guards": [
+        "authenticated-subject",
+        "configured-provider",
+        "strict-schema"
+      ],
+      "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152",
+      "enforcement_ids": [
+        "backend.network-owner-inventory",
+        "backend.policy-projection",
+        "backend.route-inventory"
+      ]
+    },
+    {
       "id": "backend.premium.email-delivery",
       "surface": "backend",
       "from_zone": "desktop.main",
@@ -267,6 +390,31 @@
       "enforcement_ids": [
         "backend.persistence-inventory",
         "backend.policy-projection"
+      ]
+    },
+    {
+      "id": "backend.premium.health",
+      "surface": "backend",
+      "from_zone": "premium-service.memory",
+      "to_zone": "premium-service.memory",
+      "transport": "https",
+      "method": "GET",
+      "route": "/healthz",
+      "request_contract": null,
+      "response_contract": "premium-health-v1",
+      "request_data": [],
+      "response_data": [
+        "metadata.public-configuration"
+      ],
+      "destination_persistence": [],
+      "logging": [],
+      "guards": [
+        "bounded-response"
+      ],
+      "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152",
+      "enforcement_ids": [
+        "backend.policy-projection",
+        "backend.route-inventory"
       ]
     },
     {

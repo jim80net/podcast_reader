@@ -22,7 +22,12 @@ required to decode unnecessary personal data.
 movement, retention, logging, public claims, and network-capable product roots.
 Its generated per-surface projections are committed evidence, not independent
 sources of truth; `python -m podcast_reader_premium.boundary_policy --check`
-validates the policy and proves every projection is current.
+validates the policy, proves every projection is current, and checks the
+non-authoritative `surface-inventory-v1.json` binding against production source.
+That binding inventories backend routes and persistence, desktop IPC and network
+owners, extension permissions/routes/storage, private-web routes, and policy-backed
+copy. Every entry must resolve to an operation or claim in a generated projection;
+new unbound source fails closed.
 
 Any incompatible field, enum, or semantic change requires a new
 `schema_version` and an independent design gate. Additive server behavior must
