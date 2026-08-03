@@ -56,6 +56,7 @@
 !src/podcast_reader/web_assets/*.html
 !docs/walk-repros/*.json
 !services/premium/contracts/*.json
+!src/podcast_reader/engine/contracts/v1/subscriptions/*.json
 
 # Python
 __pycache__/

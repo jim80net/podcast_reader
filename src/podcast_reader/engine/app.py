@@ -23,7 +23,7 @@ import httpx
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, Response, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from starlette.background import BackgroundTask
 
 from podcast_reader.chapters import verify_key
@@ -58,6 +58,12 @@ from podcast_reader.engine.settings import (
     load_settings,
     save_settings,
     token_fingerprint,
+)
+from podcast_reader.engine.subscription_feed import FeedError
+from podcast_reader.engine.subscriptions import (
+    OnlineCapabilitySnapshot,
+    PremiumFeatureUnavailableError,
+    SubscriptionManager,
 )
 from podcast_reader.engine.web_session import SESSION_LIFETIME_S, WebSessionSigner
 from podcast_reader.engine.web_surface import SHELL_CSP, asset_bytes, transcript_csp
@@ -394,6 +400,23 @@ class WebSearchResponse(BaseModel):
     partial: bool
 
 
+class SubscriptionCreateBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    feed_url: str = Field(min_length=1, max_length=2048)
+
+
+class OnlineCapabilityBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: int = Field(strict=True)
+    subject: str = Field(pattern=r"usr_[A-Za-z0-9_-]{1,128}")
+    entitlement_revision: int = Field(strict=True, ge=0)
+    flags_revision: int = Field(strict=True, ge=0)
+    podcast_subscriptions: bool = Field(strict=True)
+    expires_at: str = Field(min_length=20, max_length=64)
+
+
 #: Cap on the unauthenticated claim body (per V4): a legitimate claim is a
 #: tiny JSON object, so anything declaring more — or declaring nothing
 #: (chunked) — is rejected before the body is read.
@@ -412,6 +435,7 @@ def create_app(
     pairing: PairingState | None = None,
     media_manager: MediaManager | None = None,
     web_session_signer: WebSessionSigner | None = None,
+    subscription_manager: SubscriptionManager | None = None,
 ) -> FastAPI:
     """Build the engine's FastAPI app bound to *store* and *data_dir*.
 
@@ -436,6 +460,9 @@ def create_app(
 
     *web_session_signer* is the test seam for the stateless browser-session
     clock and revoke generation. Production derives it from the engine bearer.
+
+    *subscription_manager* owns the separate subscription database, memory-only
+    online capability, and scheduler. Without one, its routes answer 503.
     """
     app = FastAPI(title="podcast-reader engine", version=engine_version())
     expected_token = load_engine_state(data_dir)["token"].encode()
@@ -729,6 +756,62 @@ def create_app(
         if on_shutdown is None:
             raise HTTPException(status_code=503, detail="shutdown hook not configured")
         background.add_task(on_shutdown)
+
+    def _subscriptions() -> SubscriptionManager:
+        if subscription_manager is None:
+            raise HTTPException(status_code=503, detail="subscription manager not configured")
+        return subscription_manager
+
+    @app.get("/v1/subscriptions")
+    def list_subscriptions() -> list[dict[str, object]]:
+        return [dict(item) for item in _subscriptions().list_subscriptions()]
+
+    @app.post("/v1/subscriptions", status_code=status.HTTP_201_CREATED)
+    def create_subscription(body: SubscriptionCreateBody) -> dict[str, object]:
+        try:
+            return dict(_subscriptions().create_subscription(body.feed_url))
+        except PremiumFeatureUnavailableError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except FeedError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.delete("/v1/subscriptions/{subscription_id}", status_code=status.HTTP_204_NO_CONTENT)
+    def delete_subscription(subscription_id: str) -> None:
+        try:
+            _subscriptions().delete_subscription(subscription_id)
+        except PremiumFeatureUnavailableError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="subscription not found") from exc
+
+    @app.post("/v1/subscriptions/{subscription_id}/poll")
+    def poll_subscription(subscription_id: str) -> dict[str, object]:
+        try:
+            result = _subscriptions().poll_subscription(subscription_id)
+        except PremiumFeatureUnavailableError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="subscription not found") from exc
+        except FeedError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {
+            "subscription": dict(result.subscription),
+            "discovered_count": result.discovered_count,
+            "not_modified": result.not_modified,
+        }
+
+    @app.put("/v1/online-capabilities", status_code=status.HTTP_204_NO_CONTENT)
+    async def update_online_capabilities(request: Request) -> None:
+        manager = _subscriptions()
+        try:
+            raw = await request.body()
+            if len(raw) > 4096:
+                raise ValueError("online capability body is too large")
+            body = OnlineCapabilityBody.model_validate_json(raw)
+            manager.update_capability(OnlineCapabilitySnapshot(**body.model_dump()))
+        except (ValidationError, ValueError):
+            manager.clear_capability()
+            raise HTTPException(status_code=400, detail="invalid online capability") from None
 
     @app.post("/v1/jobs", status_code=status.HTTP_201_CREATED)
     def submit_job(body: JobSubmission) -> JobRecord:

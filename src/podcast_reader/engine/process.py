@@ -47,6 +47,8 @@ from podcast_reader.engine.settings import (
     save_engine_state,
     token_fingerprint,
 )
+from podcast_reader.engine.subscription_store import SubscriptionStore
+from podcast_reader.engine.subscriptions import SubscriptionManager
 from podcast_reader.pipeline import InputType, PipelineError, classify_input, run_pipeline
 from podcast_reader.providers import build_provider_registry, canonicalize_custom_providers
 from podcast_reader.tools import (
@@ -360,6 +362,7 @@ def serve_engine(
         cache_max_bytes=lambda: load_settings(base)["media_cache_max_bytes"],
         get_entry=lambda sid: library.get_entry(Path(load_settings(base)["library_dir"]), sid),
     )
+    subscription_manager = SubscriptionManager(SubscriptionStore(base))
 
     # POST /v1/shutdown hook: the server object is created after the app, so
     # the hook reaches it through this list (filled before any request runs).
@@ -376,6 +379,7 @@ def serve_engine(
         on_shutdown=request_shutdown,
         pack_manager=pack_manager,
         media_manager=media_manager,
+        subscription_manager=subscription_manager,
     )
     # timeout_graceful_shutdown bounds exit even when a client leaves an SSE
     # stream open — an open /v1/events response would otherwise hold graceful
@@ -388,6 +392,7 @@ def serve_engine(
     try:
         store.start_worker()
         pack_manager.start_worker()
+        subscription_manager.start()
         # Scheduled yt-dlp self-update (design decision 8): background thread,
         # gated inside on the 24 h cadence and the user-data residence of the
         # resolved binary; never touches PATH/pip copies, never raises.
@@ -407,6 +412,7 @@ def serve_engine(
         # An in-flight pack download aborts between chunks; its partial stays
         # on disk, so the pack surfaces as resumable on the next start.
         pack_manager.shutdown()
+        subscription_manager.shutdown()
         sock.close()
 
 
