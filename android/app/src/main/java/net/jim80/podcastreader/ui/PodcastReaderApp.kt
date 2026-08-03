@@ -26,6 +26,7 @@ import net.jim80.podcastreader.ui.ads.JobsHouseAdSlot
 import net.jim80.podcastreader.ui.ads.LibraryHouseAdSlot
 
 data class PodcastReaderActions(
+    val onDevelopmentOriginChanged: (String) -> Unit,
     val onConnectAccount: () -> Unit,
     val onCancelAccountConnect: () -> Unit,
     val onRetryAccount: () -> Unit,
@@ -77,7 +78,7 @@ fun PodcastReaderApp(
                     }
                     AppDestination.ACCOUNT -> AccountScreen(
                         state = state.account,
-                        accountServiceConfigured = state.accountServiceConfigured,
+                        onDevelopmentOriginChanged = actions.onDevelopmentOriginChanged,
                         onConnect = actions.onConnectAccount,
                         onCancelConnect = actions.onCancelAccountConnect,
                         onRetry = actions.onRetryAccount,

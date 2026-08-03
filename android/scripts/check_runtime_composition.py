@@ -37,8 +37,12 @@ def main() -> None:
         "PremiumNativeAuthTransport(requests, premiumClient)",
         "PremiumCurrentUserTransport(requests, premiumClient)",
         "PremiumEntitlementTransport(requests, premiumClient)",
+        "AndroidExternalBrowserLauncher(applicationContext)",
+        "DeviceAuthorizationFlow(origin, nativeAuth, browser)",
+        "accountConnectionFactory = PremiumAccountConnectionFactory",
     ):
         require(required in composition, f"production runtime dependency missing: {required}")
+    require('"https://' not in composition, "production composition must not embed a premium origin")
 
     allowed = COMPOSITION.resolve()
     definitions = {
@@ -46,6 +50,8 @@ def main() -> None:
         "PremiumNativeAuthTransport": "PremiumNativeAuthTransport.kt",
         "PremiumCurrentUserTransport": "PremiumTransport.kt",
         "PremiumEntitlementTransport": "PremiumTransport.kt",
+        "AndroidExternalBrowserLauncher": "DeviceAuthorizationFlow.kt",
+        "DeviceAuthorizationFlow": "DeviceAuthorizationFlow.kt",
     }
     kotlin_files = list(MAIN.rglob("*.kt"))
     for class_name, definition_name in definitions.items():

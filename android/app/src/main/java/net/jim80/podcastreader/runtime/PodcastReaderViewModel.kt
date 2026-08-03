@@ -7,6 +7,11 @@ import androidx.lifecycle.viewModelScope
 import java.time.Instant
 import kotlinx.coroutines.Dispatchers
 import net.jim80.podcastreader.core.engine.EngineCredentialStore
+import net.jim80.podcastreader.core.premium.AndroidExternalBrowserLauncher
+import net.jim80.podcastreader.core.premium.AuthorizedPremiumTokens
+import net.jim80.podcastreader.core.premium.DeviceAuthorizationFlow
+import net.jim80.podcastreader.core.premium.DeviceAuthorizationSession
+import net.jim80.podcastreader.core.premium.DeviceAuthorizationTransition
 import net.jim80.podcastreader.core.premium.PremiumAccountAuthorizer
 import net.jim80.podcastreader.core.premium.PremiumAccountCredentials
 import net.jim80.podcastreader.core.premium.PremiumCredentialStore
@@ -27,11 +32,15 @@ internal class PodcastReaderViewModel(
         engineRecords = dependencies.engineRecords,
         premiumRecords = dependencies.premiumRecords,
         connectedFactory = dependencies.connectedFactory,
+        accountConnectionFactory = dependencies.accountConnectionFactory,
         now = dependencies.now,
     )
 
     val uiState = runtime.uiState
     val actions = PodcastReaderActions(
+        onDevelopmentOriginChanged = {
+            runtime.dispatch(PodcastReaderRuntimeEvent.DevelopmentOriginChanged(it))
+        },
         onConnectAccount = { runtime.dispatch(PodcastReaderRuntimeEvent.ConnectAccount) },
         onCancelAccountConnect = { runtime.dispatch(PodcastReaderRuntimeEvent.CancelAuthorization) },
         onRetryAccount = { runtime.dispatch(PodcastReaderRuntimeEvent.RetryAccount) },
@@ -48,6 +57,7 @@ internal data class RuntimeDependencies(
     val engineRecords: EngineRecordProbe,
     val premiumRecords: PremiumAccountRecordAccess,
     val connectedFactory: ConnectedPremiumSessionFactory,
+    val accountConnectionFactory: PremiumAccountConnectionFactory,
     val now: () -> Instant,
 )
 
@@ -59,6 +69,19 @@ internal object PodcastReaderProductionComposition {
         val premiumClient by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
             securePremiumHttpClient()
         }
+        fun accountBrowser() = AndroidExternalBrowserLauncher(applicationContext)
+        fun accountAuthorizer() = PremiumAccountAuthorizer(premiumStore)
+        fun nativeAuth(requests: PremiumRequestFactory) = PremiumNativeAuthTransport(requests, premiumClient)
+        fun connectedSession(
+            requests: PremiumRequestFactory,
+            authorizer: PremiumAccountAuthorizer,
+            nativeAuth: PremiumNativeAuthTransport,
+        ) = ProductionPremiumConnectedSession(
+            authorizer = authorizer,
+            nativeAuth = nativeAuth,
+            currentUser = PremiumCurrentUserTransport(requests, premiumClient),
+            entitlements = PremiumEntitlementTransport(requests, premiumClient),
+        )
         val dependencies = RuntimeDependencies(
             workDispatcher = Dispatchers.IO,
             engineRecords = EngineRecordProbe {
@@ -70,12 +93,37 @@ internal object PodcastReaderProductionComposition {
             },
             connectedFactory = ConnectedPremiumSessionFactory { account ->
                 val requests = PremiumRequestFactory(account.origin)
-                ProductionPremiumConnectedSession(
-                    authorizer = PremiumAccountAuthorizer(premiumStore),
-                    nativeAuth = PremiumNativeAuthTransport(requests, premiumClient),
-                    currentUser = PremiumCurrentUserTransport(requests, premiumClient),
-                    entitlements = PremiumEntitlementTransport(requests, premiumClient),
+                connectedSession(
+                    requests = requests,
+                    authorizer = accountAuthorizer(),
+                    nativeAuth = nativeAuth(requests),
                 )
+            },
+            accountConnectionFactory = PremiumAccountConnectionFactory { origin ->
+                val requests = PremiumRequestFactory(origin)
+                val nativeAuth = nativeAuth(requests)
+                val browser = accountBrowser()
+                val flow = DeviceAuthorizationFlow(origin, nativeAuth, browser)
+                object : PremiumAccountConnection {
+                    override fun begin(now: Instant, requestId: String): DeviceAuthorizationTransition =
+                        flow.begin(now, requestId)
+
+                    override fun poll(
+                        session: DeviceAuthorizationSession,
+                        now: Instant,
+                        requestId: String,
+                    ): DeviceAuthorizationTransition = flow.poll(session, now, requestId)
+
+                    override fun cancel(session: DeviceAuthorizationSession) {
+                        flow.cancel(session)
+                    }
+
+                    override fun complete(tokens: AuthorizedPremiumTokens) = runCatching {
+                        val authorizer = accountAuthorizer()
+                        authorizer.completeDeviceAuthorization(origin, tokens).getOrThrow()
+                        connectedSession(requests, authorizer, nativeAuth)
+                    }
+                }
             },
             now = Instant::now,
         )
