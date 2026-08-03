@@ -864,6 +864,16 @@ class TestCorruptJournal:
         assert store.list_jobs() == []
         assert (tmp_path / "jobs.json.corrupt").exists()
 
+    def test_duplicate_job_id_journal_is_quarantined(self, tmp_path: Path) -> None:
+        first = _journal_record("duplicate", "done", 1.0)
+        second = _journal_record("duplicate", "done", 2.0)
+        second["idempotency_key"] = "subscription:sub_1:episode_1"
+        (tmp_path / "jobs.json").write_text(json.dumps([first, second]))
+
+        store = JobStore(tmp_path, _ok_runner)
+        assert store.list_jobs() == []
+        assert (tmp_path / "jobs.json.corrupt").exists()
+
     @pytest.mark.skipif(
         sys.platform == "win32" or os.geteuid() == 0,
         reason="chmod 0o000 does not block reads on Windows or for root",

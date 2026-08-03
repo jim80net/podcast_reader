@@ -503,6 +503,8 @@ class JobStore:
                 # structured error detail existed.
                 record.setdefault("overrides", None)
                 record.setdefault("models", None)
+                if record["id"] in jobs:
+                    raise ValueError("duplicate job id")
                 idempotency_key = record.get("idempotency_key")
                 if idempotency_key is not None:
                     _validate_idempotency_key(idempotency_key)

@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import re
 import threading
+import time
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -38,7 +40,9 @@ MAX_SCHEDULED_PER_TICK = 3
 MAX_JOBS_PER_POLL = 3
 ERROR_BACKOFF_SECONDS = 30 * 60
 MAX_CAPABILITY_LIFETIME_SECONDS = 10 * 60
+RECONCILIATION_INTERVAL_SECONDS = 30
 _SUBJECT_RE = re.compile(r"usr_[A-Za-z0-9_-]{1,128}")
+logger = logging.getLogger(__name__)
 
 
 class Clock(Protocol):
@@ -101,7 +105,7 @@ class SubscriptionManager:
         self._capability: OnlineCapabilitySnapshot | None = None
         self._capability_lock = threading.Lock()
         self._in_flight: set[str] = set()
-        self._in_flight_lock = threading.Lock()
+        self._in_flight_condition = threading.Condition()
         self._wake = threading.Event()
         self._stopping = threading.Event()
         self._scheduler_stop = threading.Event()
@@ -137,11 +141,16 @@ class SubscriptionManager:
             self._thread.start()
 
     def shutdown(self) -> None:
-        self._stopping.set()
+        with self._in_flight_condition:
+            self._stopping.set()
         self._scheduler_stop.set()
         self._wake.set()
         if self._thread is not None:
             self._thread.join(timeout=12)
+        with self._in_flight_condition:
+            self._in_flight_condition.wait_for(lambda: not self._in_flight)
+        if self._thread is not None and self._thread.is_alive():
+            self._thread.join()
         self.store.close()
 
     def update_capability(self, snapshot: OnlineCapabilitySnapshot) -> None:
@@ -183,6 +192,8 @@ class SubscriptionManager:
         self._wake.set()
 
     def is_available(self) -> bool:
+        if self._stopping.is_set():
+            return False
         with self._capability_lock:
             snapshot = self._capability
         if snapshot is None or not snapshot.podcast_subscriptions:
@@ -401,14 +412,17 @@ class SubscriptionManager:
             self._subscription_id = subscription_id
 
         def __enter__(self) -> None:
-            with self._manager._in_flight_lock:
+            with self._manager._in_flight_condition:
+                if self._manager._stopping.is_set():
+                    raise PremiumFeatureUnavailableError("premium_feature_unavailable")
                 if self._subscription_id in self._manager._in_flight:
                     raise FeedError("subscription poll is already in progress")
                 self._manager._in_flight.add(self._subscription_id)
 
         def __exit__(self, *_args: object) -> None:
-            with self._manager._in_flight_lock:
+            with self._manager._in_flight_condition:
                 self._manager._in_flight.discard(self._subscription_id)
+                self._manager._in_flight_condition.notify_all()
 
     def _claim(self, subscription_id: str) -> _Claim:
         return self._Claim(self, subscription_id)
@@ -420,8 +434,15 @@ class SubscriptionManager:
         return POLL_INTERVAL_SECONDS + offset
 
     def _run_scheduler(self) -> None:
+        next_reconciliation = 0.0
         while not self._stopping.is_set() and not self._scheduler_stop.is_set():
-            self._reconcile_jobs()
+            monotonic_now = time.monotonic()
+            if monotonic_now >= next_reconciliation:
+                try:
+                    self._reconcile_jobs()
+                except Exception:
+                    logger.exception("Subscription job reconciliation failed; retrying later")
+                next_reconciliation = monotonic_now + RECONCILIATION_INTERVAL_SECONDS
             if not self.is_available():
                 self._wake.wait(timeout=1.0)
                 self._wake.clear()

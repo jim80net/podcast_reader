@@ -26,7 +26,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
     from pathlib import Path
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 DATABASE_DIR = "subscriptions"
 DATABASE_FILE = "subscriptions.sqlite3"
 
@@ -162,6 +162,21 @@ class SubscriptionStore:
                 )
             if version == 0:
                 connection.executescript(_SCHEMA)
+                connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+            elif version == 1:
+                rows = connection.execute(
+                    "SELECT subscription_id, episode_key, published_at FROM episodes"
+                ).fetchall()
+                for row in rows:
+                    normalized = _normalized_published_at(row["published_at"])
+                    if normalized != row["published_at"]:
+                        connection.execute(
+                            """
+                            UPDATE episodes SET published_at = ?
+                            WHERE subscription_id = ? AND episode_key = ?
+                            """,
+                            (normalized, row["subscription_id"], row["episode_key"]),
+                        )
                 connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
             elif version != SCHEMA_VERSION:
                 raise RuntimeError(f"unsupported subscription database schema {version}")
@@ -571,4 +586,4 @@ def _normalized_published_at(value: str | None) -> str | None:
             return None
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    return parsed.astimezone(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")

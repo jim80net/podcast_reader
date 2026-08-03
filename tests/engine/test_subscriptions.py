@@ -367,9 +367,9 @@ def test_subscription_handoff_caps_jobs_oldest_first(tmp_path: Path) -> None:
         assert len(queued) == MAX_JOBS_PER_POLL
         assert [episode["episode_key"] for episode in queued] == ["new-0", "new-1", "new-2"]
         assert [episode["published_at"] for episode in queued] == [
-            "2024-01-01T00:00:00Z",
-            "2024-01-02T00:00:00Z",
-            "2024-01-03T00:00:00Z",
+            "2024-01-01T00:00:00.000000Z",
+            "2024-01-02T00:00:00.000000Z",
+            "2024-01-03T00:00:00.000000Z",
         ]
         assert [episode["episode_key"] for episode in discovered] == ["new-3", "new-4"]
         assert [job["source"] for job in job_store.list_jobs()] == [
@@ -389,6 +389,106 @@ def test_subscription_handoff_caps_jobs_oldest_first(tmp_path: Path) -> None:
         assert [
             episode["episode_key"] for episode in episodes if episode["state"] == "discovered"
         ] == ["new-6"]
+    finally:
+        manager.shutdown()
+
+
+def test_shutdown_waits_for_in_flight_poll_before_closing_store(tmp_path: Path) -> None:
+    clock = _Clock(datetime(2026, 8, 3, tzinfo=timezone.utc))
+    fetcher = _Fetcher()
+    manager = SubscriptionManager(SubscriptionStore(tmp_path), fetcher=fetcher, clock=clock)
+    manager.update_capability(_snapshot(clock))
+    subscription = manager.create_subscription("https://93.184.216.34/show.xml")
+    entered = threading.Event()
+    release = threading.Event()
+
+    class BlockingFetcher:
+        def fetch(
+            self,
+            _url: str,
+            *,
+            etag: str | None = None,
+            last_modified: str | None = None,
+            should_continue: Callable[[], bool] = lambda: True,
+        ) -> FeedResponse:
+            entered.set()
+            assert release.wait(timeout=2)
+            return FeedResponse(304, subscription["feed_url"], b"", '"v1"', None)
+
+    manager._fetcher = BlockingFetcher()
+    poll_error: list[Exception] = []
+
+    def poll() -> None:
+        try:
+            manager.poll_subscription(subscription["id"])
+        except Exception as exc:
+            poll_error.append(exc)
+
+    poll_thread = threading.Thread(target=poll)
+    poll_thread.start()
+    assert entered.wait(timeout=1)
+    shutdown_thread = threading.Thread(target=manager.shutdown)
+    shutdown_thread.start()
+    time.sleep(0.05)
+    assert shutdown_thread.is_alive()
+    release.set()
+    poll_thread.join(timeout=1)
+    shutdown_thread.join(timeout=1)
+    assert not poll_thread.is_alive()
+    assert not shutdown_thread.is_alive()
+    assert len(poll_error) == 1
+    assert isinstance(poll_error[0], PremiumFeatureUnavailableError)
+
+
+def test_scheduler_reconciliation_failure_does_not_kill_thread(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    clock = _Clock(datetime(2026, 8, 3, tzinfo=timezone.utc))
+    manager = SubscriptionManager(SubscriptionStore(tmp_path), fetcher=_Fetcher(), clock=clock)
+    manager.update_capability(_snapshot(clock))
+    calls = 0
+
+    def flaky_reconcile() -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise RuntimeError("transient reconciliation failure")
+
+    monkeypatch.setattr("podcast_reader.engine.subscriptions.RECONCILIATION_INTERVAL_SECONDS", 0)
+    monkeypatch.setattr(manager, "_reconcile_jobs", flaky_reconcile)
+    try:
+        manager._ensure_scheduler()
+        deadline = time.monotonic() + 1
+        while calls < 2 and time.monotonic() < deadline:
+            manager._wake.set()
+            time.sleep(0.01)
+        assert calls >= 2
+        assert manager._thread is not None and manager._thread.is_alive()
+    finally:
+        manager.shutdown()
+
+
+def test_scheduler_throttles_idle_reconciliation(tmp_path: Path) -> None:
+    clock = _Clock(datetime(2026, 8, 3, tzinfo=timezone.utc))
+    manager = SubscriptionManager(SubscriptionStore(tmp_path), fetcher=_Fetcher(), clock=clock)
+    manager.update_capability(_snapshot(clock))
+    calls = 0
+
+    def count_reconcile() -> None:
+        nonlocal calls
+        calls += 1
+
+    manager._reconcile_jobs = count_reconcile
+    try:
+        manager._ensure_scheduler()
+        deadline = time.monotonic() + 1
+        while calls == 0 and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert calls == 1
+        for _ in range(5):
+            manager._wake.set()
+            time.sleep(0.02)
+        assert calls == 1
     finally:
         manager.shutdown()
 
