@@ -19,6 +19,20 @@ interface PremiumCapabilitySnapshot {
   podcast_subscriptions: boolean
   expires_at: string
 }
+/** Premium domain's exact view of the frozen engine v1 email capability fixture. */
+interface EmailCapabilitySnapshot {
+  schema_version: 1
+  subject: string
+  entitlement_revision: number
+  flags_revision: number
+  transcript_email: boolean
+  expires_at: string
+}
+interface EmailSenderAccess {
+  enable(subject: string): void
+  disable(): void
+  wake(): void
+}
 const MAX_TIMER_MS = 2_147_483_647
 
 export interface PremiumControllerDeps {
@@ -29,6 +43,8 @@ export interface PremiumControllerDeps {
   invalidated(): void
   stateChanged(state: PremiumProductState): void
   syncCapability?(snapshot: PremiumCapabilitySnapshot): Promise<void>
+  syncEmailCapability?(snapshot: EmailCapabilitySnapshot): Promise<void>
+  emailSender?: EmailSenderAccess
   capabilitySyncFailed?(): void
   now(): number
   schedule(callback: () => void, milliseconds: number): ReturnType<typeof setTimeout>
@@ -42,6 +58,10 @@ export interface PremiumAccess {
   signOut(): PremiumProductState
   background(): PremiumProductState
   subscriptionsEnabled(): boolean
+  emailEnabled(): boolean
+  emailSubject(): string | null
+  wakeEmailSender(): void
+  emailUnavailable(): void
   synchronizeCapability(): Promise<void>
   inventory(slot: PremiumAdSlot): Promise<PremiumAdInventory | null>
   openCta(slot: PremiumAdSlot, url: string): Promise<void>
@@ -59,6 +79,7 @@ export class PremiumController implements PremiumAccess {
   private expiryTimer: ReturnType<typeof setTimeout> | null = null
   private refreshPromise: Promise<PremiumProductState> | null = null
   private lastCapability: PremiumCapabilitySnapshot | null = null
+  private lastEmailCapability: EmailCapabilitySnapshot | null = null
   private capabilityQueue: Promise<void> = Promise.resolve()
 
   constructor(private readonly deps: PremiumControllerDeps) {}
@@ -88,30 +109,30 @@ export class PremiumController implements PremiumAccess {
   }
 
   private async performRefresh(): Promise<PremiumProductState> {
-    this.disableCapability(this.deps.runtime.state)
+    this.disableCapabilities(this.deps.runtime.state)
     this.evict()
     await this.deps.runtime.restore()
     this.armEntitlementExpiry()
-    this.queueCapability(this.deps.runtime.state)
+    this.queueCapabilities(this.deps.runtime.state)
     return this.state()
   }
 
   async connect(): Promise<PremiumProductState> {
-    this.disableCapability(this.deps.runtime.state)
+    this.disableCapabilities(this.deps.runtime.state)
     this.evict()
     const generation = this.generation
     const tokens = await this.deps.deviceFlow.authorize()
     if (generation !== this.generation) return this.state()
     await this.deps.runtime.acceptTokens(tokens)
     this.armEntitlementExpiry()
-    this.queueCapability(this.deps.runtime.state)
+    this.queueCapabilities(this.deps.runtime.state)
     const state = this.state()
     this.deps.stateChanged(state)
     return state
   }
 
   signOut(): PremiumProductState {
-    this.disableCapability(this.deps.runtime.state)
+    this.disableCapabilities(this.deps.runtime.state)
     this.evict()
     this.deps.runtime.signOut()
     const state = this.state()
@@ -120,7 +141,7 @@ export class PremiumController implements PremiumAccess {
   }
 
   background(): PremiumProductState {
-    this.disableCapability(this.deps.runtime.state)
+    this.disableCapabilities(this.deps.runtime.state)
     this.evict()
     this.deps.runtime.background()
     const state = this.state()
@@ -133,8 +154,30 @@ export class PremiumController implements PremiumAccess {
     return state.state === 'online-premium' && state.podcastSubscriptions === true && state.refreshAfter > this.deps.now()
   }
 
+  emailEnabled(): boolean {
+    const state = this.deps.runtime.state
+    return state.state === 'online-premium' && state.transcriptEmail === true && state.refreshAfter > this.deps.now()
+  }
+
+  emailSubject(): string | null {
+    const state = this.deps.runtime.state
+    if ((state.state === 'online-free' || state.state === 'online-premium') && state.refreshAfter > this.deps.now()) {
+      return state.subject
+    }
+    return this.lastEmailCapability?.subject ?? null
+  }
+
+  wakeEmailSender(): void {
+    if (this.emailEnabled()) this.deps.emailSender?.wake()
+  }
+
+  emailUnavailable(): void {
+    if (this.emailEnabled()) this.failClosed()
+    else this.deps.emailSender?.disable()
+  }
+
   synchronizeCapability(): Promise<void> {
-    this.queueCapability(this.deps.runtime.state)
+    this.queueCapabilities(this.deps.runtime.state)
     return this.capabilityQueue
   }
 
@@ -215,7 +258,7 @@ export class PremiumController implements PremiumAccess {
   }
 
   private failClosed(): void {
-    this.disableCapability(this.deps.runtime.state)
+    this.disableCapabilities(this.deps.runtime.state)
     this.evict()
     this.deps.runtime.background()
     this.deps.stateChanged(productState(this.deps.runtime.state))
@@ -255,7 +298,7 @@ export class PremiumController implements PremiumAccess {
 
   private expire(): void {
     const state = this.deps.runtime.state
-    this.disableCapability(state)
+    this.disableCapabilities(state)
     this.evict()
     if ((state.state === 'online-free' || state.state === 'online-premium') && state.refreshAfter <= this.deps.now()) {
       this.deps.runtime.background()
@@ -266,30 +309,55 @@ export class PremiumController implements PremiumAccess {
     this.deps.stateChanged(productState(state))
   }
 
-  private disableCapability(state: ProductState): void {
-    const snapshot = capabilitySnapshot(state, false) ?? this.lastCapability
-    if (snapshot === null) return
-    this.lastCapability = { ...snapshot, podcast_subscriptions: false }
-    this.enqueueCapability(this.lastCapability)
+  private disableCapabilities(state: ProductState): void {
+    this.deps.emailSender?.disable()
+    const subscription = subscriptionCapabilitySnapshot(state, false) ?? this.lastCapability
+    const email = emailCapabilitySnapshot(state, false) ?? this.lastEmailCapability
+    if (subscription !== null) this.lastCapability = { ...subscription, podcast_subscriptions: false }
+    if (email !== null) this.lastEmailCapability = { ...email, transcript_email: false }
+    this.enqueueCapabilities(this.lastCapability, this.lastEmailCapability)
   }
 
-  private queueCapability(state: ProductState): void {
-    const snapshot = capabilitySnapshot(state, this.subscriptionsEnabled())
-    if (snapshot === null) return
-    this.lastCapability = snapshot
-    this.enqueueCapability(snapshot, snapshot.podcast_subscriptions)
+  private queueCapabilities(state: ProductState): void {
+    const subscription = subscriptionCapabilitySnapshot(state, this.subscriptionsEnabled())
+    const email = emailCapabilitySnapshot(state, this.emailEnabled())
+    if (subscription === null || email === null) return
+    this.deps.emailSender?.disable()
+    this.lastCapability = subscription
+    this.lastEmailCapability = email
+    this.enqueueCapabilities(
+      subscription,
+      email,
+      subscription.podcast_subscriptions || email.transcript_email
+    )
   }
 
-  private enqueueCapability(snapshot: PremiumCapabilitySnapshot, disableFirst = false): void {
-    if (this.deps.syncCapability === undefined) return
-    const sync = this.deps.syncCapability
+  private enqueueCapabilities(
+    subscription: PremiumCapabilitySnapshot | null,
+    email: EmailCapabilitySnapshot | null,
+    disableFirst = false
+  ): void {
+    if (this.deps.syncCapability === undefined && this.deps.syncEmailCapability === undefined) return
+    const syncSubscription = this.deps.syncCapability
+    const syncEmail = this.deps.syncEmailCapability
     this.capabilityQueue = this.capabilityQueue
       .catch(() => undefined)
       .then(async () => {
-        if (disableFirst) await sync({ ...snapshot, podcast_subscriptions: false })
-        await sync(snapshot)
+        if (disableFirst) {
+          if (email !== null && syncEmail !== undefined) await syncEmail({ ...email, transcript_email: false })
+          if (subscription !== null && syncSubscription !== undefined) await syncSubscription({ ...subscription, podcast_subscriptions: false })
+        }
+        if (email !== null && !email.transcript_email && syncEmail !== undefined) await syncEmail(email)
+        if (subscription !== null && syncSubscription !== undefined) await syncSubscription(subscription)
+        if (email !== null && email.transcript_email && syncEmail !== undefined) await syncEmail(email)
+        if (email?.transcript_email === true && syncEmail !== undefined && this.emailEnabled() && this.emailSubject() === email.subject) {
+          this.deps.emailSender?.enable(email.subject)
+        }
       })
-      .catch(() => { this.deps.capabilitySyncFailed?.() })
+      .catch(() => {
+        this.deps.emailSender?.disable()
+        this.deps.capabilitySyncFailed?.()
+      })
   }
 }
 
@@ -300,6 +368,10 @@ export const disabledPremiumAccess = (): PremiumAccess => ({
   signOut: () => ({ state: 'local', available: false }),
   background: () => ({ state: 'local', available: false }),
   subscriptionsEnabled: () => false,
+  emailEnabled: () => false,
+  emailSubject: () => null,
+  wakeEmailSender: () => undefined,
+  emailUnavailable: () => undefined,
   synchronizeCapability: async () => undefined,
   inventory: async () => null,
   openCta: async () => { throw new Error('ad destination is unavailable') }
@@ -307,11 +379,11 @@ export const disabledPremiumAccess = (): PremiumAccess => ({
 
 function productState(state: ProductState): PremiumProductState {
   if (state.state === 'online-free') return { state: state.state, available: true, expiresAt: state.refreshAfter }
-  if (state.state === 'online-premium') return { state: state.state, available: true, expiresAt: state.refreshAfter, subscriptionsAvailable: state.podcastSubscriptions === true }
+  if (state.state === 'online-premium') return { state: state.state, available: true, expiresAt: state.refreshAfter, subscriptionsAvailable: state.podcastSubscriptions === true, emailAvailable: state.transcriptEmail === true }
   return { state: state.state, available: true }
 }
 
-function capabilitySnapshot(state: ProductState, enabled: boolean): PremiumCapabilitySnapshot | null {
+function subscriptionCapabilitySnapshot(state: ProductState, enabled: boolean): PremiumCapabilitySnapshot | null {
   if (state.state !== 'online-free' && state.state !== 'online-premium') return null
   if (!Number.isSafeInteger(state.entitlementRevision) || !Number.isSafeInteger(state.flagsRevision)) return null
   return {
@@ -320,6 +392,19 @@ function capabilitySnapshot(state: ProductState, enabled: boolean): PremiumCapab
     entitlement_revision: state.entitlementRevision as number,
     flags_revision: state.flagsRevision as number,
     podcast_subscriptions: enabled,
+    expires_at: new Date(state.refreshAfter).toISOString().replace('.000Z', 'Z')
+  }
+}
+
+function emailCapabilitySnapshot(state: ProductState, enabled: boolean): EmailCapabilitySnapshot | null {
+  if (state.state !== 'online-free' && state.state !== 'online-premium') return null
+  if (!Number.isSafeInteger(state.entitlementRevision) || !Number.isSafeInteger(state.flagsRevision)) return null
+  return {
+    schema_version: 1,
+    subject: state.subject,
+    entitlement_revision: state.entitlementRevision as number,
+    flags_revision: state.flagsRevision as number,
+    transcript_email: enabled,
     expires_at: new Date(state.refreshAfter).toISOString().replace('.000Z', 'Z')
   }
 }

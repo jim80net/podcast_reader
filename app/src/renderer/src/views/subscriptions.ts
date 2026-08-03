@@ -1,12 +1,17 @@
 import { el } from '../dom'
 import { hrefFor } from '../router'
-import type { PremiumProductState, SubscriptionSummary } from '../../../shared/ipc'
+import type {
+  EmailPreferenceSummary,
+  PremiumProductState,
+  SubscriptionSummary
+} from '../../../shared/ipc'
 import type { ViewCleanup } from '../store'
 
 export function mountSubscriptions(container: HTMLElement): ViewCleanup {
   let disposed = false
   let state: PremiumProductState = { state: 'local', available: true }
   let subscriptions: SubscriptionSummary[] = []
+  const preferences = new Map<string, EmailPreferenceSummary>()
 
   const status = el('p', { class: 'section-note', attrs: { role: 'status', 'aria-live': 'polite' } })
   const feedUrl = el('input', {
@@ -46,6 +51,13 @@ export function mountSubscriptions(container: HTMLElement): ViewCleanup {
     for (const subscription of subscriptions) {
       const poll = el('button', { text: 'Poll now', attrs: { type: 'button' } })
       const remove = el('button', { text: 'Remove', attrs: { type: 'button' } })
+      const preference = preferences.get(subscription.id)
+      const emailEnabled = preference?.enabled === true
+      const emailToggle = el('input', {
+        attrs: { type: 'checkbox', 'aria-label': `Email each new transcript for ${subscription.title ?? subscription.origin}` }
+      })
+      emailToggle.checked = emailEnabled
+      emailToggle.disabled = !emailPreferenceControls(state, emailEnabled).mutation
       poll.disabled = !enabled()
       remove.disabled = !enabled()
       poll.addEventListener('click', () => {
@@ -64,6 +76,29 @@ export function mountSubscriptions(container: HTMLElement): ViewCleanup {
           if (!disposed) renderList()
         }).catch(() => { if (!disposed) { status.textContent = 'The subscription could not be removed.'; renderList() } })
       })
+      emailToggle.addEventListener('change', () => {
+        const enabled = emailToggle.checked
+        if (!emailPreferenceControls(state, emailEnabled).mutation) {
+          emailToggle.checked = emailEnabled
+          return
+        }
+        emailToggle.disabled = true
+        void window.api.setSubscriptionEmailPreference(subscription.id, enabled).then((next) => {
+          preferences.set(subscription.id, next)
+          if (!disposed) {
+            status.textContent = enabled
+              ? 'New transcripts from this podcast will be emailed to the Captured DEV mailbox.'
+              : 'Transcript email is off for this podcast; unsent subscription deliveries were cancelled.'
+            renderList()
+          }
+        }).catch(() => {
+          if (!disposed) {
+            emailToggle.checked = emailEnabled
+            status.textContent = 'The transcript email preference could not be changed.'
+            renderList()
+          }
+        })
+      })
       const details = [
         subscription.origin,
         subscription.lastCheckedAt === null ? 'Not checked yet' : `Last checked ${formatTime(subscription.lastCheckedAt)}`,
@@ -75,6 +110,17 @@ export function mountSubscriptions(container: HTMLElement): ViewCleanup {
         { class: 'card subscription-card' },
         el('h2', { text: subscription.title ?? subscription.origin }),
         el('p', { class: 'section-note', text: details.join(' · ') }),
+        el(
+          'label',
+          { class: 'subscription-email-toggle' },
+          emailToggle,
+          document.createTextNode(' Email each new transcript')
+        ),
+        el('p', {
+          class: 'section-note email-disclosure',
+          text: 'Each newly completed transcript for this podcast will be uploaded to the premium relay and emailed to the Captured DEV mailbox. The relay does not retain a copy after the delivery attempt; the mailbox retains the email. Existing episodes are not backfilled.'
+        }),
+        el('p', { class: 'section-note', text: emailPreferenceStatus(state, emailEnabled) }),
         el('div', { class: 'button-row' }, poll, remove, el('a', { text: 'Open Library', attrs: { href: hrefFor({ view: 'library' }) } }))
       ))
     }
@@ -98,10 +144,31 @@ export function mountSubscriptions(container: HTMLElement): ViewCleanup {
 
   const unsubscribeState = window.api.onPremiumState((next) => {
     state = next
-    if (!disposed) { renderStatus(); renderList() }
+    if (!disposed) {
+      renderStatus()
+      renderList()
+      void loadPreferences()
+    }
   })
+  const loadPreferences = async (): Promise<void> => {
+    if (state.state !== 'online-free' && state.state !== 'online-premium') return
+    const loaded = await Promise.all(subscriptions.map((subscription) =>
+      window.api.getSubscriptionEmailPreference(subscription.id)
+    ))
+    if (disposed) return
+    for (const preference of loaded) preferences.set(preference.subscriptionId, preference)
+    renderList()
+  }
   void Promise.all([window.api.getPremiumState(), window.api.listSubscriptions()]).then(([next, local]) => {
-    if (!disposed) { state = next; subscriptions = local; renderStatus(); renderList() }
+    if (!disposed) {
+      state = next
+      subscriptions = local
+      renderStatus()
+      renderList()
+      void loadPreferences().catch(() => {
+        if (!disposed) status.textContent = 'Email preferences are temporarily unavailable.'
+      })
+    }
   }).catch(() => { if (!disposed) { status.textContent = 'The local subscription list is unavailable.'; feedUrl.disabled = true; add.disabled = true } })
   renderStatus()
   renderList()
@@ -122,6 +189,32 @@ export function subscriptionStatus(state: PremiumProductState): string {
   if (state.state === 'online-unavailable') return 'Online features are unavailable. Subscription polling is paused; your local list is retained.'
   if (!state.subscriptionsAvailable) return 'Podcast subscriptions are not enabled for this premium account.'
   return 'Premium subscription polling is active while the app and account status are current.'
+}
+
+export function emailPreferenceControls(
+  state: PremiumProductState,
+  currentlyEnabled: boolean
+): { mutation: boolean } {
+  return {
+    mutation: currentlyEnabled ||
+      (state.state === 'online-premium' && state.emailAvailable)
+  }
+}
+
+export function emailPreferenceStatus(
+  state: PremiumProductState,
+  currentlyEnabled: boolean
+): string {
+  if (currentlyEnabled && (state.state !== 'online-premium' || !state.emailAvailable)) {
+    return 'Email delivery is paused. You can still turn this preference off.'
+  }
+  if (!state.available || state.state === 'local') return 'Connect an account to email transcripts.'
+  if (state.state === 'online-free') return 'Transcript email requires premium.'
+  if (state.state === 'online-unavailable') return 'Email delivery is paused while account status is unavailable.'
+  if (!state.emailAvailable) return 'Transcript email is not enabled for this premium account.'
+  return currentlyEnabled
+    ? 'Only future completions under this consent are queued; existing episodes are not backfilled.'
+    : 'Off for this podcast.'
 }
 
 function formatTime(value: string): string {

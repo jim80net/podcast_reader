@@ -23,6 +23,16 @@ def test_premium_service_is_absent_from_local_engine_and_desktop_dependency_clos
         desktop_root / "main" / "index.ts",
         desktop_root / "main" / "ipc.ts",
         desktop_root / "main" / "ipc.test.ts",
+        # Issue #122 admits the main-only relay/engine sender bridge.
+        desktop_root / "main" / "email-sender.ts",
+        # Issue #122 admits the sender's frozen-contract and fail-closed proof.
+        desktop_root / "main" / "email-sender.test.ts",
+        # Issue #122 admits the minimized email status/intent mapper.
+        desktop_root / "main" / "email-control.ts",
+        # Issue #122 admits the IPC subject-derivation and double-click proof.
+        desktop_root / "main" / "email-ipc.test.ts",
+        # Issue #122 admits the frozen engine/relay wire validators.
+        desktop_root / "main" / "email-contracts.ts",
         # Issue #121 admits the main-process subscription gate and its boundary proof.
         desktop_root / "main" / "subscriptions.ts",
         desktop_root / "main" / "subscriptions-ipc.test.ts",
@@ -36,6 +46,8 @@ def test_premium_service_is_absent_from_local_engine_and_desktop_dependency_clos
         # Issue #121 admits the renderer subscription state projection and its reducer proof.
         desktop_root / "renderer" / "src" / "views" / "subscriptions.ts",
         desktop_root / "renderer" / "src" / "subscriptions-view.test.ts",
+        # Issue #122 admits the renderer's manual-email three-state reducer proof.
+        desktop_root / "renderer" / "src" / "reader-email.test.ts",
     }
     desktop_sources = [
         path

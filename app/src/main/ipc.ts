@@ -1,3 +1,5 @@
+import { randomBytes } from 'node:crypto'
+
 import { CHANNELS } from '../shared/ipc'
 import type { EngineManager } from './engine-manager'
 import type { PrivateWebController } from './private-web'
@@ -7,6 +9,8 @@ import type { SettingsUpdate } from '../shared/types'
 import { disabledPremiumAccess } from './premium/controller'
 import type { PremiumAccess } from './premium/controller'
 import { publicPollResult, publicSubscription, subscriptionError, validateFeedUrlInput, validateSubscriptionId } from './subscriptions'
+import { emailRequestError, publicEmailPreference, publicEmailStatus, validateEmailSourceId } from './email-control'
+import type { EmailDeliverySummary } from '../shared/ipc'
 
 /**
  * Main-process side of the typed IPC surface (design decision 4): each
@@ -49,6 +53,7 @@ export function registerIpcHandlers(
     if (c === null) throw new Error('engine is not ready')
     return c
   }
+  const manualEmailInFlight = new Map<string, Promise<EmailDeliverySummary>>()
 
   ipcMain.handle(CHANNELS.engineGetStatus, () => manager.status)
   ipcMain.handle(CHANNELS.keysStorageMode, () => manager.keyStorageMode)
@@ -146,6 +151,49 @@ export function registerIpcHandlers(
     if (!premium.subscriptionsEnabled()) throw new Error('premium_feature_unavailable')
     try { await client().deleteSubscription(validateSubscriptionId(subscriptionId)) }
     catch (error) { throw subscriptionError(error) }
+  })
+  ipcMain.handle(CHANNELS.emailPreferenceGet, async (_e, subscriptionId: unknown) => {
+    const id = validateSubscriptionId(subscriptionId)
+    const subject = premium.emailSubject()
+    if (subject === null) return { subscriptionId: id, enabled: false, consentRevision: 0 }
+    try { return publicEmailPreference(await client().getEmailPreference(id, subject)) }
+    catch (error) { throw emailRequestError(error) }
+  })
+  ipcMain.handle(CHANNELS.emailPreferenceSet, async (_e, subscriptionId: unknown, enabled: unknown) => {
+    const id = validateSubscriptionId(subscriptionId)
+    if (typeof enabled !== 'boolean') throw new Error('invalid_email_preference')
+    if (enabled && !premium.emailEnabled()) throw new Error('premium_feature_unavailable')
+    const subject = premium.emailSubject()
+    if (subject === null) throw new Error('email_account_unavailable')
+    try {
+      const result = publicEmailPreference(await client().setEmailPreference(id, subject, enabled))
+      if (enabled) premium.wakeEmailSender()
+      return result
+    } catch (error) { throw emailRequestError(error) }
+  })
+  ipcMain.handle(CHANNELS.emailManualCreate, (_e, sourceId: unknown) => {
+    if (!premium.emailEnabled()) throw new Error('premium_feature_unavailable')
+    const source = validateEmailSourceId(sourceId)
+    const existing = manualEmailInFlight.get(source)
+    if (existing !== undefined) return existing
+    const actionId = `act_${randomBytes(18).toString('base64url')}`
+    const operation = client().createManualEmail(actionId, source)
+      .then((value) => {
+        const result = publicEmailStatus(value)
+        premium.wakeEmailSender()
+        return result
+      })
+      .catch((error: unknown) => { throw emailRequestError(error) })
+      .finally(() => {
+        if (manualEmailInFlight.get(source) === operation) manualEmailInFlight.delete(source)
+      })
+    manualEmailInFlight.set(source, operation)
+    return operation
+  })
+  ipcMain.handle(CHANNELS.emailOutboxList, async () => {
+    if (premium.emailSubject() === null) return []
+    try { return (await client().listEmailOutbox()).map(publicEmailStatus) }
+    catch (error) { throw emailRequestError(error) }
   })
 
   ipcMain.handle(CHANNELS.updateGetStatus, () => updates.status())

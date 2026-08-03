@@ -1,4 +1,16 @@
 import { SseParser } from './sse'
+import {
+  validateEmailClaim,
+  validateEmailOutboxStatus,
+  validateEmailPreference
+} from './email-contracts'
+import type {
+  EmailCapabilitySnapshot,
+  EmailClaim,
+  EmailDeliveryErrorCode,
+  EmailOutboxStatusWire,
+  EmailPreferenceWire
+} from './email-contracts'
 import type {
   CookieJarInfo,
   EngineSettings,
@@ -200,6 +212,71 @@ export class EngineClient {
     return this.request('PUT', '/v1/online-capabilities', snapshot).then(() => undefined)
   }
 
+  updateEmailCapability(snapshot: EmailCapabilitySnapshot): Promise<void> {
+    return this.request('PUT', '/v1/email/online-capability', snapshot).then(() => undefined)
+  }
+
+  async getEmailPreference(subscriptionId: string, subject: string): Promise<EmailPreferenceWire> {
+    const value = await this.json(
+      'GET',
+      `/v1/subscriptions/${encodeURIComponent(subscriptionId)}/email-preference?subject=${encodeURIComponent(subject)}`
+    )
+    return validateEmailPreference(value)
+  }
+
+  async setEmailPreference(
+    subscriptionId: string,
+    subject: string,
+    enabled: boolean
+  ): Promise<EmailPreferenceWire> {
+    const value = await this.json(
+      'PUT',
+      `/v1/subscriptions/${encodeURIComponent(subscriptionId)}/email-preference`,
+      { schema_version: 1, subject, enabled }
+    )
+    return validateEmailPreference(value)
+  }
+
+  async createManualEmail(actionId: string, sourceId: string): Promise<EmailOutboxStatusWire> {
+    const value = await this.json('POST', '/v1/email-outbox/manual', {
+      schema_version: 1,
+      action_id: actionId,
+      source_id: sourceId
+    })
+    return validateEmailOutboxStatus(value)
+  }
+
+  async listEmailOutbox(): Promise<EmailOutboxStatusWire[]> {
+    const value = await this.json<unknown>('GET', '/v1/email-outbox')
+    if (!Array.isArray(value) || value.length > 10_000) throw new Error('invalid email outbox list')
+    return value.map(validateEmailOutboxStatus)
+  }
+
+  async claimEmailDelivery(): Promise<EmailClaim | null> {
+    const response = await this.request('POST', '/v1/email-outbox/claim')
+    if (response.status === 204) return null
+    return validateEmailClaim(await readBoundedJson(response, 3 * 1024 * 1024 + 4096))
+  }
+
+  async completeEmailDelivery(body: {
+    schema_version: 1
+    client_delivery_id: string
+    claim_generation: number
+    delivery_id: string
+    delivered_at: string
+  }): Promise<EmailOutboxStatusWire> {
+    return validateEmailOutboxStatus(await this.json('POST', '/v1/email-outbox/complete', body))
+  }
+
+  async releaseEmailDelivery(body: {
+    schema_version: 1
+    client_delivery_id: string
+    claim_generation: number
+    error_code: EmailDeliveryErrorCode
+  }): Promise<EmailOutboxStatusWire> {
+    return validateEmailOutboxStatus(await this.json('POST', '/v1/email-outbox/release', body))
+  }
+
   listSubscriptions(): Promise<EngineSubscriptionRecord[]> {
     return this.json('GET', '/v1/subscriptions')
   }
@@ -248,6 +325,30 @@ export class EngineClient {
     if (!res.ok) throw new EngineRequestError(res.status, await readDetail(res))
     return res
   }
+}
+
+async function readBoundedJson(response: Response, maximumBytes: number): Promise<unknown> {
+  if (response.body === null) throw new Error('empty engine response')
+  const reader = response.body.getReader()
+  const chunks: Uint8Array[] = []
+  let size = 0
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    if (size + value.byteLength > maximumBytes) {
+      await reader.cancel()
+      throw new Error('engine response too large')
+    }
+    size += value.byteLength
+    chunks.push(value)
+  }
+  const body = new Uint8Array(size)
+  let offset = 0
+  for (const chunk of chunks) {
+    body.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+  return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(body)) as unknown
 }
 
 async function readDetail(res: Response): Promise<string> {

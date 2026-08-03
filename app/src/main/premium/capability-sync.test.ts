@@ -12,13 +12,16 @@ const premium: ProductState = {
   refreshAfter: Date.parse('2026-08-03T00:05:00Z'),
   entitlementRevision: 7,
   flagsRevision: 12,
-  podcastSubscriptions: true
+  podcastSubscriptions: true,
+  transcriptEmail: true
 }
 
 describe('PremiumController capability handoff', () => {
   it('disables first, then sends the exact memory snapshot, and clears on sign-out', async () => {
     let state: ProductState = { state: 'local' }
     const snapshots: unknown[] = []
+    const emailSnapshots: unknown[] = []
+    const sender = { enable: vi.fn(), disable: vi.fn(), wake: vi.fn() }
     const runtime = {
       get state() { return state },
       get bearer() { return null },
@@ -38,6 +41,8 @@ describe('PremiumController capability handoff', () => {
       schedule: () => 1 as unknown as ReturnType<typeof setTimeout>,
       cancel: vi.fn(),
       syncCapability: async (snapshot) => { snapshots.push(snapshot) },
+      syncEmailCapability: async (snapshot) => { emailSnapshots.push(snapshot) },
+      emailSender: sender,
       capabilitySyncFailed: vi.fn()
     })
 
@@ -47,10 +52,18 @@ describe('PremiumController capability handoff', () => {
       { schema_version: 1, subject: 'usr_premium', entitlement_revision: 7, flags_revision: 12, podcast_subscriptions: false, expires_at: '2026-08-03T00:05:00Z' },
       { schema_version: 1, subject: 'usr_premium', entitlement_revision: 7, flags_revision: 12, podcast_subscriptions: true, expires_at: '2026-08-03T00:05:00Z' }
     ])
+    expect(emailSnapshots.slice(0, 2)).toEqual([
+      { schema_version: 1, subject: 'usr_premium', entitlement_revision: 7, flags_revision: 12, transcript_email: false, expires_at: '2026-08-03T00:05:00Z' },
+      { schema_version: 1, subject: 'usr_premium', entitlement_revision: 7, flags_revision: 12, transcript_email: true, expires_at: '2026-08-03T00:05:00Z' }
+    ])
+    expect(sender.enable).toHaveBeenCalledWith('usr_premium')
     controller.signOut()
     await controller.synchronizeCapability()
     expect(snapshots.at(-1)).toMatchObject({ podcast_subscriptions: false })
+    expect(emailSnapshots.at(-1)).toMatchObject({ transcript_email: false })
+    expect(sender.disable).toHaveBeenCalled()
     expect(controller.subscriptionsEnabled()).toBe(false)
+    expect(controller.emailEnabled()).toBe(false)
   })
 
   it('never sends an enabling snapshot when the preceding disable fails', async () => {
