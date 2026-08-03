@@ -9,6 +9,7 @@ on:
       - "src/podcast_reader/engine/app.py"
       - "src/podcast_reader/types.py"
       - "services/premium/contracts/**"
+      - "services/premium/src/podcast_reader_premium/boundary_*.py"
   pull_request:
     paths:
       - "android/**"
@@ -16,6 +17,7 @@ on:
       - "src/podcast_reader/engine/app.py"
       - "src/podcast_reader/types.py"
       - "services/premium/contracts/**"
+      - "services/premium/src/podcast_reader_premium/boundary_*.py"
   workflow_dispatch:
 
 permissions:
@@ -44,6 +46,9 @@ jobs:
         working-directory: .
       - name: Engine contract fixture parity
         run: uv run python scripts/check_engine_contract_fixtures.py
+      - name: Cross-product boundary policy
+        run: uv run --python 3.12 python -m podcast_reader_premium.boundary_policy --check
+        working-directory: services/premium
       - name: House-ad containment policy
         run: python3 scripts/check_ad_containment.py
       - name: Frozen ad consumer handoff parity

@@ -137,3 +137,43 @@ def test_copy_declaration_cannot_name_a_claim_absent_from_projections() -> None:
     claim_ids.append("zzzz.missing-claim")
     with pytest.raises(PolicyError, match="copy declarations must cover every projected claim"):
         _validate(value)
+
+
+def test_android_resolved_production_dependency_has_a_negative_mutation() -> None:
+    value = copy.deepcopy(_inventory())
+    android = value["android"]
+    assert isinstance(android, dict)
+    dependencies = android["production_dependencies"]
+    assert isinstance(dependencies, list)
+    dependencies.append("zzzz.example:undeclared-network-sdk:1.0.0")
+    with pytest.raises(PolicyError, match="inventory drift"):
+        _validate(value)
+
+
+def test_android_network_owner_has_a_negative_mutation() -> None:
+    value = copy.deepcopy(_inventory())
+    android = value["android"]
+    assert isinstance(android, dict)
+    owners = android["network_owners"]
+    assert isinstance(owners, list)
+    owners.append(
+        {
+            "item": "zzzz-new-android-network-owner.kt",
+            "operation_ids": ["android.engine.health"],
+        }
+    )
+    with pytest.raises(PolicyError, match="inventory drift"):
+        _validate(value)
+
+
+def test_android_network_owner_cannot_name_an_unprojected_operation() -> None:
+    value = copy.deepcopy(_inventory())
+    android = value["android"]
+    assert isinstance(android, dict)
+    owners = android["network_owners"]
+    assert isinstance(owners, list)
+    first = owners[0]
+    assert isinstance(first, dict)
+    first["operation_ids"] = ["desktop.engine.control"]
+    with pytest.raises(PolicyError, match="absent from the Android projection"):
+        _validate(value)

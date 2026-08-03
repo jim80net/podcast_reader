@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "contract": "podcast-reader-boundary-policy",
-  "policy_revision": 2,
+  "policy_revision": 3,
   "data_classes": [
     {"id": "content.audio", "sensitivity": "user-content", "description": "User-selected media bytes or samples."},
     {"id": "content.reversible-derivative", "sensitivity": "user-content", "description": "Embeddings or other representations from which transcript content can be recovered."},
@@ -115,7 +115,7 @@
       {"path": "src", "surface": "backend", "kind": "product-service", "network_capable": true, "admitting_issue": "https://github.com/jim80net/podcast_reader/issues/152"}
     ],
     "surfaces": {
-      "android": {"projection": "projection-android-v1.json", "checker_ids": ["android.dependency-allowlist", "android.network-owner-inventory", "android.policy-projection"], "consuming_tests": ["android/app/src/test/java/net/jim80/podcastreader/core/premium/EntitlementContractTest.kt", "services/premium/tests/test_boundary_policy.py"]},
+      "android": {"projection": "projection-android-v1.json", "checker_ids": ["android.dependency-allowlist", "android.network-owner-inventory", "android.policy-projection"], "consuming_tests": ["android/app/src/test/java/net/jim80/podcastreader/core/premium/EntitlementContractTest.kt", "android/app/src/test/java/net/jim80/podcastreader/policy/BoundaryPolicyContractTest.kt", "services/premium/tests/test_boundary_policy.py"]},
       "backend": {"projection": "projection-backend-v1.json", "checker_ids": ["backend.network-owner-inventory", "backend.persistence-inventory", "backend.policy-projection", "backend.route-inventory"], "consuming_tests": ["services/premium/tests/test_boundary_inventory.py", "services/premium/tests/test_boundary_policy.py", "services/premium/tests/test_email_delivery.py", "tests/engine/test_app.py"]},
       "desktop": {"projection": "projection-desktop-v1.json", "checker_ids": ["desktop.ipc-inventory", "desktop.network-owner-inventory", "desktop.policy-projection", "desktop.secret-zone"], "consuming_tests": ["app/tests/e2e/isolation.spec.ts", "services/premium/tests/test_boundary_inventory.py", "services/premium/tests/test_boundary_policy.py"]},
       "extension": {"projection": "projection-extension-v1.json", "checker_ids": ["extension.manifest-inventory", "extension.policy-projection", "extension.route-inventory", "extension.storage-zone"], "consuming_tests": ["extension/src/client.test.ts", "extension/src/storage.test.ts", "services/premium/tests/test_boundary_inventory.py", "services/premium/tests/test_boundary_policy.py"]},
