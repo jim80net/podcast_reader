@@ -88,6 +88,15 @@ for marker in "${markers[@]}"; do
     fi
 done
 
+if [[ $collection_status -ne 0 ]]; then
+    purge_upload_roots
+    echo "::error::Android acceptance evidence was incomplete or could not be fully swept"
+    if [[ $gradle_status -ne 0 ]]; then
+        exit "$gradle_status"
+    fi
+    exit "$collection_status"
+fi
+
 printf 'Android K4 sweep passed: %s full/prefix markers absent from device evidence\n' "${#markers[@]}"
 : > "$evidence_dir/SAFE_TO_UPLOAD"
 if [[ $gradle_status -ne 0 ]]; then
