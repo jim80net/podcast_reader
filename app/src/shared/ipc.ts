@@ -46,6 +46,11 @@ export const CHANNELS = {
   firstRunComplete: 'first-run:complete',
   privateWebGetStatus: 'private-web:get-status',
   privateWebSetEnabled: 'private-web:set-enabled',
+  premiumGetState: 'premium:get-state',
+  premiumConnect: 'premium:connect',
+  premiumSignOut: 'premium:sign-out',
+  premiumInventory: 'premium:inventory',
+  premiumOpenCta: 'premium:open-cta',
   pairStart: 'pair:start',
   cookiesList: 'cookies:list',
   cookiesDelete: 'cookies:delete',
@@ -67,7 +72,10 @@ export const PUSH_CHANNELS = {
   /** Auto-update lifecycle (UpdateStatus) from the main-process UpdaterController. */
   updateStatus: 'update:status',
   /** Managed tailnet transport lifecycle. */
-  privateWebStatus: 'private-web:status'
+  privateWebStatus: 'private-web:status',
+  /** Premium truth or inventory was evicted; mounted slots must collapse immediately. */
+  premiumInvalidated: 'premium:invalidated',
+  premiumState: 'premium:state'
 } as const
 
 export type EngineStatus =
@@ -111,6 +119,21 @@ export type PrivateWebStatus =
   | { state: 'ready'; url: string }
   | { state: 'conflict'; message: string }
   | { state: 'error'; message: string }
+
+export type PremiumProductState =
+  | { state: 'local'; available: boolean }
+  | { state: 'online-unavailable'; available: true }
+  | { state: 'online-free'; available: true; expiresAt: number }
+  | { state: 'online-premium'; available: true; expiresAt: number }
+
+export type PremiumAdSlot = 'library' | 'reader'
+
+/** Credential-free, presentation-only house creative. */
+export interface PremiumAdInventory {
+  slot: PremiumAdSlot
+  expiresAt: number
+  creative: { title: string; body: string; ctaUrl: string }
+}
 
 /** The `jobs:submit` request — one shared shape for the renderer call and the main handler. */
 export interface SubmitJobRequest {
@@ -173,6 +196,11 @@ export interface PodcastReaderApi {
   markFirstRunComplete(): Promise<void>
   getPrivateWebStatus(): Promise<PrivateWebStatus>
   setPrivateWebEnabled(enabled: boolean): Promise<PrivateWebStatus>
+  getPremiumState(): Promise<PremiumProductState>
+  connectPremiumAccount(): Promise<PremiumProductState>
+  signOutPremiumAccount(): Promise<PremiumProductState>
+  getPremiumInventory(slot: PremiumAdSlot): Promise<PremiumAdInventory | null>
+  openPremiumCta(slot: PremiumAdSlot, url: string): Promise<void>
   /** Mint an extension pairing code (engine `POST /v1/pair`) plus the engine port. */
   startPairing(): Promise<PairingDisplay>
   /** Captured cookie-jar metadata (`GET /v1/cookies`) — domains and dates, never values. */
@@ -191,4 +219,6 @@ export interface PodcastReaderApi {
   onProtocolRequest(listener: (job: JobRecord) => void): () => void
   onUpdateStatus(listener: (status: UpdateStatus) => void): () => void
   onPrivateWebStatus(listener: (status: PrivateWebStatus) => void): () => void
+  onPremiumInvalidated(listener: () => void): () => void
+  onPremiumState(listener: (state: PremiumProductState) => void): () => void
 }

@@ -3,6 +3,7 @@ import { extractEngineDetail } from '../engine-error'
 import { mediaTerminalState } from '../media-events'
 import { createMediaPlayer } from '../media-player'
 import { createSyncBridge } from '../sync-bridge'
+import { mountPremiumAdSlot } from '../premium-ad-slot'
 import type { MediaPlayer } from '../media-player'
 import type { ViewCleanup } from '../store'
 import type { SyncBridge } from '../sync-bridge'
@@ -35,6 +36,7 @@ export function mountReader(container: HTMLElement, sourceId: string): ViewClean
   frame.hidden = true
   const mediaSlot = el('div', { class: 'media-slot' })
   const readerBody = el('div', { class: 'reader-body' }, mediaSlot, frame)
+  const adSlot = el('div', { class: 'house-ad-slot', attrs: { 'data-slot': 'reader' } })
   // A permanent video toggle (shown only once a player exists): always visible
   // so the user can hide/show the video at will. The choice persists ("doesn't
   // use the video" sticks across episodes and launches).
@@ -52,11 +54,13 @@ export function mountReader(container: HTMLElement, sourceId: string): ViewClean
   container.append(
     el('div', { class: 'reader-toolbar' }, mediaToggle),
     status,
+    adSlot,
     // Side-by-side: the player docks in a left column and the transcript fills
     // the rest at full height (stacks on narrow windows). An empty media slot
     // collapses, so a transcript-only Reader uses the full width.
     readerBody
   )
+  const cleanupAd = mountPremiumAdSlot(adSlot, 'reader')
 
   let disposed = false
   let player: MediaPlayer | null = null
@@ -191,6 +195,7 @@ export function mountReader(container: HTMLElement, sourceId: string): ViewClean
     disposed = true
     window.removeEventListener('pr-theme-change', onThemeChange)
     teardownPlayer()
+    cleanupAd()
   }
 }
 

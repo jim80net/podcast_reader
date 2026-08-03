@@ -15,6 +15,9 @@ export class PremiumTransport {
   async pollDeviceToken(deviceCode: string): Promise<TokenPair> { return validateTokenPair(await this.request('/v1/device-authorizations/token', { method: 'POST', body: JSON.stringify({ device_code: deviceCode }) })) }
   async refresh(refreshToken: string): Promise<TokenPair> { return validateTokenPair(await this.request('/v1/tokens/refresh', { method: 'POST', body: JSON.stringify({ refresh_token: refreshToken }) })) }
   entitlement(accessToken: string): Promise<unknown> { return this.request('/v1/me/entitlements', { headers: { Authorization: `Bearer ${accessToken}` } }) }
+  inventory(slot: 'library' | 'reader', accessToken: string): Promise<unknown | null> {
+    return this.requestInventory(`/v1/ads/inventory/${slot}`, accessToken)
+  }
   ownsExternalUrl(url: string): boolean { return this.origin.owns(url) }
 
   private async request<T>(path: string, init: RequestInit): Promise<T> {
@@ -33,6 +36,27 @@ export class PremiumTransport {
       throw new PremiumRequestError(response.status, code)
     }
     return JSON.parse(text) as T
+  }
+
+  private async requestInventory(path: string, accessToken: string): Promise<unknown | null> {
+    const response = await this.fetchFn(this.origin.resolve(path), {
+      redirect: 'error',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+      referrerPolicy: 'no-referrer',
+      credentials: 'omit',
+      signal: AbortSignal.timeout(15_000)
+    })
+    const text = await readBoundedBody(response)
+    if (response.status === 204) {
+      if (text !== '') throw new Error('invalid premium response')
+      return null
+    }
+    if (!response.ok) {
+      let code = 'request_failed'
+      try { const parsed = JSON.parse(text) as { code?: unknown }; if (typeof parsed.code === 'string') code = parsed.code } catch { /* bounded generic error */ }
+      throw new PremiumRequestError(response.status, code)
+    }
+    return JSON.parse(text) as unknown
   }
 }
 

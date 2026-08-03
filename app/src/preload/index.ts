@@ -5,6 +5,7 @@ import type {
   EngineStatus,
   PodcastReaderApi,
   PrivateWebStatus,
+  PremiumProductState,
   UpdateStatus
 } from '../shared/ipc'
 import type { JobRecord, PipelineEvent, SettingsUpdate } from '../shared/types'
@@ -47,6 +48,11 @@ const api: PodcastReaderApi = {
   markFirstRunComplete: () => ipcRenderer.invoke(CHANNELS.firstRunComplete),
   getPrivateWebStatus: () => ipcRenderer.invoke(CHANNELS.privateWebGetStatus),
   setPrivateWebEnabled: (enabled) => ipcRenderer.invoke(CHANNELS.privateWebSetEnabled, enabled),
+  getPremiumState: () => ipcRenderer.invoke(CHANNELS.premiumGetState),
+  connectPremiumAccount: () => ipcRenderer.invoke(CHANNELS.premiumConnect),
+  signOutPremiumAccount: () => ipcRenderer.invoke(CHANNELS.premiumSignOut),
+  getPremiumInventory: (slot) => ipcRenderer.invoke(CHANNELS.premiumInventory, slot),
+  openPremiumCta: (slot, url) => ipcRenderer.invoke(CHANNELS.premiumOpenCta, slot, url),
   startPairing: () => ipcRenderer.invoke(CHANNELS.pairStart),
   listCookieJars: () => ipcRenderer.invoke(CHANNELS.cookiesList),
   deleteCookieJar: (domain) => ipcRenderer.invoke(CHANNELS.cookiesDelete, domain),
@@ -65,7 +71,11 @@ const api: PodcastReaderApi = {
   onUpdateStatus: (listener: (status: UpdateStatus) => void) =>
     subscribe(PUSH_CHANNELS.updateStatus, listener),
   onPrivateWebStatus: (listener: (status: PrivateWebStatus) => void) =>
-    subscribe(PUSH_CHANNELS.privateWebStatus, listener)
+    subscribe(PUSH_CHANNELS.privateWebStatus, listener),
+  onPremiumInvalidated: (listener: () => void) =>
+    subscribe(PUSH_CHANNELS.premiumInvalidated, listener),
+  onPremiumState: (listener: (state: PremiumProductState) => void) =>
+    subscribe(PUSH_CHANNELS.premiumState, listener)
 }
 
 contextBridge.exposeInMainWorld('api', api)

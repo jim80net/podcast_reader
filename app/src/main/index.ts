@@ -15,6 +15,12 @@ import { RespawnPolicy } from './respawn-policy'
 import { registerIpcHandlers } from './ipc'
 import { createMediaProtocolHandler } from './media-protocol'
 import { PrivateWebController } from './private-web'
+import { PremiumController, disabledPremiumAccess } from './premium/controller'
+import { PremiumCredentialStore } from './premium/credentials'
+import { PremiumDeviceFlow } from './premium/device-flow'
+import { PremiumOrigin } from './premium/origin'
+import { PremiumRuntime } from './premium/runtime'
+import { PremiumTransport } from './premium/transport'
 import { parseProtocolUrl, selectProtocolArgv } from './protocol'
 import { pidIsAlive } from './quit'
 import { ServeOwnershipJournal } from './serve-journal'
@@ -24,6 +30,7 @@ import { BUILD_SIGNED, UpdaterController, updaterGate } from './updater'
 import { KeyVault } from './vault'
 import { PUSH_CHANNELS } from '../shared/ipc'
 import type { UpdaterAccess } from './ipc'
+import type { PremiumAccess } from './premium/controller'
 import type { UpdateStatus } from '../shared/ipc'
 
 /**
@@ -60,6 +67,7 @@ let manager: EngineManager | null = null
 let mainWindow: BrowserWindow | null = null
 let quitting = false
 let updater: UpdaterController | null = null
+let premium: PremiumAccess = disabledPremiumAccess()
 let updaterDisabled: UpdateStatus = { state: 'disabled', reason: 'updater not initialized' }
 
 // Test seam: an explicit userData override keeps the vault and the
@@ -134,6 +142,7 @@ async function start(): Promise<void> {
   })
 
   const appConfig = new AppConfigStore(join(app.getPath('userData'), 'app-config.json'), log)
+  premium = setupPremium()
   const serveManager = new ServeManager(
     defaultServeManagerDeps({
       journal: new ServeOwnershipJournal(
@@ -171,7 +180,7 @@ async function start(): Promise<void> {
     privateWeb,
     log
   })
-  registerIpcHandlers(ipcMain, manager, setupUpdater(), appConfig, privateWeb)
+  registerIpcHandlers(ipcMain, manager, setupUpdater(), appConfig, privateWeb, premium)
 
   // Install the app://media handler now that the engine manager (token source)
   // exists. The handler reads loopback coordinates lazily on each request, so
@@ -181,11 +190,44 @@ async function start(): Promise<void> {
   protocol.handle(MEDIA_SCHEME, (request) => mediaHandler(request))
 
   createWindow()
+  void premium.restore().catch(() => log('premium account restore failed'))
   await manager.start()
 
   // Windows cold-start protocol launch: the URL arrives in our own argv.
   const raw = selectProtocolArgv(process.argv)
   if (raw !== null) void handleProtocolUrl(raw)
+}
+
+function setupPremium(): PremiumAccess {
+  const configuredOrigin = process.env['PODCAST_READER_PREMIUM_ORIGIN']
+  if (configuredOrigin === undefined || configuredOrigin === '') return disabledPremiumAccess()
+  try {
+    const transport = new PremiumTransport(PremiumOrigin.fromTrustedConfiguration(configuredOrigin))
+    const credentials = new PremiumCredentialStore(
+      join(app.getPath('userData'), 'premium-account.json'),
+      safeStorage
+    )
+    const runtime = new PremiumRuntime(transport, credentials)
+    const deviceFlow = new PremiumDeviceFlow(transport, {
+      openExternal: (url) => shell.openExternal(url),
+      sleep: (milliseconds) => new Promise((resolveSleep) => setTimeout(resolveSleep, milliseconds)),
+      now: Date.now
+    })
+    return new PremiumController({
+      runtime,
+      transport,
+      deviceFlow,
+      openExternal: (url) => shell.openExternal(url),
+      invalidated: () => broadcast(PUSH_CHANNELS.premiumInvalidated, null),
+      stateChanged: (state) => broadcast(PUSH_CHANNELS.premiumState, state),
+      now: Date.now,
+      schedule: (callback, milliseconds) => setTimeout(callback, milliseconds),
+      cancel: clearTimeout
+    })
+  } catch {
+    log('premium account origin rejected; online account features disabled')
+    return disabledPremiumAccess()
+  }
 }
 
 // ---- auto-update (design decisions 9, 10) -----------------------------------
@@ -267,6 +309,7 @@ function createWindow(): void {
   mainWindow.on('closed', () => {
     mainWindow = null
   })
+  mainWindow.on('blur', () => { premium.background() })
 
   // External links (the "Watch on YouTube" fallback, provider key-docs links)
   // open in the OS default browser — where the user is logged in — never a

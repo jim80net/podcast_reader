@@ -3,6 +3,7 @@ import { emptyLibraryState } from '../empty-state'
 import { extractEngineDetail } from '../engine-error'
 import { formatDate, sourceLabel } from '../job-view'
 import { LatestGate } from '../latest-gate'
+import { mountPremiumAdSlot } from '../premium-ad-slot'
 import { hrefFor } from '../router'
 import type { ViewCleanup } from '../store'
 import type { LibraryEntry, LibrarySearchResult } from '../../../shared/types'
@@ -44,7 +45,9 @@ export function mountLibrary(container: HTMLElement): ViewCleanup {
     el('div', { class: 'library-search-controls' }, searchInput, clearSearch),
     searchStatus
   )
-  container.append(el('h2', { text: 'Library' }), search, status, list)
+  const adSlot = el('div', { class: 'house-ad-slot', attrs: { 'data-slot': 'library' } })
+  container.append(el('h2', { text: 'Library' }), search, status, adSlot, list)
+  const cleanupAd = mountPremiumAdSlot(adSlot, 'library')
 
   let disposed = false
   // load() fires from several triggers (mount, job_done, hydration, engine
@@ -57,6 +60,7 @@ export function mountLibrary(container: HTMLElement): ViewCleanup {
 
   async function load(): Promise<void> {
     cancelSearch()
+    cleanupAd()
     const isLatest = gate.next()
     try {
       const loadedEntries = await window.api.listLibrary()
