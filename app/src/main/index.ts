@@ -10,6 +10,7 @@ import { YOUTUBE_REFERER, YOUTUBE_URL_FILTER, isExternalWebUrl } from './externa
 import { resolveDataDir } from './data-dir'
 import { defaultSupervisorDeps, ensureEngine } from './engine'
 import { EngineClient, EventStream } from './engine-client'
+import { EmailSender } from './email-sender'
 import { EngineManager } from './engine-manager'
 import { RespawnPolicy } from './respawn-policy'
 import { registerIpcHandlers } from './ipc'
@@ -218,7 +219,26 @@ function setupPremium(): PremiumAccess {
       sleep: (milliseconds) => new Promise((resolveSleep) => setTimeout(resolveSleep, milliseconds)),
       now: Date.now
     })
-    return new PremiumController({
+    let controller: PremiumController | null = null
+    const emailSender = new EmailSender({
+      engine: () => manager?.client ?? null,
+      authorization: () => {
+        const state = runtime.state
+        const bearer = runtime.bearer
+        if (
+          state.state !== 'online-premium' ||
+          state.transcriptEmail !== true ||
+          state.refreshAfter <= Date.now() ||
+          bearer === null
+        ) return null
+        return { subject: state.subject, bearer }
+      },
+      transport,
+      unavailable: () => controller?.emailUnavailable(),
+      schedule: (callback, milliseconds) => setTimeout(callback, milliseconds),
+      cancel: clearTimeout
+    })
+    controller = new PremiumController({
       runtime,
       transport,
       deviceFlow,
@@ -229,6 +249,11 @@ function setupPremium(): PremiumAccess {
         const client = manager?.client
         if (client !== null && client !== undefined) await client.updateOnlineCapabilities(snapshot)
       },
+      syncEmailCapability: async (snapshot) => {
+        const client = manager?.client
+        if (client !== null && client !== undefined) await client.updateEmailCapability(snapshot)
+      },
+      emailSender,
       capabilitySyncFailed: () => {
         log('online capability synchronization failed; restarting engine fail-closed')
         void manager?.restart()
@@ -237,6 +262,7 @@ function setupPremium(): PremiumAccess {
       schedule: (callback, milliseconds) => setTimeout(callback, milliseconds),
       cancel: clearTimeout
     })
+    return controller
   } catch {
     log('premium account origin rejected; online account features disabled')
     return disabledPremiumAccess()

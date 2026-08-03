@@ -1,4 +1,6 @@
 import { PremiumOrigin } from './origin'
+import { validateEmailDelivery } from '../email-contracts'
+import type { EmailDeliveryRequest, EmailDeliveryResult } from '../email-contracts'
 
 export interface DeviceStart { device_code: string; user_code: string; verification_uri: string; expires_in: number; interval: number }
 export interface TokenPair { access_token: string; token_type: 'Bearer'; expires_in: number; refresh_token: string }
@@ -17,6 +19,14 @@ export class PremiumTransport {
   entitlement(accessToken: string): Promise<unknown> { return this.request('/v1/me/entitlements', { headers: { Authorization: `Bearer ${accessToken}` } }) }
   inventory(slot: 'library' | 'reader', accessToken: string): Promise<unknown | null> {
     return this.requestInventory(`/v1/ads/inventory/${slot}`, accessToken)
+  }
+  async deliverEmail(request: EmailDeliveryRequest, accessToken: string): Promise<EmailDeliveryResult> {
+    const value = await this.request('/v1/email-deliveries', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify(request)
+    })
+    return validateEmailDelivery(value)
   }
   ownsExternalUrl(url: string): boolean { return this.origin.owns(url) }
 

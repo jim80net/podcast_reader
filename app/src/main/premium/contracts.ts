@@ -2,7 +2,7 @@ export type ProductState =
   | { state: 'local' }
   | { state: 'online-unavailable' }
   | { state: 'online-free'; subject: string; refreshAfter: number; adPolicy: 'none' | 'house'; entitlementRevision?: number; flagsRevision?: number; podcastSubscriptions?: false }
-  | { state: 'online-premium'; subject: string; refreshAfter: number; entitlementRevision?: number; flagsRevision?: number; podcastSubscriptions?: boolean }
+  | { state: 'online-premium'; subject: string; refreshAfter: number; entitlementRevision?: number; flagsRevision?: number; podcastSubscriptions?: boolean; transcriptEmail?: boolean }
 
 type ObjectValue = Record<string, unknown>
 const CLOCK_SKEW_MS = 5 * 60 * 1000
@@ -26,6 +26,6 @@ export function reduceEntitlement(value: unknown, expectedSubject: string, now =
   if (!Number.isFinite(refreshAfter) || !Number.isFinite(evaluatedAt) || evaluatedAt > now + CLOCK_SKEW_MS || refreshAfter <= evaluatedAt || refreshAfter <= now || new Date(refreshAfter).toISOString().replace('.000Z', 'Z') !== root.refresh_after || new Date(evaluatedAt).toISOString().replace('.000Z', 'Z') !== root.evaluated_at) throw new Error('stale premium contract')
   const revisions = { entitlementRevision: Number(entitlement.revision), flagsRevision: Number(root.flags_revision) }
   if (root.tier === 'free' && (entitlement.source === 'none' || entitlement.source === 'admin') && (capabilities.ad_policy === 'none' || capabilities.ad_policy === 'house') && capabilities.podcast_subscriptions === false && capabilities.transcript_email === false && capabilities.mobile_ad_free === false && capabilities.topic_corpus === false) return { state: 'online-free', subject: expectedSubject, refreshAfter, adPolicy: capabilities.ad_policy, podcastSubscriptions: false, ...revisions }
-  if (root.tier === 'premium' && (entitlement.source === 'test_purchase' || entitlement.source === 'admin') && capabilities.ad_policy === 'none') return { state: 'online-premium', subject: expectedSubject, refreshAfter, podcastSubscriptions: capabilities.podcast_subscriptions === true, ...revisions }
+  if (root.tier === 'premium' && (entitlement.source === 'test_purchase' || entitlement.source === 'admin') && capabilities.ad_policy === 'none') return { state: 'online-premium', subject: expectedSubject, refreshAfter, podcastSubscriptions: capabilities.podcast_subscriptions === true, transcriptEmail: capabilities.transcript_email === true, ...revisions }
   throw new Error('invalid premium contract')
 }

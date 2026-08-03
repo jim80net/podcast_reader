@@ -8,6 +8,7 @@ import type { MediaPlayer } from '../media-player'
 import type { ViewCleanup } from '../store'
 import type { SyncBridge } from '../sync-bridge'
 import type { MediaInfo } from '../../../shared/types'
+import type { PremiumProductState } from '../../../shared/ipc'
 
 /** Persisted "hide the media column" preference (the user may never use video). */
 const MEDIA_HIDDEN_KEY = 'pr.media.hidden'
@@ -42,6 +43,35 @@ export function mountReader(container: HTMLElement, sourceId: string): ViewClean
   // use the video" sticks across episodes and launches).
   const mediaToggle = el('button', { class: 'media-toggle', attrs: { type: 'button' } })
   mediaToggle.hidden = true
+  const emailButton = el('button', {
+    class: 'button-secondary',
+    text: 'Email this transcript',
+    attrs: { type: 'button' }
+  })
+  const emailStatus = el('p', {
+    class: 'section-note',
+    attrs: { role: 'status', 'aria-live': 'polite' }
+  })
+  const confirmEmail = el('button', {
+    text: 'Send to Captured DEV mailbox',
+    attrs: { type: 'button' }
+  })
+  const cancelEmail = el('button', {
+    class: 'button-secondary',
+    text: 'Cancel',
+    attrs: { type: 'button' }
+  })
+  const confirmation = el(
+    'section',
+    { class: 'card email-confirmation', attrs: { 'aria-label': 'Confirm transcript email' } },
+    el('h2', { text: 'Email this transcript?' }),
+    el('p', {
+      text: 'This transcript’s bounded plain text will be uploaded to the premium relay for this delivery only. The relay does not retain a copy after the delivery attempt. The Captured DEV mailbox retains the resulting email.'
+    }),
+    el('div', { class: 'button-row' }, confirmEmail, cancelEmail)
+  )
+  confirmation.hidden = true
+  let premiumState: PremiumProductState = { state: 'local', available: true }
   const setMediaHidden = (hidden: boolean, persist: boolean): void => {
     readerBody.classList.toggle('media-hidden', hidden)
     mediaToggle.textContent = hidden ? '▸ Show video' : '▾ Hide video'
@@ -52,7 +82,9 @@ export function mountReader(container: HTMLElement, sourceId: string): ViewClean
   )
   const hideMedia = (): void => setMediaHidden(true, true)
   container.append(
-    el('div', { class: 'reader-toolbar' }, mediaToggle),
+    el('div', { class: 'reader-toolbar' }, mediaToggle, emailButton),
+    emailStatus,
+    confirmation,
     status,
     adSlot,
     // Side-by-side: the player docks in a left column and the transcript fills
@@ -71,6 +103,56 @@ export function mountReader(container: HTMLElement, sourceId: string): ViewClean
   // exist, so the bridge binds a stable window.
   let frameLoaded = false
   let pendingInfo: MediaInfo | null = null
+
+  const renderEmail = (): void => {
+    emailButton.disabled = !manualEmailAvailable(premiumState)
+    emailStatus.textContent = manualEmailStatus(premiumState)
+    if (!manualEmailAvailable(premiumState)) confirmation.hidden = true
+  }
+  emailButton.addEventListener('click', () => {
+    if (!manualEmailAvailable(premiumState)) return
+    confirmation.hidden = false
+    emailStatus.textContent = 'Confirm this one transcript upload before sending.'
+  })
+  cancelEmail.addEventListener('click', () => {
+    confirmation.hidden = true
+    renderEmail()
+  })
+  confirmEmail.addEventListener('click', () => {
+    if (!manualEmailAvailable(premiumState)) return
+    confirmEmail.disabled = true
+    cancelEmail.disabled = true
+    void window.api.createManualEmail(sourceId).then((delivery) => {
+      if (disposed) return
+      confirmation.hidden = true
+      emailStatus.textContent = delivery.state === 'delivered'
+        ? 'Delivered to the Captured DEV mailbox.'
+        : 'Queued for the Captured DEV mailbox.'
+    }).catch(() => {
+      if (!disposed) emailStatus.textContent = 'This transcript could not be queued for email.'
+    }).finally(() => {
+      if (!disposed) {
+        confirmEmail.disabled = false
+        cancelEmail.disabled = false
+      }
+    })
+  })
+  const unsubscribePremium = window.api.onPremiumState((next) => {
+    premiumState = next
+    if (!disposed) renderEmail()
+  })
+  void window.api.getPremiumState().then((next) => {
+    if (!disposed) {
+      premiumState = next
+      renderEmail()
+    }
+  }).catch(() => {
+    if (!disposed) {
+      premiumState = { state: 'online-unavailable', available: true }
+      renderEmail()
+    }
+  })
+  renderEmail()
 
   const teardownPlayer = (): void => {
     bridge?.destroy()
@@ -196,7 +278,20 @@ export function mountReader(container: HTMLElement, sourceId: string): ViewClean
     window.removeEventListener('pr-theme-change', onThemeChange)
     teardownPlayer()
     cleanupAd()
+    unsubscribePremium()
   }
+}
+
+export function manualEmailAvailable(state: PremiumProductState): boolean {
+  return state.state === 'online-premium' && state.emailAvailable
+}
+
+export function manualEmailStatus(state: PremiumProductState): string {
+  if (!state.available || state.state === 'local') return 'Connect an account to email this transcript.'
+  if (state.state === 'online-free') return 'Transcript email requires premium.'
+  if (state.state === 'online-unavailable') return 'Transcript email is paused while account status is unavailable.'
+  if (!state.emailAvailable) return 'Transcript email is not enabled for this premium account.'
+  return 'Email is delivered only to the Captured DEV mailbox.'
 }
 
 /** Set `data-theme` on the artifact's <html> so it opens in the app's theme. */

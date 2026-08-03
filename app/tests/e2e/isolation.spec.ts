@@ -63,11 +63,15 @@ test('engine bearer token is unreachable from the renderer', async ({ harness })
   // The bridge is the renderer's ONLY door, and it is payload-only.
   expect(probe.apiKeys).toEqual(
     [
+      // Issue #122 admits the gated manual transcript-email command.
+      'createManualEmail',
       'createSubscription',
       'deleteSubscription',
       'getEngineStatus',
       'getPrivateWebStatus',
       'getPremiumState',
+      // Issue #122 admits the gated subscription email-preference read.
+      'getSubscriptionEmailPreference',
       'submitJob',
       'listJobs',
       'getJob',
@@ -86,6 +90,8 @@ test('engine bearer token is unreachable from the renderer', async ({ harness })
       'listProviders',
       'listPacks',
       'listSubscriptions',
+      // Issue #122 admits delivery-metadata status without transcript content.
+      'listEmailDeliveries',
       'installPack',
       'uninstallPack',
       'isFirstRunComplete',
@@ -103,6 +109,8 @@ test('engine bearer token is unreachable from the renderer', async ({ harness })
       'installUpdate',
       'engineRestart',
       'setPrivateWebEnabled',
+      // Issue #122 admits the gated subscription email-preference write.
+      'setSubscriptionEmailPreference',
       'onEngineStatus',
       'onPipelineEvent',
       'onPrivateWebStatus',

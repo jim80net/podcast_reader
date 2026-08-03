@@ -36,6 +36,10 @@ function access(enabled: boolean): PremiumAccess {
     signOut: () => ({ state: 'local', available: true }),
     background: () => ({ state: 'local', available: true }),
     subscriptionsEnabled: () => enabled,
+    emailEnabled: () => false,
+    emailSubject: () => null,
+    wakeEmailSender: () => undefined,
+    emailUnavailable: () => undefined,
     synchronizeCapability: async () => undefined,
     inventory: async () => null,
     openCta: async () => undefined
