@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -9,16 +10,21 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from podcast_reader.engine.jobs import JobStore
 from podcast_reader.engine.subscription_feed import FeedResponse, FeedTemporaryError
 from podcast_reader.engine.subscription_store import SubscriptionStore
 from podcast_reader.engine.subscriptions import (
+    MAX_JOBS_PER_POLL,
     OnlineCapabilitySnapshot,
     PremiumFeatureUnavailableError,
     SubscriptionManager,
 )
+from podcast_reader.types import PipelineEvent, PipelineResult
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+    from podcast_reader.types import JobRecord
 
 _FEED_BASELINE = b"""
 <rss><channel><title>Fixture Show</title>
@@ -81,6 +87,32 @@ def _snapshot(clock: _Clock, *, enabled: bool = True) -> OnlineCapabilitySnapsho
         podcast_subscriptions=enabled,
         expires_at=(clock.now + timedelta(minutes=5)).isoformat(),
     )
+
+
+def _job_runner(
+    _record: JobRecord,
+    on_event: Callable[[PipelineEvent], None],
+) -> PipelineResult:
+    on_event(PipelineEvent(kind="job_done", step=None, message="Done", data={}))
+    return PipelineResult(
+        json_path="/library/episode.json",
+        chapters_path=None,
+        html_path="/library/episode.html",
+        title="Episode",
+    )
+
+
+def _updated_feed(count: int) -> bytes:
+    items = "".join(
+        f"""
+        <item><guid>new-{index}</guid><title>New {index}</title>
+          <pubDate>Tue, {index + 1:02d} Jan 2024 00:00:00 GMT</pubDate>
+          <enclosure type="audio/mpeg" url="https://93.184.216.34/new-{index}.mp3"/>
+        </item>
+        """
+        for index in range(count)
+    )
+    return f"<rss><channel><title>Fixture Show</title>{items}</channel></rss>".encode()
 
 
 def test_frozen_online_capability_fixture_has_exact_shape() -> None:
@@ -164,6 +196,377 @@ def test_initial_subscribe_baselines_archive_then_poll_discovers_only_new_episod
         ] == [("old", "baseline"), ("new", "discovered")]
     finally:
         manager.shutdown()
+
+
+def test_subscription_handoff_is_idempotent_across_crash_before_episode_link(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clock = _Clock(datetime(2026, 8, 3, tzinfo=timezone.utc))
+    fetcher = _Fetcher()
+    job_store = JobStore(tmp_path, _job_runner)
+    subscription_store = SubscriptionStore(tmp_path)
+    manager = SubscriptionManager(
+        subscription_store,
+        fetcher=fetcher,
+        clock=clock,
+        job_store=job_store,
+    )
+    manager.update_capability(_snapshot(clock))
+    subscription = manager.create_subscription("https://93.184.216.34/show.xml")
+    fetcher.responses.append(
+        FeedResponse(200, subscription["feed_url"], _FEED_UPDATED, '"v2"', None)
+    )
+    clock.now += timedelta(minutes=1)
+
+    def crash_before_episode_link(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("simulated process crash")
+
+    monkeypatch.setattr(subscription_store, "mark_episode_queued", crash_before_episode_link)
+    with pytest.raises(RuntimeError, match="simulated process crash"):
+        manager.poll_subscription(subscription["id"])
+    assert len(job_store.list_jobs()) == 1
+    assert subscription_store.list_episodes(subscription["id"])[1]["state"] == "discovered"
+    manager.shutdown()
+
+    restarted_store = SubscriptionStore(tmp_path)
+    restarted_jobs = JobStore(tmp_path, _job_runner)
+    restarted = SubscriptionManager(
+        restarted_store,
+        fetcher=_Fetcher(),
+        clock=clock,
+        job_store=restarted_jobs,
+    )
+    try:
+        restarted.start()
+        episodes = restarted_store.list_episodes(subscription["id"])
+        assert [(episode["state"], episode["job_id"]) for episode in episodes] == [
+            ("baseline", None),
+            ("queued", restarted_jobs.list_jobs()[0]["id"]),
+        ]
+        assert len(restarted_jobs.list_jobs()) == 1
+        assert restarted._thread is None
+    finally:
+        restarted.shutdown()
+
+
+def test_subscription_handoff_recovers_discovery_committed_before_job_submit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clock = _Clock(datetime(2026, 8, 3, tzinfo=timezone.utc))
+    fetcher = _Fetcher()
+    job_store = JobStore(tmp_path, _job_runner)
+    subscription_store = SubscriptionStore(tmp_path)
+    manager = SubscriptionManager(
+        subscription_store,
+        fetcher=fetcher,
+        clock=clock,
+        job_store=job_store,
+    )
+    manager.update_capability(_snapshot(clock))
+    subscription = manager.create_subscription("https://93.184.216.34/show.xml")
+    fetcher.responses.append(
+        FeedResponse(200, subscription["feed_url"], _FEED_UPDATED, '"v2"', None)
+    )
+    clock.now += timedelta(minutes=1)
+
+    def crash_before_job_submit(*_args: object, **_kwargs: object) -> object:
+        raise RuntimeError("simulated crash before job journal")
+
+    monkeypatch.setattr(job_store, "submit", crash_before_job_submit)
+    with pytest.raises(RuntimeError, match="before job journal"):
+        manager.poll_subscription(subscription["id"])
+    assert job_store.list_jobs() == []
+    assert subscription_store.list_episodes(subscription["id"])[1]["state"] == "discovered"
+    manager.shutdown()
+
+    restarted_jobs = JobStore(tmp_path, _job_runner)
+    restarted_fetcher = _Fetcher()
+    restarted_fetcher.responses.clear()
+    restarted_fetcher.responses.append(
+        FeedResponse(304, subscription["feed_url"], b"", '"v2"', None)
+    )
+    restarted = SubscriptionManager(
+        SubscriptionStore(tmp_path),
+        fetcher=restarted_fetcher,
+        clock=clock,
+        job_store=restarted_jobs,
+    )
+    try:
+        restarted._reconcile_jobs()
+        assert restarted.store.list_episodes(subscription["id"])[1]["state"] == "discovered"
+        restarted.update_capability(_snapshot(clock))
+        restarted.poll_subscription(subscription["id"])
+        episode = restarted.store.list_episodes(subscription["id"])[1]
+        assert episode["state"] == "queued"
+        assert episode["job_id"] == restarted_jobs.list_jobs()[0]["id"]
+        assert len(restarted_jobs.list_jobs()) == 1
+    finally:
+        restarted.shutdown()
+
+
+def test_subscription_handoff_survives_restart_after_episode_link(tmp_path: Path) -> None:
+    clock = _Clock(datetime(2026, 8, 3, tzinfo=timezone.utc))
+    fetcher = _Fetcher()
+    manager = SubscriptionManager(
+        SubscriptionStore(tmp_path),
+        fetcher=fetcher,
+        clock=clock,
+        job_store=JobStore(tmp_path, _job_runner),
+    )
+    manager.update_capability(_snapshot(clock))
+    subscription = manager.create_subscription("https://93.184.216.34/show.xml")
+    fetcher.responses.append(
+        FeedResponse(200, subscription["feed_url"], _FEED_UPDATED, '"v2"', None)
+    )
+    clock.now += timedelta(minutes=1)
+    manager.poll_subscription(subscription["id"])
+    linked = manager.store.list_episodes(subscription["id"])[1]
+    manager.shutdown()
+
+    restarted_jobs = JobStore(tmp_path, _job_runner)
+    restarted = SubscriptionManager(
+        SubscriptionStore(tmp_path),
+        fetcher=_Fetcher(),
+        clock=clock,
+        job_store=restarted_jobs,
+    )
+    try:
+        restarted.start()
+        recovered = restarted.store.list_episodes(subscription["id"])[1]
+        assert recovered["state"] == "queued"
+        assert recovered["job_id"] == linked["job_id"]
+        assert [job["id"] for job in restarted_jobs.list_jobs()] == [linked["job_id"]]
+    finally:
+        restarted.shutdown()
+
+
+def test_subscription_handoff_caps_jobs_oldest_first(tmp_path: Path) -> None:
+    clock = _Clock(datetime(2026, 8, 3, tzinfo=timezone.utc))
+    fetcher = _Fetcher()
+    job_store = JobStore(tmp_path, _job_runner)
+    manager = SubscriptionManager(
+        SubscriptionStore(tmp_path),
+        fetcher=fetcher,
+        clock=clock,
+        job_store=job_store,
+    )
+    try:
+        manager.update_capability(_snapshot(clock))
+        subscription = manager.create_subscription("https://93.184.216.34/show.xml")
+        fetcher.responses.append(
+            FeedResponse(200, subscription["feed_url"], _updated_feed(5), '"v2"', None)
+        )
+        clock.now += timedelta(minutes=1)
+        result = manager.poll_subscription(subscription["id"])
+        episodes = manager.store.list_episodes(subscription["id"])
+        queued = [episode for episode in episodes if episode["state"] == "queued"]
+        discovered = [episode for episode in episodes if episode["state"] == "discovered"]
+        assert result.discovered_count == 5
+        assert len(queued) == MAX_JOBS_PER_POLL
+        assert [episode["episode_key"] for episode in queued] == ["new-0", "new-1", "new-2"]
+        assert [episode["published_at"] for episode in queued] == [
+            "2024-01-01T00:00:00.000000Z",
+            "2024-01-02T00:00:00.000000Z",
+            "2024-01-03T00:00:00.000000Z",
+        ]
+        assert [episode["episode_key"] for episode in discovered] == ["new-3", "new-4"]
+        assert [job["source"] for job in job_store.list_jobs()] == [
+            "https://93.184.216.34/new-0.mp3",
+            "https://93.184.216.34/new-1.mp3",
+            "https://93.184.216.34/new-2.mp3",
+        ]
+
+        fetcher.responses.append(
+            FeedResponse(200, subscription["feed_url"], _updated_feed(7), '"v3"', None)
+        )
+        clock.now += timedelta(minutes=1)
+        second = manager.poll_subscription(subscription["id"])
+        episodes = manager.store.list_episodes(subscription["id"])
+        assert second.discovered_count == 2
+        assert len(job_store.list_jobs()) == 2 * MAX_JOBS_PER_POLL
+        assert [
+            episode["episode_key"] for episode in episodes if episode["state"] == "discovered"
+        ] == ["new-6"]
+    finally:
+        manager.shutdown()
+
+
+def test_shutdown_waits_for_in_flight_poll_before_closing_store(tmp_path: Path) -> None:
+    clock = _Clock(datetime(2026, 8, 3, tzinfo=timezone.utc))
+    fetcher = _Fetcher()
+    manager = SubscriptionManager(SubscriptionStore(tmp_path), fetcher=fetcher, clock=clock)
+    manager.update_capability(_snapshot(clock))
+    subscription = manager.create_subscription("https://93.184.216.34/show.xml")
+    entered = threading.Event()
+    release = threading.Event()
+
+    class BlockingFetcher:
+        def fetch(
+            self,
+            _url: str,
+            *,
+            etag: str | None = None,
+            last_modified: str | None = None,
+            should_continue: Callable[[], bool] = lambda: True,
+        ) -> FeedResponse:
+            entered.set()
+            assert release.wait(timeout=2)
+            return FeedResponse(304, subscription["feed_url"], b"", '"v1"', None)
+
+    manager._fetcher = BlockingFetcher()
+    poll_error: list[Exception] = []
+
+    def poll() -> None:
+        try:
+            manager.poll_subscription(subscription["id"])
+        except Exception as exc:
+            poll_error.append(exc)
+
+    poll_thread = threading.Thread(target=poll)
+    poll_thread.start()
+    assert entered.wait(timeout=1)
+    shutdown_thread = threading.Thread(target=manager.shutdown)
+    shutdown_thread.start()
+    time.sleep(0.05)
+    assert shutdown_thread.is_alive()
+    release.set()
+    poll_thread.join(timeout=1)
+    shutdown_thread.join(timeout=1)
+    assert not poll_thread.is_alive()
+    assert not shutdown_thread.is_alive()
+    assert len(poll_error) == 1
+    assert isinstance(poll_error[0], PremiumFeatureUnavailableError)
+
+
+def test_scheduler_reconciliation_failure_does_not_kill_thread(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    clock = _Clock(datetime(2026, 8, 3, tzinfo=timezone.utc))
+    manager = SubscriptionManager(SubscriptionStore(tmp_path), fetcher=_Fetcher(), clock=clock)
+    manager.update_capability(_snapshot(clock))
+    calls = 0
+
+    def flaky_reconcile() -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise RuntimeError("transient reconciliation failure")
+
+    monkeypatch.setattr("podcast_reader.engine.subscriptions.RECONCILIATION_INTERVAL_SECONDS", 0)
+    monkeypatch.setattr(manager, "_reconcile_jobs", flaky_reconcile)
+    try:
+        manager._ensure_scheduler()
+        deadline = time.monotonic() + 1
+        while calls < 2 and time.monotonic() < deadline:
+            manager._wake.set()
+            time.sleep(0.01)
+        assert calls >= 2
+        assert manager._thread is not None and manager._thread.is_alive()
+    finally:
+        manager.shutdown()
+
+
+def test_scheduler_throttles_idle_reconciliation(tmp_path: Path) -> None:
+    clock = _Clock(datetime(2026, 8, 3, tzinfo=timezone.utc))
+    manager = SubscriptionManager(SubscriptionStore(tmp_path), fetcher=_Fetcher(), clock=clock)
+    manager.update_capability(_snapshot(clock))
+    calls = 0
+
+    def count_reconcile() -> None:
+        nonlocal calls
+        calls += 1
+
+    manager._reconcile_jobs = count_reconcile
+    try:
+        manager._ensure_scheduler()
+        deadline = time.monotonic() + 1
+        while calls == 0 and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert calls == 1
+        for _ in range(5):
+            manager._wake.set()
+            time.sleep(0.02)
+        assert calls == 1
+    finally:
+        manager.shutdown()
+
+
+def test_subscription_job_uses_normal_worker_sse_and_terminal_reconciliation(
+    tmp_path: Path,
+) -> None:
+    clock = _Clock(datetime(2026, 8, 3, tzinfo=timezone.utc))
+    fetcher = _Fetcher()
+    job_store = JobStore(tmp_path, _job_runner)
+    manager = SubscriptionManager(
+        SubscriptionStore(tmp_path),
+        fetcher=fetcher,
+        clock=clock,
+        job_store=job_store,
+    )
+    subscriber = job_store.subscribe()
+    try:
+        manager.update_capability(_snapshot(clock))
+        subscription = manager.create_subscription("https://93.184.216.34/show.xml")
+        fetcher.responses.append(
+            FeedResponse(200, subscription["feed_url"], _FEED_UPDATED, '"v2"', None)
+        )
+        clock.now += timedelta(minutes=1)
+        manager.poll_subscription(subscription["id"])
+        job = job_store.list_jobs()[0]
+        job_store.start_worker()
+        deadline = time.monotonic() + 2
+        while job_store.get(job["id"])["state"] != "done" and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert job_store.get(job["id"])["state"] == "done"
+        event = subscriber.get(timeout=1)
+        assert event["kind"] == "job_done"
+        assert event["data"]["job_id"] == job["id"]
+        manager._reconcile_jobs()
+        assert manager.store.list_episodes(subscription["id"])[1]["state"] == "completed"
+    finally:
+        job_store.unsubscribe(subscriber)
+        job_store.shutdown()
+        manager.shutdown()
+
+
+@pytest.mark.parametrize(("library_present", "expected"), [(True, "completed"), (False, "failed")])
+def test_restart_reconciles_missing_job_against_final_library(
+    tmp_path: Path,
+    library_present: bool,
+    expected: str,
+) -> None:
+    clock = _Clock(datetime(2026, 8, 3, tzinfo=timezone.utc))
+    fetcher = _Fetcher()
+    manager = SubscriptionManager(
+        SubscriptionStore(tmp_path),
+        fetcher=fetcher,
+        clock=clock,
+        job_store=JobStore(tmp_path, _job_runner),
+    )
+    manager.update_capability(_snapshot(clock))
+    subscription = manager.create_subscription("https://93.184.216.34/show.xml")
+    fetcher.responses.append(
+        FeedResponse(200, subscription["feed_url"], _FEED_UPDATED, '"v2"', None)
+    )
+    clock.now += timedelta(minutes=1)
+    manager.poll_subscription(subscription["id"])
+    manager.shutdown()
+    (tmp_path / "jobs.json").unlink()
+
+    restarted = SubscriptionManager(
+        SubscriptionStore(tmp_path),
+        fetcher=_Fetcher(),
+        clock=clock,
+        job_store=JobStore(tmp_path, _job_runner),
+        library_has_source=lambda _source: library_present,
+    )
+    try:
+        restarted.start()
+        assert restarted.store.list_episodes(subscription["id"])[1]["state"] == expected
+    finally:
+        restarted.shutdown()
 
 
 def test_reordered_feed_is_deduplicated_and_304_changes_no_episodes(tmp_path: Path) -> None:

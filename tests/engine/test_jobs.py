@@ -16,6 +16,7 @@ import pytest
 from podcast_reader.engine.events import SUBSCRIBER_FULL_STREAK_LIMIT, SUBSCRIBER_QUEUE_SIZE
 from podcast_reader.engine.jobs import (
     MAX_TERMINAL_JOBS,
+    IdempotencyConflictError,
     JobStateError,
     JobStore,
 )
@@ -78,6 +79,94 @@ class TestSubmit:
         record = store.submit("https://example.com/a", None)
         journal = json.loads((tmp_path / "jobs.json").read_text())
         assert [r["id"] for r in journal] == [record["id"]]
+
+    def test_manual_submission_record_and_journal_shape_are_unchanged(
+        self, store: JobStore, tmp_path: Path
+    ) -> None:
+        record = store.submit("https://example.com/manual", "Manual")
+        assert set(record) == {
+            "id",
+            "source",
+            "title",
+            "state",
+            "error",
+            "events",
+            "result",
+            "overrides",
+            "models",
+            "created_at",
+            "updated_at",
+        }
+        assert json.loads((tmp_path / "jobs.json").read_text()) == [record]
+
+    def test_internal_idempotency_key_returns_retained_job_without_public_leak(
+        self, tmp_path: Path
+    ) -> None:
+        store = JobStore(tmp_path, _ok_runner)
+        first = store.submit(
+            "https://example.com/episode.mp3",
+            "Episode",
+            idempotency_key="subscription:sub_1:episode_1",
+        )
+        second = store.submit(
+            "https://example.com/episode.mp3",
+            "Episode",
+            idempotency_key="subscription:sub_1:episode_1",
+        )
+        assert second == first
+        assert "idempotency_key" not in first
+        journal = json.loads((tmp_path / "jobs.json").read_text())
+        assert len(journal) == 1
+        assert journal[0]["idempotency_key"] == "subscription:sub_1:episode_1"
+
+        restarted = JobStore(tmp_path, _ok_runner)
+        assert (
+            restarted.submit(
+                "https://example.com/episode.mp3",
+                "Episode",
+                idempotency_key="subscription:sub_1:episode_1",
+            )
+            == first
+        )
+        assert len(restarted.list_jobs()) == 1
+
+    def test_idempotency_key_reuse_with_different_input_fails_closed(self, store: JobStore) -> None:
+        store.submit(
+            "https://example.com/one.mp3",
+            None,
+            idempotency_key="subscription:sub_1:episode_1",
+        )
+        with pytest.raises(IdempotencyConflictError):
+            store.submit(
+                "https://example.com/two.mp3",
+                None,
+                idempotency_key="subscription:sub_1:episode_1",
+            )
+
+    def test_concurrent_same_key_submissions_create_one_job(self, tmp_path: Path) -> None:
+        store = JobStore(tmp_path, _ok_runner)
+        barrier = threading.Barrier(8)
+        returned: list[str] = []
+
+        def submit() -> None:
+            barrier.wait()
+            returned.append(
+                store.submit(
+                    "https://example.com/episode.mp3",
+                    "Episode",
+                    idempotency_key="subscription:sub_1:episode_1",
+                )["id"]
+            )
+
+        threads = [threading.Thread(target=submit) for _ in range(8)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=2)
+
+        assert len(returned) == 8
+        assert len(set(returned)) == 1
+        assert len(store.list_jobs()) == 1
 
 
 class TestExecution:
@@ -764,6 +853,27 @@ class TestCorruptJournal:
         assert store.list_jobs() == []
         assert (tmp_path / "jobs.json.corrupt").exists()
 
+    def test_duplicate_idempotency_key_journal_is_quarantined(self, tmp_path: Path) -> None:
+        first = _journal_record("j1", "done", 1.0)
+        second = _journal_record("j2", "done", 2.0)
+        first["idempotency_key"] = "subscription:sub_1:episode_1"
+        second["idempotency_key"] = "subscription:sub_1:episode_1"
+        (tmp_path / "jobs.json").write_text(json.dumps([first, second]))
+
+        store = JobStore(tmp_path, _ok_runner)
+        assert store.list_jobs() == []
+        assert (tmp_path / "jobs.json.corrupt").exists()
+
+    def test_duplicate_job_id_journal_is_quarantined(self, tmp_path: Path) -> None:
+        first = _journal_record("duplicate", "done", 1.0)
+        second = _journal_record("duplicate", "done", 2.0)
+        second["idempotency_key"] = "subscription:sub_1:episode_1"
+        (tmp_path / "jobs.json").write_text(json.dumps([first, second]))
+
+        store = JobStore(tmp_path, _ok_runner)
+        assert store.list_jobs() == []
+        assert (tmp_path / "jobs.json.corrupt").exists()
+
     @pytest.mark.skipif(
         sys.platform == "win32" or os.geteuid() == 0,
         reason="chmod 0o000 does not block reads on Windows or for root",
@@ -801,3 +911,22 @@ class TestCorruptJournal:
         assert store.list_jobs() == []
         assert "quarantine" in caplog.text.lower()
         assert "read-only data dir" in caplog.text
+
+
+def test_legacy_journal_without_idempotency_key_migrates_additively(tmp_path: Path) -> None:
+    legacy = _journal_record("legacy", "done", 1.0)
+    encoded = json.dumps([legacy])
+    (tmp_path / "jobs.json").write_text(encoded)
+
+    store = JobStore(tmp_path, _ok_runner)
+    assert store.get("legacy")["id"] == "legacy"
+    assert (tmp_path / "jobs.json").read_text() == encoded
+    keyed = store.submit(
+        "https://example.com/new.mp3",
+        None,
+        idempotency_key="subscription:sub_1:episode_1",
+    )
+    journal = json.loads((tmp_path / "jobs.json").read_text())
+    by_id = {record["id"]: record for record in journal}
+    assert "idempotency_key" not in by_id["legacy"]
+    assert by_id[keyed["id"]]["idempotency_key"] == "subscription:sub_1:episode_1"
