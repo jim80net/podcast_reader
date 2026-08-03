@@ -46,9 +46,7 @@ NETWORK_ROOTS: Mapping[str, tuple[Path, ...]] = {
     "extension": (Path("extension/src"),),
     "private-web": (Path("src/podcast_reader/web_assets"),),
 }
-NETWORK_SOURCE_SUFFIXES = frozenset(
-    {".cjs", ".js", ".jsx", ".kt", ".mjs", ".py", ".ts", ".tsx"}
-)
+NETWORK_SOURCE_SUFFIXES = frozenset({".cjs", ".js", ".jsx", ".kt", ".mjs", ".py", ".ts", ".tsx"})
 
 
 def _fail(path: str, message: str) -> NoReturn:
@@ -320,19 +318,13 @@ def validate_surface_inventory(
         "https://github.com/jim80net/podcast_reader/issues/"
     ):
         _fail("$.android.admitting_issue", "must name the admitting issue")
-    dependencies = _strings(
-        android["production_dependencies"], "$.android.production_dependencies"
-    )
+    dependencies = _strings(android["production_dependencies"], "$.android.production_dependencies")
     _check_snapshot(
         "$.android.production_dependencies",
-        discover_android_runtime_dependencies(
-            _source(repo_root, android["dependency_lock"])
-        ),
+        discover_android_runtime_dependencies(_source(repo_root, android["dependency_lock"])),
         {dependency: "android.dependency-allowlist" for dependency in dependencies},
     )
-    android_network = _multi_binding_map(
-        android["network_owners"], "$.android.network_owners"
-    )
+    android_network = _multi_binding_map(android["network_owners"], "$.android.network_owners")
     _check_snapshot(
         "$.android.network_owners",
         discover_network_owner_files(repo_root, "android"),
@@ -355,9 +347,7 @@ def validate_surface_inventory(
     )
     android_operations = {
         operation.get("id")
-        for operation in _objects(
-            android_projection["operations"], "projection.android.operations"
-        )
+        for operation in _objects(android_projection["operations"], "projection.android.operations")
         if isinstance(operation.get("id"), str)
     }
     unknown_android_operations = sorted(
