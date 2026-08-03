@@ -28,6 +28,9 @@ class Settings:
     payment_claim_ttl_seconds: int = 5 * 60
     payment_retry_base_seconds: int = 5
     payment_max_attempts: int = 5
+    email_maildir_path: Path | None = None
+    email_delivery_hmac_key: bytes | None = None
+    email_sink: str = "dev_maildir"
 
     def __post_init__(self) -> None:
         try:
@@ -56,6 +59,10 @@ class Settings:
             raise ValueError("user_code_pepper must contain at least 32 bytes")
         if self.environment not in {"dev", "test"}:
             raise ValueError("the premium service is restricted to dev or test environments")
+        if self.email_sink != "dev_maildir":
+            raise ValueError("only the DEV Maildir email sink is supported")
+        if self.email_delivery_hmac_key is not None and len(self.email_delivery_hmac_key) < 32:
+            raise ValueError("email_delivery_hmac_key must contain at least 32 bytes")
         positive_fields = {
             "session_ttl_seconds": self.session_ttl_seconds,
             "access_ttl_seconds": self.access_ttl_seconds,

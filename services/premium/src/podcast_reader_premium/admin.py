@@ -35,6 +35,7 @@ from .models import (
     AuditLog,
     BrowserSession,
     CheckoutAttempt,
+    EmailDeliveryReceipt,
     EntitlementEvent,
     EntitlementProjection,
     FeatureFlag,
@@ -125,6 +126,39 @@ def _active_admin_count(database: Session) -> int:
 
 def _is_last_active_admin(database: Session, user: User) -> bool:
     return user.role == "admin" and user.status == "active" and _active_admin_count(database) <= 1
+
+
+@router.get("/email-deliveries", response_class=HTMLResponse)
+def email_deliveries_page(
+    request: Request,
+    page: Annotated[int, Query(ge=1, le=10_000)] = 1,
+    admin: User = Depends(_admin_user),
+    database: Session = Depends(_database_session),
+) -> HTMLResponse:
+    page_size = 50
+    totals: dict[str, int] = {
+        state: count
+        for state, count in database.execute(
+            select(EmailDeliveryReceipt.state, func.count()).group_by(EmailDeliveryReceipt.state)
+        ).all()
+    }
+    rows = database.scalars(
+        select(EmailDeliveryReceipt)
+        .order_by(EmailDeliveryReceipt.created_at.desc(), EmailDeliveryReceipt.id.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size + 1)
+    ).all()
+    return TEMPLATES.TemplateResponse(
+        request,
+        "email_deliveries.html",
+        {
+            "admin": admin,
+            "rows": rows[:page_size],
+            "totals": totals,
+            "page": page,
+            "has_next": len(rows) > page_size,
+        },
+    )
 
 
 @router.get("/", response_class=HTMLResponse)

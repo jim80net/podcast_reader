@@ -14,7 +14,7 @@ from urllib.parse import urlencode
 from fastapi import Cookie, Depends, FastAPI, Form, Header, Query, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy import Engine, select, update
 from sqlalchemy.orm import Session, sessionmaker
 from starlette.exceptions import HTTPException
@@ -33,14 +33,18 @@ from .billing import (
 )
 from .config import Settings
 from .contracts import (
+    EMAIL_REQUEST_MAX_BYTES,
     AdInventoryV1,
     AdSlot,
     DeviceAuthorizationStartV1,
+    EmailDeliveryRequestV1,
+    EmailDeliveryV1,
     EntitlementV1,
     TokenResponseV1,
     TokenRevokeRequestV1,
 )
 from .db import begin_immediate, create_database, require_current_schema
+from .email_delivery import DevMaildirSink, EmailDeliveryError, EmailRelay
 from .entitlements import (
     AD_SLOTS,
     ensure_projection,
@@ -284,6 +288,11 @@ def create_app(
         else:
             billing_adapter = StripeBillingAdapter(settings)
     payment_worker = PaymentWorker(session_factory, billing_adapter, settings)
+    if settings.email_maildir_path is None or settings.email_delivery_hmac_key is None:
+        raise RuntimeError("DEV email relay configuration is required")
+    email_relay = EmailRelay(
+        DevMaildirSink(settings.email_maildir_path), settings.email_delivery_hmac_key
+    )
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
@@ -340,6 +349,7 @@ def create_app(
     app.state.session_factory = session_factory
     app.state.billing = billing_adapter
     app.state.payment_worker = payment_worker
+    app.state.email_relay = email_relay
     app.mount(
         "/premium-static",
         StaticFiles(directory=Path(__file__).with_name("static")),
@@ -907,6 +917,34 @@ def create_app(
         value = evaluate_entitlements(database, user.id, at=datetime.now(UTC))
         response.headers["ETag"] = entitlement_etag(value)
         return value
+
+    @app.post("/v1/email-deliveries", response_model=EmailDeliveryV1)
+    async def create_email_delivery(
+        request: Request,
+        user: User = Depends(_bearer_user),
+        database: Session = Depends(_database_session),
+    ) -> EmailDeliveryV1:
+        body = bytearray()
+        async for chunk in request.stream():
+            body.extend(chunk)
+            if len(body) > EMAIL_REQUEST_MAX_BYTES:
+                raise ApiError(413, "delivery_too_large", "Transcript email content is too large")
+        try:
+            payload = EmailDeliveryRequestV1.model_validate_json(bytes(body))
+        except ValidationError as exc:
+            too_large = any(
+                error["loc"] == ("transcript_text",) and "delivery bound" in str(error["msg"])
+                for error in exc.errors()
+            )
+            if too_large:
+                raise ApiError(
+                    413, "delivery_too_large", "Transcript email content is too large"
+                ) from exc
+            raise ApiError(422, "invalid_request", "Request data is invalid") from exc
+        try:
+            return email_relay.deliver(database, user.id, payload)
+        except EmailDeliveryError as exc:
+            raise ApiError(exc.status, exc.code, exc.message) from exc
 
     @app.get(
         "/v1/ads/inventory/{slot}",

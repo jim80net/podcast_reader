@@ -282,6 +282,49 @@ class HouseAd(Base):
     )
 
 
+class EmailDeliveryReceipt(Base):
+    __tablename__ = "email_delivery_receipts"
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    client_delivery_id: Mapped[str] = mapped_column(String(40), nullable=False)
+    consent_kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    content_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    payload_hmac: Mapped[str] = mapped_column(String(64), nullable=False)
+    sink: Mapped[str] = mapped_column(String(24), nullable=False)
+    state: Mapped[str] = mapped_column(String(16), nullable=False)
+    error_code: Mapped[str | None] = mapped_column(String(64))
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[int] = mapped_column(Integer, nullable=False)
+    updated_at: Mapped[int] = mapped_column(Integer, nullable=False)
+    delivered_at: Mapped[int | None] = mapped_column(Integer)
+
+    __table_args__ = (
+        CheckConstraint(
+            "consent_kind IN ('subscription_completion', 'manual')",
+            name="ck_email_receipts_consent",
+        ),
+        CheckConstraint("sink = 'dev_maildir'", name="ck_email_receipts_sink"),
+        CheckConstraint(
+            "state IN ('processing', 'delivered', 'failed')", name="ck_email_receipts_state"
+        ),
+        CheckConstraint(
+            "error_code IS NULL OR error_code = 'delivery_unavailable'",
+            name="ck_email_receipts_error",
+        ),
+        CheckConstraint(
+            "(state = 'delivered' AND delivered_at IS NOT NULL AND error_code IS NULL) OR "
+            "(state = 'processing' AND delivered_at IS NULL AND error_code IS NULL) OR "
+            "(state = 'failed' AND delivered_at IS NULL "
+            "AND error_code = 'delivery_unavailable')",
+            name="ck_email_receipts_state_fields",
+        ),
+        CheckConstraint("attempts >= 1", name="ck_email_receipts_attempts"),
+        UniqueConstraint("user_id", "client_delivery_id", name="uq_email_receipts_user_client"),
+        Index("ix_email_receipts_state_updated", "state", "updated_at"),
+    )
+
+
 class AuditLog(Base):
     __tablename__ = "audit_log"
 

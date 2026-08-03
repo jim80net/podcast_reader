@@ -313,6 +313,6 @@ def test_migration_normalizes_existing_ad_system_all_to_free(
             == "free"
         )
         assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == (
-            "0004_ad_inventory_contract"
+            "0005_email_delivery_relay"
         )
     engine.dispose()
