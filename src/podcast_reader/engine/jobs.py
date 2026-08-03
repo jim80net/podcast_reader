@@ -41,10 +41,17 @@ if TYPE_CHECKING:
 
     JobRunner = Callable[[JobRecord, Callable[[PipelineEvent], None]], PipelineResult]
 
+    class StoredJobRecord(JobRecord, total=False):
+        """Journal-only fields that must never cross the public job boundary."""
+
+        idempotency_key: str
+
+
 logger = logging.getLogger(__name__)
 
 JOURNAL_FILE = "jobs.json"
 MAX_TERMINAL_JOBS = 200
+MAX_IDEMPOTENCY_KEY_LENGTH = 8192
 
 _TERMINAL_STATES = frozenset({"done", "failed", "interrupted"})
 
@@ -77,6 +84,21 @@ class JobStateError(Exception):
     The message names the job's current state and is self-authored, so the
     API layer may surface it verbatim (as a 409 detail).
     """
+
+
+class IdempotencyConflictError(ValueError):
+    """An internal idempotency key was reused for different job input."""
+
+
+def _public_record(record: StoredJobRecord) -> JobRecord:
+    snapshot = copy.deepcopy(record)
+    snapshot.pop("idempotency_key", None)
+    return cast("JobRecord", snapshot)
+
+
+def _validate_idempotency_key(value: str) -> None:
+    if not value or len(value) > MAX_IDEMPOTENCY_KEY_LENGTH or not value.isprintable():
+        raise ValueError("invalid job idempotency key")
 
 
 class WakeQueue:
@@ -136,7 +158,8 @@ class JobStore:
         self._data_dir = data_dir
         self._runner = runner
         self._lock = threading.RLock()
-        self._jobs: dict[str, JobRecord] = {}
+        self._jobs: dict[str, StoredJobRecord] = {}
+        self._idempotency_keys: dict[str, str] = {}
         self._queue = WakeQueue()
         self._worker: threading.Thread | None = None
         self._stop = threading.Event()
@@ -158,6 +181,7 @@ class JobStore:
         *,
         requires_confirmation: bool = False,
         overrides: JobOverrides | None = None,
+        idempotency_key: str | None = None,
     ) -> JobRecord:
         """Create a job and enqueue it for the worker (default: ``queued``).
 
@@ -168,21 +192,59 @@ class JobStore:
 
         *overrides* carries per-job model choices for a rerun; the runner merges
         them over settings and clears the cached artifacts the change invalidates.
+
+        *idempotency_key* is an internal-only subscription handoff seam. Reusing
+        it with identical input returns the retained job; it is never returned by
+        the public API and manual submissions omit it from the journal entirely.
         """
-        record = new_job_record(
-            job_id=uuid.uuid4().hex, source=source, title=title, overrides=overrides or None
-        )
-        if requires_confirmation:
-            record["state"] = "awaiting-confirmation"
-        now = time.time()
-        record["created_at"] = now
-        record["updated_at"] = now
+        if idempotency_key is not None:
+            _validate_idempotency_key(idempotency_key)
+            if requires_confirmation:
+                raise ValueError("idempotent jobs cannot require confirmation")
         with self._lock:
+            if idempotency_key is not None:
+                existing_id = self._idempotency_keys.get(idempotency_key)
+                if existing_id is not None:
+                    existing = self._jobs[existing_id]
+                    if (
+                        existing["source"] != source
+                        or existing["title"] != title
+                        or existing.get("overrides") != (overrides or None)
+                    ):
+                        raise IdempotencyConflictError(
+                            "job idempotency key already belongs to different input"
+                        )
+                    return _public_record(existing)
+
+            record = cast(
+                "StoredJobRecord",
+                new_job_record(
+                    job_id=uuid.uuid4().hex,
+                    source=source,
+                    title=title,
+                    overrides=overrides or None,
+                ),
+            )
+            if requires_confirmation:
+                record["state"] = "awaiting-confirmation"
+            if idempotency_key is not None:
+                record["idempotency_key"] = idempotency_key
+            now = time.time()
+            record["created_at"] = now
+            record["updated_at"] = now
             self._jobs[record["id"]] = record
-            self._write_journal()
+            if idempotency_key is not None:
+                self._idempotency_keys[idempotency_key] = record["id"]
+            try:
+                self._write_journal()
+            except Exception:
+                del self._jobs[record["id"]]
+                if idempotency_key is not None:
+                    del self._idempotency_keys[idempotency_key]
+                raise
         if not requires_confirmation:
             self._queue.put(record["id"])
-        return copy.deepcopy(record)
+        return _public_record(record)
 
     def confirm(self, job_id: str) -> JobRecord:
         """Transition an awaiting-confirmation job to ``queued`` and enqueue it.
@@ -196,7 +258,7 @@ class JobStore:
             record["state"] = "queued"
             record["updated_at"] = time.time()
             self._write_journal()
-            snapshot = copy.deepcopy(record)
+            snapshot = _public_record(record)
         self._queue.put(job_id)
         return snapshot
 
@@ -216,12 +278,19 @@ class JobStore:
     def get(self, job_id: str) -> JobRecord:
         """Snapshot of one job record (raises ``KeyError`` when unknown)."""
         with self._lock:
-            return copy.deepcopy(self._jobs[job_id])
+            return _public_record(self._jobs[job_id])
 
     def list_jobs(self) -> list[JobRecord]:
         """Snapshots of all job records in submission order."""
         with self._lock:
-            return [copy.deepcopy(record) for record in self._jobs.values()]
+            return [_public_record(record) for record in self._jobs.values()]
+
+    def get_by_idempotency_key(self, idempotency_key: str) -> JobRecord | None:
+        """Return the retained internal job for *idempotency_key*, if any."""
+        _validate_idempotency_key(idempotency_key)
+        with self._lock:
+            job_id = self._idempotency_keys.get(idempotency_key)
+            return _public_record(self._jobs[job_id]) if job_id is not None else None
 
     def start_worker(self) -> None:
         """Start the single worker thread (idempotent; restartable after shutdown).
@@ -316,7 +385,7 @@ class JobStore:
     def _run_job(self, job_id: str) -> None:
         self._transition(job_id, "running")
         with self._lock:
-            record = copy.deepcopy(self._jobs[job_id])
+            record = _public_record(self._jobs[job_id])
 
         def on_event(event: PipelineEvent) -> None:
             tagged = PipelineEvent(
@@ -424,15 +493,22 @@ class JobStore:
         if not path.exists():
             return
         try:
-            records = cast("list[JobRecord]", json.loads(path.read_text()))
-            jobs: dict[str, JobRecord] = {}
-            queued: list[JobRecord] = []
+            records = cast("list[StoredJobRecord]", json.loads(path.read_text()))
+            jobs: dict[str, StoredJobRecord] = {}
+            idempotency_keys: dict[str, str] = {}
+            queued: list[StoredJobRecord] = []
             interrupted = False
             for record in records:
                 # Migrate journals written before per-job overrides/models and
                 # structured error detail existed.
                 record.setdefault("overrides", None)
                 record.setdefault("models", None)
+                idempotency_key = record.get("idempotency_key")
+                if idempotency_key is not None:
+                    _validate_idempotency_key(idempotency_key)
+                    if idempotency_key in idempotency_keys:
+                        raise ValueError("duplicate job idempotency key")
+                    idempotency_keys[idempotency_key] = record["id"]
                 error = record["error"]
                 if error is not None:
                     error.setdefault("detail", "")
@@ -461,6 +537,7 @@ class JobStore:
             return
         with self._lock:
             self._jobs.update(jobs)
+            self._idempotency_keys.update(idempotency_keys)
             if interrupted:
                 self._write_journal()
         for record in queued:
@@ -484,3 +561,6 @@ class JobStore:
         terminal.sort(key=lambda r: r["updated_at"])
         for record in terminal[:excess]:
             del self._jobs[record["id"]]
+            idempotency_key = record.get("idempotency_key")
+            if idempotency_key is not None:
+                self._idempotency_keys.pop(idempotency_key, None)

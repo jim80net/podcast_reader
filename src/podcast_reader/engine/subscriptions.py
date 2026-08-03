@@ -8,7 +8,7 @@ import threading
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from podcast_reader.engine.subscription_feed import (
     CachingResolver,
@@ -27,9 +27,15 @@ from podcast_reader.engine.subscription_store import (
     episode_record,
 )
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from podcast_reader.engine.jobs import JobStore
+
 POLL_INTERVAL_SECONDS = 30 * 60
 START_DELAY_SECONDS = 15
 MAX_SCHEDULED_PER_TICK = 3
+MAX_JOBS_PER_POLL = 3
 ERROR_BACKOFF_SECONDS = 30 * 60
 MAX_CAPABILITY_LIFETIME_SECONDS = 10 * 60
 _SUBJECT_RE = re.compile(r"usr_[A-Za-z0-9_-]{1,128}")
@@ -84,10 +90,14 @@ class SubscriptionManager:
         *,
         fetcher: FeedFetcher | None = None,
         clock: Clock = _utc_now,
+        job_store: JobStore | None = None,
+        library_has_source: Callable[[str], bool] | None = None,
     ) -> None:
         self.store = store
         self._fetcher = fetcher or SafeFeedFetcher()
         self._clock = clock
+        self._job_store = job_store
+        self._library_has_source = library_has_source or (lambda _source: False)
         self._capability: OnlineCapabilitySnapshot | None = None
         self._capability_lock = threading.Lock()
         self._in_flight: set[str] = set()
@@ -101,6 +111,7 @@ class SubscriptionManager:
 
     def start(self) -> None:
         """Arm scheduling; Local remains thread-free until a fresh capability arrives."""
+        self._reconcile_jobs()
         self._armed = True
         if not self.is_available():
             return
@@ -236,6 +247,10 @@ class SubscriptionManager:
         self._require_available()
         with self._claim(subscription_id):
             subscription = self.store.get_subscription(subscription_id)
+            handed_off = self._handoff_discovered(
+                subscription_id,
+                limit=MAX_JOBS_PER_POLL,
+            )
             try:
                 response = self._fetcher.fetch(
                     subscription["feed_url"],
@@ -244,7 +259,11 @@ class SubscriptionManager:
                     should_continue=self.is_available,
                 )
                 self._require_available()
-                return self._record_response(subscription, response)
+                return self._record_response(
+                    subscription,
+                    response,
+                    handoff_limit=MAX_JOBS_PER_POLL - handed_off,
+                )
             except PremiumFeatureUnavailableError:
                 raise
             except FeedError as exc:
@@ -264,7 +283,11 @@ class SubscriptionManager:
                 raise
 
     def _record_response(
-        self, subscription: SubscriptionRecord, response: FeedResponse
+        self,
+        subscription: SubscriptionRecord,
+        response: FeedResponse,
+        *,
+        handoff_limit: int,
     ) -> PollResult:
         now = self._clock()
         next_check = _iso(now + timedelta(seconds=self._jitter(subscription["id"])))
@@ -299,11 +322,78 @@ class SubscriptionManager:
             next_check_at=next_check,
             episodes=episodes,
         )
+        self._handoff_discovered(subscription["id"], limit=handoff_limit)
         return PollResult(
             subscription=updated,
             discovered_count=discovered,
             not_modified=False,
         )
+
+    @staticmethod
+    def _idempotency_key(episode: EpisodeRecord) -> str:
+        return f"subscription:{episode['subscription_id']}:{episode['episode_key']}"
+
+    def _handoff_discovered(self, subscription_id: str, *, limit: int) -> int:
+        if self._job_store is None or limit <= 0:
+            return 0
+        episodes = self.store.discovered_episodes(
+            subscription_id,
+            limit=limit,
+        )
+        for episode in episodes:
+            self._require_available()
+            job = self._job_store.submit(
+                episode["enclosure_url"],
+                episode["title"],
+                idempotency_key=self._idempotency_key(episode),
+            )
+            self.store.mark_episode_queued(
+                episode["subscription_id"],
+                episode["episode_key"],
+                job_id=job["id"],
+                updated_at=_iso(self._clock()),
+            )
+        return len(episodes)
+
+    def _reconcile_jobs(self) -> None:
+        if self._job_store is None:
+            return
+        for episode in self.store.episodes_for_reconciliation():
+            job = None
+            if episode["state"] == "discovered":
+                job = self._job_store.get_by_idempotency_key(self._idempotency_key(episode))
+                if job is None:
+                    continue
+                self.store.mark_episode_queued(
+                    episode["subscription_id"],
+                    episode["episode_key"],
+                    job_id=job["id"],
+                    updated_at=_iso(self._clock()),
+                )
+            else:
+                job_id = episode["job_id"]
+                if job_id is not None:
+                    try:
+                        job = self._job_store.get(job_id)
+                    except KeyError:
+                        job = None
+
+            terminal_state: str | None = None
+            if job is not None and job["state"] == "done":
+                terminal_state = "completed"
+            elif job is not None and job["state"] in {"failed", "interrupted"}:
+                terminal_state = "failed"
+            elif job is None and episode["state"] == "queued":
+                terminal_state = (
+                    "completed" if self._library_has_source(episode["enclosure_url"]) else "failed"
+                )
+            if terminal_state is not None:
+                self.store.mark_episode_terminal(
+                    episode["subscription_id"],
+                    episode["episode_key"],
+                    state=terminal_state,
+                    updated_at=_iso(self._clock()),
+                )
 
     class _Claim:
         def __init__(self, manager: SubscriptionManager, subscription_id: str) -> None:
@@ -331,6 +421,7 @@ class SubscriptionManager:
 
     def _run_scheduler(self) -> None:
         while not self._stopping.is_set() and not self._scheduler_stop.is_set():
+            self._reconcile_jobs()
             if not self.is_available():
                 self._wake.wait(timeout=1.0)
                 self._wake.clear()

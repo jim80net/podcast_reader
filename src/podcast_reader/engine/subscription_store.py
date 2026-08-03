@@ -12,6 +12,8 @@ import sqlite3
 import sys
 import threading
 from contextlib import contextmanager
+from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from typing import TYPE_CHECKING, TypedDict
 
 from podcast_reader.engine.settings import (
@@ -393,6 +395,111 @@ class SubscriptionStore:
             for row in rows
         ]
 
+    def discovered_episodes(self, subscription_id: str, *, limit: int) -> list[EpisodeRecord]:
+        """Oldest discovered episodes eligible for the bounded job handoff."""
+        with self._lock:
+            rows = self._connection.execute(
+                """
+                SELECT * FROM episodes
+                WHERE subscription_id = ? AND state = 'discovered'
+                ORDER BY
+                    CASE WHEN published_at IS NULL THEN 1 ELSE 0 END,
+                    published_at, created_at, episode_key
+                LIMIT ?
+                """,
+                (subscription_id, limit),
+            ).fetchall()
+        return [self._episode_from_row(row) for row in rows]
+
+    def episodes_for_reconciliation(self) -> list[EpisodeRecord]:
+        """Rows whose discovery-to-job crash window or terminal state needs repair."""
+        with self._lock:
+            rows = self._connection.execute(
+                """
+                SELECT * FROM episodes
+                WHERE state IN ('discovered', 'queued')
+                ORDER BY created_at, subscription_id, episode_key
+                """
+            ).fetchall()
+        return [self._episode_from_row(row) for row in rows]
+
+    def mark_episode_queued(
+        self,
+        subscription_id: str,
+        episode_key: str,
+        *,
+        job_id: str,
+        updated_at: str,
+    ) -> None:
+        """Atomically attach the idempotently submitted job to a discovery."""
+        with self._transaction() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE episodes SET state = 'queued', job_id = ?, updated_at = ?
+                WHERE subscription_id = ? AND episode_key = ? AND state = 'discovered'
+                """,
+                (job_id, updated_at, subscription_id, episode_key),
+            )
+            if cursor.rowcount == 0:
+                row = connection.execute(
+                    """
+                    SELECT state, job_id FROM episodes
+                    WHERE subscription_id = ? AND episode_key = ?
+                    """,
+                    (subscription_id, episode_key),
+                ).fetchone()
+                if row is None:
+                    raise KeyError((subscription_id, episode_key))
+                if row["state"] != "queued" or row["job_id"] != job_id:
+                    raise RuntimeError("episode cannot be attached to this job")
+
+    def mark_episode_terminal(
+        self,
+        subscription_id: str,
+        episode_key: str,
+        *,
+        state: str,
+        updated_at: str,
+    ) -> None:
+        """Record a reconciled job outcome without deleting local episode data."""
+        if state not in {"completed", "failed"}:
+            raise ValueError("invalid terminal episode state")
+        with self._transaction() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE episodes SET state = ?, updated_at = ?
+                WHERE subscription_id = ? AND episode_key = ? AND state = 'queued'
+                """,
+                (state, updated_at, subscription_id, episode_key),
+            )
+            if cursor.rowcount == 0:
+                row = connection.execute(
+                    """
+                    SELECT state FROM episodes
+                    WHERE subscription_id = ? AND episode_key = ?
+                    """,
+                    (subscription_id, episode_key),
+                ).fetchone()
+                if row is None:
+                    raise KeyError((subscription_id, episode_key))
+                if row["state"] != state:
+                    raise RuntimeError("episode is not queued for reconciliation")
+
+    @staticmethod
+    def _episode_from_row(row: sqlite3.Row) -> EpisodeRecord:
+        return EpisodeRecord(
+            subscription_id=row["subscription_id"],
+            episode_key=row["episode_key"],
+            guid=row["guid"],
+            enclosure_url=row["enclosure_url"],
+            title=row["title"],
+            published_at=row["published_at"],
+            state=row["state"],
+            job_id=row["job_id"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+
     def backup_and_verify(self, output: Path) -> BackupProof:
         """Create an online backup and prove integrity plus application row counts."""
         if output.resolve() == self.path.resolve():
@@ -444,9 +551,24 @@ def episode_record(
         guid=guid,
         enclosure_url=enclosure_url,
         title=title,
-        published_at=published_at,
+        published_at=_normalized_published_at(published_at),
         state="discovered",
         job_id=None,
         created_at=now,
         updated_at=now,
     )
+
+
+def _normalized_published_at(value: str | None) -> str | None:
+    if value is None:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        try:
+            parsed = parsedate_to_datetime(value)
+        except (TypeError, ValueError, OverflowError):
+            return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC).isoformat().replace("+00:00", "Z")

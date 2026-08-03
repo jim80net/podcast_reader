@@ -362,7 +362,16 @@ def serve_engine(
         cache_max_bytes=lambda: load_settings(base)["media_cache_max_bytes"],
         get_entry=lambda sid: library.get_entry(Path(load_settings(base)["library_dir"]), sid),
     )
-    subscription_manager = SubscriptionManager(SubscriptionStore(base))
+    subscription_manager = SubscriptionManager(
+        SubscriptionStore(base),
+        job_store=store,
+        library_has_source=lambda source: (
+            library.get_entry(
+                Path(load_settings(base)["library_dir"]), library.source_identity(source)
+            )
+            is not None
+        ),
+    )
 
     # POST /v1/shutdown hook: the server object is created after the app, so
     # the hook reaches it through this list (filled before any request runs).
@@ -403,6 +412,10 @@ def serve_engine(
         server.run(sockets=[sock])
     finally:
         remove_discovery(path)
+        # Stop feed discovery before stopping the durable job worker: an
+        # in-flight poll may finish its bounded handoff, but no scheduler can
+        # append a new job after the worker has gone quiescent.
+        subscription_manager.shutdown()
         # Mark the store stopping BEFORE reaping children: the in-flight job
         # fails when its child dies, and that failure must already be
         # attributable to shutdown (journaled interrupted, per P2).
@@ -412,7 +425,6 @@ def serve_engine(
         # An in-flight pack download aborts between chunks; its partial stays
         # on disk, so the pack surfaces as resumable on the next start.
         pack_manager.shutdown()
-        subscription_manager.shutdown()
         sock.close()
 
 
