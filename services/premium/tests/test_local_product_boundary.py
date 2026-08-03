@@ -30,9 +30,12 @@ def test_premium_service_is_absent_from_local_engine_and_desktop_dependency_clos
         if path.is_relative_to(premium_boundary):
             folded = source.casefold()
             assert "127.0.0.1" not in folded and "localhost" not in folded, path
-            assert re.search(
-                r"from\s+['\"](?:(?:\.\./)+|@[^/'\"]+/)?engine(?:[-/'\"])",
-                folded,
-            ) is None, path
+            assert (
+                re.search(
+                    r"from\s+['\"](?:(?:\.\./)+|@[^/'\"]+/)?engine(?:[-/'\"])",
+                    folded,
+                )
+                is None
+            ), path
         else:
             assert "premium" not in source.casefold(), path
