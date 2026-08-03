@@ -234,7 +234,7 @@ def evaluate_entitlements(
         + ([ad_config.revision] if ad_config is not None else [0])
     )
     premium = tier == "premium"
-    ad_policy: Literal["none", "house", "paid"] = "none"
+    ad_policy: Literal["none", "house"] = "none"
     if (
         not premium
         and ad_config is not None

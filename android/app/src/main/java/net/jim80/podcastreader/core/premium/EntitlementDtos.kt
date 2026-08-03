@@ -5,6 +5,9 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
+private const val MAX_SAFE_REVISION = 9_007_199_254_740_991L
+private val CANONICAL_UTC_SECONDS = Regex("^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$")
+
 internal val premiumJson = Json {
     ignoreUnknownKeys = false
     isLenient = false
@@ -28,14 +31,19 @@ data class EntitlementV1Dto(
     internal fun validated(expectedSubject: String): Result<EntitlementProjection> = runCatching {
         require(schemaVersion == 1) { "unsupported entitlement schema" }
         require(subject == expectedSubject && subject.isNotBlank()) { "entitlement subject mismatch" }
-        require(entitlement.revision >= 0 && flagsRevision >= 0) { "invalid entitlement revision" }
+        require(entitlement.revision in 0..MAX_SAFE_REVISION && flagsRevision in 0..MAX_SAFE_REVISION) {
+            "invalid entitlement revision"
+        }
         val evaluated = parseCanonicalUtc(evaluatedAt)
         val refresh = parseCanonicalUtc(refreshAfter)
         require(refresh.isAfter(evaluated)) { "invalid entitlement refresh window" }
 
         when (tier) {
             EntitlementTierDto.FREE -> {
-                require(entitlement.source == EntitlementSourceKindDto.NONE)
+                require(
+                    entitlement.source == EntitlementSourceKindDto.NONE ||
+                        entitlement.source == EntitlementSourceKindDto.ADMIN,
+                )
                 require(capabilities.adPolicy == AdPolicyDto.NONE || capabilities.adPolicy == AdPolicyDto.HOUSE)
                 require(!capabilities.podcastSubscriptions)
                 require(!capabilities.transcriptEmail)
@@ -45,10 +53,10 @@ data class EntitlementV1Dto(
 
             EntitlementTierDto.PREMIUM -> {
                 require(
-                    entitlement.source == EntitlementSourceKindDto.TEST_PURCHASE,
+                    entitlement.source == EntitlementSourceKindDto.TEST_PURCHASE ||
+                        entitlement.source == EntitlementSourceKindDto.ADMIN,
                 )
                 require(capabilities.adPolicy == AdPolicyDto.NONE)
-                require(capabilities.mobileAdFree)
             }
         }
 
@@ -88,6 +96,9 @@ enum class EntitlementSourceKindDto {
     @SerialName("test_purchase")
     TEST_PURCHASE,
 
+    @SerialName("admin")
+    ADMIN,
+
 }
 
 @Serializable
@@ -123,7 +134,7 @@ data class EntitlementProjection(
 }
 
 private fun parseCanonicalUtc(value: String): Instant {
-    require(value.endsWith('Z')) { "entitlement timestamp must be UTC" }
+    require(CANONICAL_UTC_SECONDS.matches(value)) { "entitlement timestamp must be canonical UTC seconds" }
     return Instant.parse(value).also {
         require(it.toString() == value) { "entitlement timestamp is not canonical" }
     }
