@@ -27,7 +27,7 @@ def _normalize_token_response(payload: dict[str, object]) -> dict[str, object]:
 
 
 def test_native_auth_route_inventory_and_success_fixtures_match_live_shapes(
-    client: TestClient, browser_auth: dict[str, str]
+    client: TestClient, account: dict[str, object], browser_auth: dict[str, str]
 ) -> None:
     app = cast("Any", client.app)
     route_inventory = {
@@ -77,6 +77,7 @@ def test_native_auth_route_inventory_and_success_fixtures_match_live_shapes(
     current_fixture = cast("dict[str, object]", _fixture("v1/current-user/current-user-v1.json"))
     assert set(current) == {"id"}
     assert isinstance(current["id"], str) and current["id"]
+    assert current["id"] == account["id"]
     current["id"] = current_fixture["id"]
     assert current == current_fixture
 
