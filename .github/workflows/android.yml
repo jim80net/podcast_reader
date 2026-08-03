@@ -85,7 +85,7 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
           script: ./android/scripts/run_emulator_acceptance.sh "$GITHUB_WORKSPACE/android/build/acceptance/api-${{ matrix.api-level }}"
       - name: Upload redacted acceptance evidence
-        if: always()
+        if: ${{ always() && hashFiles(format('android/build/acceptance/api-{0}/SAFE_TO_UPLOAD', matrix.api-level)) != '' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: android-emulator-api-${{ matrix.api-level }}
