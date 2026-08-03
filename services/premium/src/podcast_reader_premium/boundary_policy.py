@@ -675,6 +675,9 @@ def write_or_check(repo_root: Path, *, check: bool) -> None:
                 raise PolicyError(f"{path}: stale or missing generated projection")
         else:
             path.write_text(expected, encoding="utf-8")
+    from .boundary_inventory import check_surface_inventory
+
+    check_surface_inventory(repo_root)
 
 
 def repository_root() -> Path:
