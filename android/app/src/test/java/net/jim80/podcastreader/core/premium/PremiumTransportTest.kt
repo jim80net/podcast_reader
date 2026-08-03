@@ -23,6 +23,15 @@ class PremiumTransportTest {
     }
 
     @Test
+    fun currentUserRequestUsesTheFrozenRouteOnTheSamePremiumOrigin() {
+        val request = PremiumRequestFactory(origin).authenticatedGet(PremiumRoute.CurrentUser, access)
+
+        assertEquals("https://premium.example.ts.net:8443/v1/me", request.url.toString())
+        assertEquals("Bearer premium-access-marker-1234567890", request.header("Authorization"))
+        assertEquals("application/json", request.header("Accept"))
+    }
+
+    @Test
     fun premiumTransportHasNoRedirectCookieOrCacheSurface() {
         val client = securePremiumHttpClient()
 

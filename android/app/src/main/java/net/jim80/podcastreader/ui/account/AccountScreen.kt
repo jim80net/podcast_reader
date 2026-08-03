@@ -38,6 +38,10 @@ fun AccountScreen(
             style = MaterialTheme.typography.bodyLarge,
         )
         when (state) {
+            AccountUiState.Bootstrapping -> {
+                Text("Checking account status", style = MaterialTheme.typography.titleMedium)
+                Text("Local reading remains available while the account record is checked.")
+            }
             AccountUiState.Local -> LocalAccount(accountServiceConfigured, onConnect)
             is AccountUiState.Authorizing -> AuthorizingAccount(state, onCancelConnect)
             AccountUiState.OnlineFree -> ConnectedAccount(

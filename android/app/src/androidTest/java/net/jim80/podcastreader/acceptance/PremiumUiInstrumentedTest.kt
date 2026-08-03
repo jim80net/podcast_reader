@@ -14,6 +14,7 @@ import net.jim80.podcastreader.core.ads.HouseAdPlacement
 import net.jim80.podcastreader.core.ads.HouseInventory
 import net.jim80.podcastreader.core.premium.OnlineUnavailableReason
 import net.jim80.podcastreader.core.premium.UserCode
+import net.jim80.podcastreader.runtime.PodcastReaderRuntimeSnapshot
 import net.jim80.podcastreader.support.FixtureProductStates
 import net.jim80.podcastreader.ui.AccountUiState
 import net.jim80.podcastreader.ui.PodcastReaderActions
@@ -59,11 +60,12 @@ class PremiumUiInstrumentedTest {
     @Test
     fun freshOnlineFreeMountsOnlyItsPlacementMatchedNativeText() {
         val state = PodcastReaderUiState.project(
-            productState = fixtures.free(houseAds = true),
+            snapshot = PodcastReaderRuntimeSnapshot.online(
+                fixtures.free(houseAds = true),
+                libraryInventory = inventory(HouseAdPlacement.LIBRARY, "Library acceptance message"),
+                jobsInventory = inventory(HouseAdPlacement.JOBS, "Jobs acceptance message"),
+            ),
             now = now,
-            accountServiceConfigured = true,
-            libraryInventory = inventory(HouseAdPlacement.LIBRARY, "Library acceptance message"),
-            jobsInventory = inventory(HouseAdPlacement.JOBS, "Jobs acceptance message"),
         )
         compose.setContent { PodcastReaderTheme { PodcastReaderApp(state, noOpActions) } }
 
@@ -84,7 +86,10 @@ class PremiumUiInstrumentedTest {
             fixtures.unavailable(OnlineUnavailableReason.OFFLINE),
             fixtures.premium(),
         ).forEach { productState ->
-            val state = PodcastReaderUiState.project(productState, now, true, libraryInventory = inventory)
+            val state = PodcastReaderUiState.project(
+                PodcastReaderRuntimeSnapshot.online(productState, libraryInventory = inventory),
+                now,
+            )
             assertTrue(state.libraryInventory == null)
             assertTrue(state.jobsInventory == null)
         }
@@ -92,10 +97,11 @@ class PremiumUiInstrumentedTest {
             PodcastReaderTheme {
                 PodcastReaderApp(
                     PodcastReaderUiState.project(
-                        fixtures.unavailable(OnlineUnavailableReason.OFFLINE),
-                        now,
-                        true,
-                        libraryInventory = inventory,
+                        PodcastReaderRuntimeSnapshot.online(
+                            fixtures.unavailable(OnlineUnavailableReason.OFFLINE),
+                            libraryInventory = inventory,
+                        ),
+                        now = now,
                     ),
                     noOpActions,
                 )

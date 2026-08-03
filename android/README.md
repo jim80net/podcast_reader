@@ -29,6 +29,7 @@ IDs, remote images, HTML, scripts, or impression/click reporting surfaces.
 uv run python scripts/check_engine_contract_fixtures.py  # from android/
 python3 scripts/check_ad_containment.py                  # from android/
 python3 scripts/check_ad_contract_handoff.py             # from android/
+python3 scripts/check_runtime_composition.py             # from android/
 ~~~
 
 The first command compiles the API-28+ Compose shell, runs boundary tests,

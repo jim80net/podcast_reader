@@ -6,6 +6,7 @@ import net.jim80.podcastreader.core.ads.HouseAdCta
 import net.jim80.podcastreader.core.ads.HouseAdPlacement
 import net.jim80.podcastreader.core.ads.HouseInventory
 import net.jim80.podcastreader.core.premium.OnlineUnavailableReason
+import net.jim80.podcastreader.runtime.PodcastReaderRuntimeSnapshot
 import net.jim80.podcastreader.support.FixtureProductStates
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
@@ -20,11 +21,17 @@ class PodcastReaderUiStateTest {
     fun localPremiumAndUnavailableNeverProjectHouseSlots() {
         val inventory = inventory(HouseAdPlacement.LIBRARY)
         listOf(
-            fixtures.local(),
-            fixtures.premium(),
-            fixtures.unavailable(OnlineUnavailableReason.OFFLINE),
-        ).forEach { productState ->
-            val state = PodcastReaderUiState.project(productState, now, true, libraryInventory = inventory)
+            PodcastReaderRuntimeSnapshot.local(),
+            PodcastReaderRuntimeSnapshot.online(fixtures.premium(), libraryInventory = inventory),
+            PodcastReaderRuntimeSnapshot.online(
+                fixtures.unavailable(OnlineUnavailableReason.OFFLINE),
+                libraryInventory = inventory,
+            ),
+        ).forEach { snapshot ->
+            val state = PodcastReaderUiState.project(
+                snapshot,
+                now,
+            )
             assertNull(state.libraryInventory)
             assertNull(state.jobsInventory)
         }
@@ -36,11 +43,17 @@ class PodcastReaderUiStateTest {
         val jobs = inventory(HouseAdPlacement.JOBS)
         val free = fixtures.free(houseAds = true)
 
-        val state = PodcastReaderUiState.project(free, now, true, libraryInventory = library, jobsInventory = jobs)
+        val state = PodcastReaderUiState.project(
+            PodcastReaderRuntimeSnapshot.online(free, libraryInventory = library, jobsInventory = jobs),
+            now,
+        )
         assertSame(library, state.libraryInventory)
         assertSame(jobs, state.jobsInventory)
 
-        val swapped = PodcastReaderUiState.project(free, now, true, libraryInventory = jobs, jobsInventory = library)
+        val swapped = PodcastReaderUiState.project(
+            PodcastReaderRuntimeSnapshot.online(free, libraryInventory = jobs, jobsInventory = library),
+            now,
+        )
         assertNull(swapped.libraryInventory)
         assertNull(swapped.jobsInventory)
     }
@@ -48,41 +61,46 @@ class PodcastReaderUiStateTest {
     @Test
     fun staleTruthAndExpiredInventoryCollapseBeforeCompose() {
         val stale = fixtures.free(houseAds = true, at = Instant.parse("2026-08-02T00:05:00Z"))
-        assertNull(PodcastReaderUiState.project(stale, now, true, libraryInventory = inventory()).libraryInventory)
+        assertNull(
+            PodcastReaderUiState.project(
+                PodcastReaderRuntimeSnapshot.online(stale, libraryInventory = inventory()),
+                now,
+            ).libraryInventory,
+        )
 
         val fresh = fixtures.free(houseAds = true)
         assertNull(
             PodcastReaderUiState.project(
-                fresh,
+                PodcastReaderRuntimeSnapshot.online(
+                    fresh,
+                    libraryInventory = inventory(expiresAt = now),
+                ),
                 now,
-                true,
-                libraryInventory = inventory(expiresAt = now),
             ).libraryInventory,
         )
     }
 
     @Test
     fun accountCopyKeepsLocalFreePremiumAndUnavailableDistinct() {
-        assertTrue(PodcastReaderUiState.project(fixtures.local(), now, false).account is AccountUiState.Local)
+        assertTrue(
+            PodcastReaderUiState.project(PodcastReaderRuntimeSnapshot.local(), now).account is AccountUiState.Local,
+        )
         assertTrue(
             PodcastReaderUiState.project(
-                fixtures.free(),
+                PodcastReaderRuntimeSnapshot.online(fixtures.free()),
                 now,
-                true,
             ).account is AccountUiState.OnlineFree,
         )
         assertTrue(
             PodcastReaderUiState.project(
-                fixtures.premium(),
+                PodcastReaderRuntimeSnapshot.online(fixtures.premium()),
                 now,
-                true,
             ).account is AccountUiState.OnlinePremium,
         )
         assertTrue(
             PodcastReaderUiState.project(
-                fixtures.unavailable(OnlineUnavailableReason.STALE),
+                PodcastReaderRuntimeSnapshot.online(fixtures.unavailable(OnlineUnavailableReason.STALE)),
                 now,
-                true,
             ).account is AccountUiState.OnlineUnavailable,
         )
     }
