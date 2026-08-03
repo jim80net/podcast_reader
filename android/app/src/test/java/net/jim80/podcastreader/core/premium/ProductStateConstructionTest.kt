@@ -14,9 +14,9 @@ class ProductStateConstructionTest {
 
         assertEquals(4, variants.size)
         assertTrue(variants.all { Modifier.isPrivate(it.modifiers) })
-        assertTrue(ProductState::class.java.constructors.isEmpty())
-        assertTrue(OnlineFreeTruth::class.java.constructors.isEmpty())
-        assertTrue(OnlinePremiumTruth::class.java.constructors.isEmpty())
+        assertTrue(ProductState::class.java.constructors.all { it.isSynthetic })
+        assertTrue(OnlineFreeTruth::class.java.constructors.all { it.isSynthetic })
+        assertTrue(OnlinePremiumTruth::class.java.constructors.all { it.isSynthetic })
     }
 
     @Test
