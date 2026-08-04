@@ -5,7 +5,6 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-
 ANDROID = Path(__file__).resolve().parents[1]
 MAIN = ANDROID / "app" / "src" / "main" / "java"
 ACTIVITY = MAIN / "net" / "jim80" / "podcastreader" / "MainActivity.kt"
@@ -16,6 +15,28 @@ RUNTIME = MAIN / "net" / "jim80" / "podcastreader" / "runtime" / "PodcastReaderR
 def require(condition: bool, message: str) -> None:
     if not condition:
         raise SystemExit(message)
+
+
+def repository_constructed_inside_runtime_gate(source: str) -> bool:
+    gate_marker = "HouseAdRuntimeGate.create(productState, now())"
+    if source.count(gate_marker) != 1:
+        return False
+    gate_start = source.index(gate_marker)
+    block_start = source.find("{", gate_start + len(gate_marker))
+    if block_start == -1:
+        return False
+    depth = 0
+    block_end = -1
+    for index in range(block_start, len(source)):
+        if source[index] == "{":
+            depth += 1
+        elif source[index] == "}":
+            depth -= 1
+            if depth == 0:
+                block_end = index
+                break
+    constructors = [match.start() for match in re.finditer(r"\bHouseAdRepository\s*\(", source)]
+    return len(constructors) == 1 and block_start < constructors[0] < block_end
 
 
 def main() -> None:
@@ -48,8 +69,16 @@ def main() -> None:
     require('"https://' not in composition, "production composition must not embed a premium origin")
     runtime = RUNTIME.read_text()
     require(
-        "HouseAdRuntimeGate.create(productState, now())" in runtime,
+        repository_constructed_inside_runtime_gate(runtime),
         "house-ad repository construction must stay reducer-gated",
+    )
+    relocated = (
+        runtime.replace("HouseAdRepository(eligibility, api)", "api", 1)
+        + "\nHouseAdRepository(eligibility, api)\n"
+    )
+    require(
+        not repository_constructed_inside_runtime_gate(relocated),
+        "runtime gate negative control failed",
     )
 
     allowed = COMPOSITION.resolve()

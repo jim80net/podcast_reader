@@ -34,6 +34,8 @@ import net.jim80.podcastreader.core.premium.UserCode
 import net.jim80.podcastreader.ui.AccountUiState
 import net.jim80.podcastreader.support.FixtureProductStates
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotSame
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -150,6 +152,7 @@ class PodcastReaderRuntimeTest {
         assertEquals(HouseAdPlacement.LIBRARY, runtime.uiState.value.libraryInventory?.placement)
         assertEquals(HouseAdPlacement.JOBS, runtime.uiState.value.jobsInventory?.placement)
 
+        val issuedState = runtime.uiState.value
         runtime.dispatch(
             PodcastReaderRuntimeEvent.OpenHouseAd(
                 HouseAdCta.fromContract("https://example.com/unissued").getOrThrow(),
@@ -161,8 +164,10 @@ class PodcastReaderRuntimeTest {
             ),
         )
         assertTrue(opened.isEmpty())
+        assertSame(issuedState, runtime.uiState.value)
         runtime.dispatch(PodcastReaderRuntimeEvent.OpenHouseAd(cta))
         assertEquals(listOf(cta), opened)
+        assertNotSame(issuedState, runtime.uiState.value)
 
         runtime.background()
         assertEquals(null, runtime.uiState.value.libraryInventory)

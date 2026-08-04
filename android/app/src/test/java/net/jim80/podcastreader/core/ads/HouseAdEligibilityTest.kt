@@ -1,12 +1,16 @@
 package net.jim80.podcastreader.core.ads
 
 import java.time.Instant
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import net.jim80.podcastreader.core.premium.PremiumFailure
 import net.jim80.podcastreader.core.premium.PremiumFailureCategory
 import net.jim80.podcastreader.core.premium.OnlineUnavailableReason
 import net.jim80.podcastreader.support.FixtureProductStates
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -67,6 +71,36 @@ class HouseAdEligibilityTest {
         assertEquals(3, api.calls)
     }
 
+    @Test
+    fun blockedFetchDoesNotHoldTheRepositoryMonitorAndCannotCommitAfterClear() {
+        val started = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val api = BlockingInventoryApi(successInventory(), started, release)
+        val repository = HouseAdRepository(EligibleHouseAds(now.plusSeconds(300)), api)
+        assertTrue(repository.refresh(HouseAdPlacement.LIBRARY, now, "seed") is HouseInventoryResult.Success)
+        val executor = Executors.newFixedThreadPool(3)
+        val refresh = executor.submit<HouseInventoryResult> {
+            repository.refresh(HouseAdPlacement.LIBRARY, now.plusSeconds(1), "blocked")
+        }
+
+        try {
+            assertTrue(started.await(1, TimeUnit.SECONDS))
+            val current = executor.submit<HouseInventory?> {
+                repository.current(HouseAdPlacement.LIBRARY, now.plusSeconds(1))
+            }
+            assertNotNull(current.get(1, TimeUnit.SECONDS))
+            val cleared = executor.submit<Unit> { repository.clear() }
+            cleared.get(1, TimeUnit.SECONDS)
+            assertNull(repository.current(HouseAdPlacement.LIBRARY, now.plusSeconds(1)))
+        } finally {
+            release.countDown()
+            executor.shutdown()
+        }
+
+        assertEquals(HouseInventoryResult.Empty, refresh.get(1, TimeUnit.SECONDS))
+        assertNull(repository.current(HouseAdPlacement.LIBRARY, now.plusSeconds(1)))
+    }
+
     private fun successInventory() = HouseInventoryResult.Success(
         HouseInventory(
             HouseAdPlacement.LIBRARY,
@@ -91,4 +125,27 @@ private class RecordingInventoryApi(initial: HouseInventoryResult) : HouseInvent
         entitlementValidUntil: Instant,
         requestId: String,
     ): HouseInventoryResult = result.also { calls += 1 }
+}
+
+private class BlockingInventoryApi(
+    private val result: HouseInventoryResult,
+    private val started: CountDownLatch,
+    private val release: CountDownLatch,
+) : HouseInventoryApi {
+    private var calls = 0
+
+    @Synchronized
+    override fun fetch(
+        placement: HouseAdPlacement,
+        now: Instant,
+        entitlementValidUntil: Instant,
+        requestId: String,
+    ): HouseInventoryResult {
+        calls += 1
+        if (calls > 1) {
+            started.countDown()
+            check(release.await(5, TimeUnit.SECONDS)) { "blocked fetch was never released" }
+        }
+        return result
+    }
 }

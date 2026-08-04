@@ -471,6 +471,11 @@ internal class PodcastReaderRuntime(
             val library = repository.current(HouseAdPlacement.LIBRARY, checkedAt)
             val jobs = repository.current(HouseAdPlacement.JOBS, checkedAt)
             val currentState = snapshot.productState ?: return@synchronized false
+            val issued = sequenceOf(library, jobs)
+                .filterNotNull()
+                .flatMap { it.items.asSequence() }
+                .any { it.cta === cta }
+            if (!issued) return@synchronized false
             publishLocked(
                 PodcastReaderRuntimeSnapshot.online(
                     productState = currentState,
@@ -479,10 +484,7 @@ internal class PodcastReaderRuntime(
                     jobsInventory = jobs,
                 ),
             )
-            sequenceOf(library, jobs)
-                .filterNotNull()
-                .flatMap { it.items.asSequence() }
-                .any { it.cta === cta }
+            true
         }
         if (issued) houseAdCtaOpener.open(cta)
     }
