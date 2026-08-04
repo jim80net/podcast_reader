@@ -6,6 +6,9 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import java.time.Instant
 import kotlinx.coroutines.Dispatchers
+import net.jim80.podcastreader.core.ads.HouseAdRequestFactory
+import net.jim80.podcastreader.core.ads.HouseAdCtaOpener
+import net.jim80.podcastreader.core.ads.HouseAdTransport
 import net.jim80.podcastreader.core.engine.EngineCredentialStore
 import net.jim80.podcastreader.core.premium.AndroidExternalBrowserLauncher
 import net.jim80.podcastreader.core.premium.AuthorizedPremiumTokens
@@ -18,10 +21,12 @@ import net.jim80.podcastreader.core.premium.PremiumCredentialStore
 import net.jim80.podcastreader.core.premium.PremiumCurrentUserTransport
 import net.jim80.podcastreader.core.premium.PremiumEntitlementTransport
 import net.jim80.podcastreader.core.premium.PremiumNativeAuthTransport
+import net.jim80.podcastreader.core.premium.PremiumOrigin
 import net.jim80.podcastreader.core.premium.PremiumRequestFactory
 import net.jim80.podcastreader.core.premium.ProductionPremiumConnectedSession
 import net.jim80.podcastreader.core.premium.securePremiumHttpClient
 import net.jim80.podcastreader.ui.PodcastReaderActions
+import net.jim80.podcastreader.ui.ads.AndroidHouseAdCtaLauncher
 
 internal class PodcastReaderViewModel(
     dependencies: RuntimeDependencies,
@@ -33,6 +38,7 @@ internal class PodcastReaderViewModel(
         premiumRecords = dependencies.premiumRecords,
         connectedFactory = dependencies.connectedFactory,
         accountConnectionFactory = dependencies.accountConnectionFactory,
+        houseAdCtaOpener = dependencies.houseAdCtaOpener,
         now = dependencies.now,
     )
 
@@ -58,6 +64,7 @@ internal data class RuntimeDependencies(
     val premiumRecords: PremiumAccountRecordAccess,
     val connectedFactory: ConnectedPremiumSessionFactory,
     val accountConnectionFactory: PremiumAccountConnectionFactory,
+    val houseAdCtaOpener: HouseAdCtaOpener,
     val now: () -> Instant,
 )
 
@@ -73,6 +80,7 @@ internal object PodcastReaderProductionComposition {
         fun accountAuthorizer() = PremiumAccountAuthorizer(premiumStore)
         fun nativeAuth(requests: PremiumRequestFactory) = PremiumNativeAuthTransport(requests, premiumClient)
         fun connectedSession(
+            origin: PremiumOrigin,
             requests: PremiumRequestFactory,
             authorizer: PremiumAccountAuthorizer,
             nativeAuth: PremiumNativeAuthTransport,
@@ -81,6 +89,9 @@ internal object PodcastReaderProductionComposition {
             nativeAuth = nativeAuth,
             currentUser = PremiumCurrentUserTransport(requests, premiumClient),
             entitlements = PremiumEntitlementTransport(requests, premiumClient),
+            houseInventoryFactory = { access ->
+                HouseAdTransport(HouseAdRequestFactory(origin), access, premiumClient)
+            },
         )
         val dependencies = RuntimeDependencies(
             workDispatcher = Dispatchers.IO,
@@ -94,6 +105,7 @@ internal object PodcastReaderProductionComposition {
             connectedFactory = ConnectedPremiumSessionFactory { account ->
                 val requests = PremiumRequestFactory(account.origin)
                 connectedSession(
+                    origin = account.origin,
                     requests = requests,
                     authorizer = accountAuthorizer(),
                     nativeAuth = nativeAuth(requests),
@@ -121,10 +133,11 @@ internal object PodcastReaderProductionComposition {
                     override fun complete(tokens: AuthorizedPremiumTokens) = runCatching {
                         val authorizer = accountAuthorizer()
                         authorizer.completeDeviceAuthorization(origin, tokens).getOrThrow()
-                        connectedSession(requests, authorizer, nativeAuth)
+                        connectedSession(origin, requests, authorizer, nativeAuth)
                     }
                 }
             },
+            houseAdCtaOpener = AndroidHouseAdCtaLauncher(applicationContext),
             now = Instant::now,
         )
         return object : ViewModelProvider.Factory {

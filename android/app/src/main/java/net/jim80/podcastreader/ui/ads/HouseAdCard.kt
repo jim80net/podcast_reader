@@ -15,6 +15,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
 import net.jim80.podcastreader.core.ads.HouseAdCreative
 import net.jim80.podcastreader.core.ads.HouseAdCta
+import net.jim80.podcastreader.core.ads.HouseAdCtaOpener
 import net.jim80.podcastreader.core.ads.HouseAdPlacement
 import net.jim80.podcastreader.core.ads.HouseInventory
 
@@ -60,10 +61,10 @@ private fun HouseAdCard(
     }
 }
 
-class AndroidHouseAdCtaLauncher(context: Context) {
+class AndroidHouseAdCtaLauncher(context: Context) : HouseAdCtaOpener {
     private val applicationContext = context.applicationContext
 
-    fun open(cta: HouseAdCta): Result<Unit> = runCatching {
+    override fun open(cta: HouseAdCta): Result<Unit> = runCatching {
         applicationContext.startActivity(
             Intent(Intent.ACTION_VIEW, cta.value.toUri())
                 .addCategory(Intent.CATEGORY_BROWSABLE)
