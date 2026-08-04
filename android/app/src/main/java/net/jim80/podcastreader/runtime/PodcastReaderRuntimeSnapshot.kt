@@ -16,8 +16,16 @@ internal enum class AccountRuntimePhase {
     BOOTSTRAPPING,
     RESTORING,
     LOCAL,
+    STARTING_AUTHORIZATION,
     AUTHORIZING,
     ONLINE,
+}
+
+enum class AccountConnectionIssue {
+    INVALID_DEVELOPMENT_ORIGIN,
+    CONNECTION_FAILED,
+    ACCESS_DENIED,
+    AUTHORIZATION_EXPIRED,
 }
 
 internal class PodcastReaderRuntimeSnapshot private constructor(
@@ -25,7 +33,9 @@ internal class PodcastReaderRuntimeSnapshot private constructor(
     val accountPhase: AccountRuntimePhase,
     val productState: ProductState?,
     val authorization: DeviceAuthorizationSession?,
-    val accountServiceConfigured: Boolean,
+    val developmentOriginDraft: String,
+    val developmentOriginValid: Boolean,
+    val connectionIssue: AccountConnectionIssue?,
     val libraryInventory: HouseInventory?,
     val jobsInventory: HouseInventory?,
 ) {
@@ -38,7 +48,9 @@ internal class PodcastReaderRuntimeSnapshot private constructor(
                 accountPhase = AccountRuntimePhase.BOOTSTRAPPING,
                 productState = null,
                 authorization = null,
-                accountServiceConfigured = false,
+                developmentOriginDraft = "",
+                developmentOriginValid = false,
+                connectionIssue = null,
                 libraryInventory = null,
                 jobsInventory = null,
             )
@@ -48,20 +60,38 @@ internal class PodcastReaderRuntimeSnapshot private constructor(
             accountPhase = AccountRuntimePhase.RESTORING,
             productState = null,
             authorization = null,
-            accountServiceConfigured = false,
+            developmentOriginDraft = "",
+            developmentOriginValid = false,
+            connectionIssue = null,
             libraryInventory = null,
             jobsInventory = null,
         )
 
         fun local(
             engine: EngineRuntimeState = EngineRuntimeState.UNPAIRED,
-            accountServiceConfigured: Boolean = false,
+            developmentOriginDraft: String = "",
+            developmentOriginValid: Boolean = false,
+            connectionIssue: AccountConnectionIssue? = null,
         ) = PodcastReaderRuntimeSnapshot(
             engine = engine,
             accountPhase = AccountRuntimePhase.LOCAL,
             productState = ProductStateReducer.local(),
             authorization = null,
-            accountServiceConfigured = accountServiceConfigured,
+            developmentOriginDraft = developmentOriginDraft,
+            developmentOriginValid = developmentOriginValid,
+            connectionIssue = connectionIssue,
+            libraryInventory = null,
+            jobsInventory = null,
+        )
+
+        fun startingAuthorization(engine: EngineRuntimeState) = PodcastReaderRuntimeSnapshot(
+            engine = engine,
+            accountPhase = AccountRuntimePhase.STARTING_AUTHORIZATION,
+            productState = null,
+            authorization = null,
+            developmentOriginDraft = "",
+            developmentOriginValid = false,
+            connectionIssue = null,
             libraryInventory = null,
             jobsInventory = null,
         )
@@ -74,7 +104,9 @@ internal class PodcastReaderRuntimeSnapshot private constructor(
             accountPhase = AccountRuntimePhase.AUTHORIZING,
             productState = ProductStateReducer.local(),
             authorization = session,
-            accountServiceConfigured = true,
+            developmentOriginDraft = "",
+            developmentOriginValid = false,
+            connectionIssue = null,
             libraryInventory = null,
             jobsInventory = null,
         )
@@ -98,7 +130,9 @@ internal class PodcastReaderRuntimeSnapshot private constructor(
                 accountPhase = AccountRuntimePhase.ONLINE,
                 productState = productState,
                 authorization = null,
-                accountServiceConfigured = true,
+                developmentOriginDraft = "",
+                developmentOriginValid = false,
+                connectionIssue = null,
                 libraryInventory = libraryInventory,
                 jobsInventory = jobsInventory,
             )

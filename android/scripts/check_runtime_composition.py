@@ -37,8 +37,12 @@ def main() -> None:
         "PremiumNativeAuthTransport(requests, premiumClient)",
         "PremiumCurrentUserTransport(requests, premiumClient)",
         "PremiumEntitlementTransport(requests, premiumClient)",
+        "AndroidExternalBrowserLauncher(applicationContext)",
+        "DeviceAuthorizationFlow(origin, nativeAuth, browser)",
+        "accountConnectionFactory = PremiumAccountConnectionFactory",
     ):
         require(required in composition, f"production runtime dependency missing: {required}")
+    require('"https://' not in composition, "production composition must not embed a premium origin")
 
     allowed = COMPOSITION.resolve()
     definitions = {
@@ -46,6 +50,8 @@ def main() -> None:
         "PremiumNativeAuthTransport": "PremiumNativeAuthTransport.kt",
         "PremiumCurrentUserTransport": "PremiumTransport.kt",
         "PremiumEntitlementTransport": "PremiumTransport.kt",
+        "AndroidExternalBrowserLauncher": "DeviceAuthorizationFlow.kt",
+        "DeviceAuthorizationFlow": "DeviceAuthorizationFlow.kt",
     }
     kotlin_files = list(MAIN.rglob("*.kt"))
     for class_name, definition_name in definitions.items():
@@ -66,6 +72,26 @@ def main() -> None:
             occurrences == [allowed],
             f"alternate production constructor for {marker}: {list(map(str, occurrences))}",
         )
+
+    account_factory_pattern = re.compile(r"\bPremiumAccountConnectionFactory\s*\{")
+    account_factory_declaration = re.compile(r"\bfun\s+interface\s+PremiumAccountConnectionFactory\s*\{")
+    account_factory_occurrences = []
+    for path in kotlin_files:
+        source = path.read_text()
+        if path.name == "PodcastReaderRuntime.kt":
+            require(
+                len(account_factory_declaration.findall(source)) == 1,
+                "expected one PremiumAccountConnectionFactory declaration",
+            )
+            source = account_factory_declaration.sub("", source, count=1)
+        account_factory_occurrences.extend(
+            [path.resolve()] * len(account_factory_pattern.findall(source)),
+        )
+    require(
+        account_factory_occurrences == [allowed],
+        "alternate production PremiumAccountConnectionFactory construction: "
+        f"{list(map(str, account_factory_occurrences))}",
+    )
 
 
 if __name__ == "__main__":

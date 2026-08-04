@@ -4,15 +4,19 @@ import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextInput
 import androidx.test.platform.app.InstrumentationRegistry
 import net.jim80.podcastreader.core.ads.HouseAdCreative
 import net.jim80.podcastreader.core.ads.HouseAdCta
 import net.jim80.podcastreader.core.ads.HouseAdPlacement
 import net.jim80.podcastreader.core.ads.HouseInventory
 import net.jim80.podcastreader.core.premium.OnlineUnavailableReason
+import net.jim80.podcastreader.core.premium.PremiumOrigin
 import net.jim80.podcastreader.core.premium.UserCode
 import net.jim80.podcastreader.runtime.PodcastReaderRuntimeSnapshot
 import net.jim80.podcastreader.support.FixtureProductStates
@@ -23,6 +27,7 @@ import net.jim80.podcastreader.ui.PodcastReaderUiState
 import net.jim80.podcastreader.ui.account.AccountScreen
 import net.jim80.podcastreader.ui.theme.PodcastReaderTheme
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -44,17 +49,50 @@ class PremiumUiInstrumentedTest {
         )
         compose.setContent {
             PodcastReaderTheme {
-                AccountScreen(state.value, true, {}, {}, {}, {})
+                AccountScreen(state.value, {}, {}, {}, {}, {})
             }
         }
 
         compose.onNodeWithText("K4AA-7BCD").assertIsDisplayed()
         compose.runOnIdle { assertTrue(compose.activity.isSecure()) }
 
-        compose.runOnIdle { state.value = AccountUiState.Local }
+        compose.runOnIdle { state.value = AccountUiState.Local("", false, null) }
         compose.waitForIdle()
         compose.onNodeWithText("K4AA-7BCD").assertDoesNotExist()
         compose.runOnIdle { assertFalse(compose.activity.isSecure()) }
+    }
+
+    @Test
+    fun localAccountRequiresExplicitDevelopmentOriginEntry() {
+        var entered = ""
+        var connectDelivered = false
+        val state = mutableStateOf<AccountUiState>(AccountUiState.Local("", false, null))
+        compose.setContent {
+            PodcastReaderTheme {
+                AccountScreen(
+                    state = state.value,
+                    onDevelopmentOriginChanged = {
+                        entered = it
+                        state.value = AccountUiState.Local(
+                            developmentOriginDraft = it,
+                            developmentOriginValid = PremiumOrigin.fromTrustedConfiguration(it).isSuccess,
+                            connectionIssue = null,
+                        )
+                    },
+                    onConnect = { connectDelivered = true },
+                    onCancelConnect = {},
+                    onRetry = {},
+                    onSignOut = {},
+                )
+            }
+        }
+
+        compose.onNodeWithText("Development service — not the production account service").assertIsDisplayed()
+        compose.onNodeWithText("Connect development account").assertIsNotEnabled()
+        compose.onNodeWithText("Development service origin").performTextInput("https://premium.example.test")
+        compose.runOnIdle { assertEquals("https://premium.example.test", entered) }
+        compose.onNodeWithText("Connect development account").assertIsEnabled().performClick()
+        compose.runOnIdle { assertTrue(connectDelivered) }
     }
 
     @Test
@@ -137,6 +175,6 @@ class PremiumUiInstrumentedTest {
     )
 
     private companion object {
-        val noOpActions = PodcastReaderActions({}, {}, {}, {}, {})
+        val noOpActions = PodcastReaderActions({}, {}, {}, {}, {}, {})
     }
 }

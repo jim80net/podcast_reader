@@ -9,6 +9,7 @@ internal sealed interface PremiumRestoreResult {
 
 internal interface ConnectedPremiumSession {
     suspend fun restore(now: Instant, requestId: String): PremiumRestoreResult
+    suspend fun validateAuthorized(now: Instant, requestId: String): PremiumRestoreResult
     suspend fun signOut(requestId: String)
 }
 
@@ -26,6 +27,19 @@ internal class ProductionPremiumConnectedSession(
                 ProductState.ProductStateReducer.unavailable(OnlineUnavailableReason.INCOMPATIBLE_RESPONSE),
             )
         }
+        return fetchCurrentTruth(now, requestId)
+    }
+
+    override suspend fun validateAuthorized(now: Instant, requestId: String): PremiumRestoreResult =
+        if (authorizer.currentAccessToken() == null) {
+            PremiumRestoreResult.Online(
+                ProductState.ProductStateReducer.unavailable(OnlineUnavailableReason.INCOMPATIBLE_RESPONSE),
+            )
+        } else {
+            fetchCurrentTruth(now, requestId)
+        }
+
+    private fun fetchCurrentTruth(now: Instant, requestId: String): PremiumRestoreResult {
         val access = authorizer.currentAccessToken() ?: return PremiumRestoreResult.Local
         val subject = when (val result = currentUser.fetch(access, "$requestId-current-user")) {
             is CurrentUserFetchResult.Success -> result.subject

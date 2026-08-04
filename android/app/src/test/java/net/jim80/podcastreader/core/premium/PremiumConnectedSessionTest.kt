@@ -34,9 +34,23 @@ class PremiumConnectedSessionTest {
         assertEquals("unavailable", requireOnline(result).kind())
     }
 
+    @Test
+    fun newlyAuthorizedSessionValidatesTruthWithoutRefreshingAgain() = runTest {
+        val calls = mutableListOf<String>()
+        val result = session(
+            currentSubject = "usr_free_fixture",
+            calls = calls,
+            authorized = true,
+        ).validateAuthorized(now, "authorized-1")
+
+        assertEquals(listOf("current-user", "entitlements"), calls)
+        assertEquals("online-free", requireOnline(result).kind())
+    }
+
     private fun session(
         currentSubject: String,
         calls: MutableList<String> = mutableListOf(),
+        authorized: Boolean = false,
     ): ProductionPremiumConnectedSession {
         val store = PremiumCredentialStore(FakeEncryptedRecordBackend(PremiumCredentialStore.storageIdentity))
         store.save(
@@ -45,8 +59,18 @@ class PremiumConnectedSessionTest {
                 PremiumRefreshToken.fromAuthorization("old_refresh_token_abcdefghijklmnopqrstuvwxyz").getOrThrow(),
             ),
         ).getOrThrow()
+        val authorizer = PremiumAccountAuthorizer(store)
+        if (authorized) {
+            authorizer.completeDeviceAuthorization(
+                origin,
+                AuthorizedPremiumTokens(
+                    PremiumAccessToken.fromAuthorization("new_access_token_abcdefghijklmnopqrstuvwxyz").getOrThrow(),
+                    PremiumRefreshToken.fromAuthorization("new_refresh_token_abcdefghijklmnopqrstuvwxyz").getOrThrow(),
+                ),
+            ).getOrThrow()
+        }
         return ProductionPremiumConnectedSession(
-            authorizer = PremiumAccountAuthorizer(store),
+            authorizer = authorizer,
             nativeAuth = SessionNativeAuthApi(calls),
             currentUser = SessionCurrentUserApi(currentSubject, calls),
             entitlements = SessionEntitlementApi(entitlementFixture(), calls),

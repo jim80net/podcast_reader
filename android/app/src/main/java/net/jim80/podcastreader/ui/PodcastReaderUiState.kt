@@ -5,6 +5,7 @@ import net.jim80.podcastreader.core.ads.HouseAdPlacement
 import net.jim80.podcastreader.core.ads.HouseInventory
 import net.jim80.podcastreader.core.premium.OnlineUnavailableReason
 import net.jim80.podcastreader.core.premium.UserCode
+import net.jim80.podcastreader.runtime.AccountConnectionIssue
 import net.jim80.podcastreader.runtime.AccountRuntimePhase
 import net.jim80.podcastreader.runtime.PodcastReaderRuntimeSnapshot
 
@@ -17,7 +18,15 @@ enum class AppDestination(val label: String, val shortLabel: String) {
 
 sealed interface AccountUiState {
     data object Bootstrapping : AccountUiState
-    data object Local : AccountUiState
+    data object Connecting : AccountUiState
+
+    class Local internal constructor(
+        val developmentOriginDraft: String,
+        val developmentOriginValid: Boolean,
+        val connectionIssue: AccountConnectionIssue?,
+    ) : AccountUiState {
+        override fun toString(): String = "AccountUiState.Local(redacted)"
+    }
 
     class Authorizing internal constructor(
         val userCode: UserCode,
@@ -33,7 +42,6 @@ sealed interface AccountUiState {
 
 class PodcastReaderUiState private constructor(
     val account: AccountUiState,
-    val accountServiceConfigured: Boolean,
     val libraryInventory: HouseInventory?,
     val jobsInventory: HouseInventory?,
 ) {
@@ -48,11 +56,15 @@ class PodcastReaderUiState private constructor(
             val account = when (snapshot.accountPhase) {
                 AccountRuntimePhase.BOOTSTRAPPING,
                 AccountRuntimePhase.RESTORING -> AccountUiState.Bootstrapping
-                AccountRuntimePhase.LOCAL -> AccountUiState.Local
-                AccountRuntimePhase.AUTHORIZING -> snapshot.authorization
-                    ?.takeIf { now.isBefore(it.expiresAt) }
-                    ?.let { AccountUiState.Authorizing(it.userCode, it.expiresAt) }
-                    ?: AccountUiState.Local
+                AccountRuntimePhase.STARTING_AUTHORIZATION -> AccountUiState.Connecting
+                AccountRuntimePhase.LOCAL -> AccountUiState.Local(
+                    snapshot.developmentOriginDraft,
+                    snapshot.developmentOriginValid,
+                    snapshot.connectionIssue,
+                )
+                AccountRuntimePhase.AUTHORIZING -> requireNotNull(snapshot.authorization).let {
+                    AccountUiState.Authorizing(it.userCode, it.expiresAt)
+                }
                 AccountRuntimePhase.ONLINE -> requireNotNull(productState).fold(
                     onLocal = { error("online snapshot contained local truth") },
                     onOnlineFree = { AccountUiState.OnlineFree },
@@ -68,7 +80,6 @@ class PodcastReaderUiState private constructor(
             ) == true
             return PodcastReaderUiState(
                 account = account,
-                accountServiceConfigured = snapshot.accountServiceConfigured,
                 libraryInventory = snapshot.libraryInventory.visibleFor(HouseAdPlacement.LIBRARY, now, adsEligible),
                 jobsInventory = snapshot.jobsInventory.visibleFor(HouseAdPlacement.JOBS, now, adsEligible),
             )

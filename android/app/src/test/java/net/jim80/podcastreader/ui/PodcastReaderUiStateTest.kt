@@ -5,7 +5,12 @@ import net.jim80.podcastreader.core.ads.HouseAdCreative
 import net.jim80.podcastreader.core.ads.HouseAdCta
 import net.jim80.podcastreader.core.ads.HouseAdPlacement
 import net.jim80.podcastreader.core.ads.HouseInventory
+import net.jim80.podcastreader.core.premium.DeviceAuthorizationSession
+import net.jim80.podcastreader.core.premium.DeviceCode
 import net.jim80.podcastreader.core.premium.OnlineUnavailableReason
+import net.jim80.podcastreader.core.premium.PremiumOrigin
+import net.jim80.podcastreader.core.premium.UserCode
+import net.jim80.podcastreader.runtime.EngineRuntimeState
 import net.jim80.podcastreader.runtime.PodcastReaderRuntimeSnapshot
 import net.jim80.podcastreader.support.FixtureProductStates
 import org.junit.Assert.assertNull
@@ -103,6 +108,26 @@ class PodcastReaderUiStateTest {
                 now,
             ).account is AccountUiState.OnlineUnavailable,
         )
+    }
+
+    @Test
+    fun projectionDoesNotPreemptTheRuntimeWhenAuthorizationTimePasses() {
+        val session = DeviceAuthorizationSession(
+            origin = PremiumOrigin.fromTrustedConfiguration("https://premium.example.test").getOrThrow(),
+            deviceCode = DeviceCode.fromAuthorization("device_code_abcdefghijklmnopqrstuvwxyz").getOrThrow(),
+            userCode = UserCode.fromAuthorization("K4AA-7BCD").getOrThrow(),
+            verificationUri = "https://premium.example.test/device",
+            expiresAt = now.minusSeconds(1),
+            pollIntervalSeconds = 5,
+            nextPollAt = now.minusSeconds(1),
+        )
+
+        val account = PodcastReaderUiState.project(
+            PodcastReaderRuntimeSnapshot.authorizing(EngineRuntimeState.PAIRED, session),
+            now,
+        ).account
+
+        assertTrue(account is AccountUiState.Authorizing)
     }
 
     private fun inventory(
