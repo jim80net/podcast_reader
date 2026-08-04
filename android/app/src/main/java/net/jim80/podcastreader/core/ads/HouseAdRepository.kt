@@ -18,6 +18,10 @@ interface HouseInventoryApi {
     ): HouseInventoryResult
 }
 
+fun interface HouseAdCtaOpener {
+    fun open(cta: HouseAdCta): Result<Unit>
+}
+
 class HouseAdRepository(
     private val eligibility: EligibleHouseAds,
     private val api: HouseInventoryApi,

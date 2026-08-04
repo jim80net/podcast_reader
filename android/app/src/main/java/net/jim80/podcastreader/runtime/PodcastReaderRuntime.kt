@@ -12,6 +12,10 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import net.jim80.podcastreader.core.ads.HouseAdCta
+import net.jim80.podcastreader.core.ads.HouseAdCtaOpener
+import net.jim80.podcastreader.core.ads.HouseAdPlacement
+import net.jim80.podcastreader.core.ads.HouseAdRepository
+import net.jim80.podcastreader.core.ads.HouseAdRuntimeGate
 import net.jim80.podcastreader.core.premium.AuthorizedPremiumTokens
 import net.jim80.podcastreader.core.premium.ConnectedPremiumSession
 import net.jim80.podcastreader.core.premium.DeviceAuthorizationSession
@@ -22,6 +26,7 @@ import net.jim80.podcastreader.core.premium.PremiumFailure
 import net.jim80.podcastreader.core.premium.PremiumFailureCategory
 import net.jim80.podcastreader.core.premium.PremiumOrigin
 import net.jim80.podcastreader.core.premium.PremiumRestoreResult
+import net.jim80.podcastreader.core.premium.ProductState
 import net.jim80.podcastreader.core.premium.ProductState.ProductStateReducer
 import net.jim80.podcastreader.ui.PodcastReaderUiState
 
@@ -72,6 +77,9 @@ internal class PodcastReaderRuntime(
     private val premiumRecords: PremiumAccountRecordAccess,
     private val connectedFactory: ConnectedPremiumSessionFactory,
     private val accountConnectionFactory: PremiumAccountConnectionFactory,
+    private val houseAdCtaOpener: HouseAdCtaOpener = HouseAdCtaOpener {
+        Result.failure(IllegalStateException("house-ad CTA opener is unavailable"))
+    },
     private val now: () -> Instant,
 ) {
     private val lock = Any()
@@ -87,6 +95,7 @@ internal class PodcastReaderRuntime(
     private var connected: ConnectedPremiumSession? = null
     private var accountConnection: PremiumAccountConnection? = null
     private var authorizationSession: DeviceAuthorizationSession? = null
+    private var houseAdRepository: HouseAdRepository? = null
     private var snapshot = PodcastReaderRuntimeSnapshot.bootstrapping()
     private val mutableUiState = MutableStateFlow(PodcastReaderUiState.project(snapshot, now()))
 
@@ -105,6 +114,9 @@ internal class PodcastReaderRuntime(
         if (snapshot.accountPhase.isAuthorizationPhase()) return@synchronized
         invalidateLocked()
         connected = null
+        snapshot.productState?.takeIf { snapshot.accountPhase == AccountRuntimePhase.ONLINE }?.let {
+            publishLocked(PodcastReaderRuntimeSnapshot.online(it, snapshot.engine))
+        }
     }
 
     fun dispatch(event: PodcastReaderRuntimeEvent) {
@@ -114,7 +126,7 @@ internal class PodcastReaderRuntime(
             PodcastReaderRuntimeEvent.CancelAuthorization -> cancelAuthorization()
             PodcastReaderRuntimeEvent.RetryAccount -> retry()
             PodcastReaderRuntimeEvent.SignOut -> signOut()
-            is PodcastReaderRuntimeEvent.OpenHouseAd -> rejectUnissuedHouseCta(event.cta)
+            is PodcastReaderRuntimeEvent.OpenHouseAd -> openIssuedHouseCta(event.cta)
         }
     }
 
@@ -358,9 +370,10 @@ internal class PodcastReaderRuntime(
                     engine,
                 ),
             )
-            is PremiumRestoreResult.Online -> publishIfCurrent(
+            is PremiumRestoreResult.Online -> publishOnlineAndRefreshHouseAds(
                 authorizationGeneration,
-                PodcastReaderRuntimeSnapshot.online(result.productState, engine),
+                result.productState,
+                engine,
             )
         }
     }
@@ -450,11 +463,28 @@ internal class PodcastReaderRuntime(
         }
     }
 
-    private fun rejectUnissuedHouseCta(@Suppress("UNUSED_PARAMETER") cta: HouseAdCta) {
-        check(uiState.value.libraryInventory != null || uiState.value.jobsInventory != null) {
-            "house-ad CTA was not issued by the runtime"
+    private fun openIssuedHouseCta(cta: HouseAdCta) {
+        val issued = synchronized(lock) {
+            if (!foreground) return@synchronized false
+            val repository = houseAdRepository ?: return@synchronized false
+            val checkedAt = now()
+            val library = repository.current(HouseAdPlacement.LIBRARY, checkedAt)
+            val jobs = repository.current(HouseAdPlacement.JOBS, checkedAt)
+            val currentState = snapshot.productState ?: return@synchronized false
+            publishLocked(
+                PodcastReaderRuntimeSnapshot.online(
+                    productState = currentState,
+                    engine = snapshot.engine,
+                    libraryInventory = library,
+                    jobsInventory = jobs,
+                ),
+            )
+            sequenceOf(library, jobs)
+                .filterNotNull()
+                .flatMap { it.items.asSequence() }
+                .any { it.cta === cta }
         }
-        error("house-ad CTA wiring belongs to slice 4")
+        if (issued) houseAdCtaOpener.open(cta)
     }
 
     private fun beginRestoreLocked() {
@@ -533,10 +563,72 @@ internal class PodcastReaderRuntime(
                 }
                 publishIfCurrent(restoreGeneration, localSnapshot(engine))
             }
-            is PremiumRestoreResult.Online -> publishIfCurrent(
+            is PremiumRestoreResult.Online -> publishOnlineAndRefreshHouseAds(
                 restoreGeneration,
-                PodcastReaderRuntimeSnapshot.online(result.productState, engine),
+                result.productState,
+                engine,
             )
+        }
+    }
+
+    private suspend fun publishOnlineAndRefreshHouseAds(
+        expectedGeneration: Long,
+        productState: ProductState,
+        engine: EngineRuntimeState,
+    ) {
+        var eligibilityValidUntil: Instant? = null
+        val repository = synchronized(lock) {
+            if (!isCurrentLocked(expectedGeneration)) return
+            houseAdRepository?.clear()
+            val created = connected?.let { session ->
+                HouseAdRuntimeGate.create(productState, now()) { eligibility ->
+                    eligibilityValidUntil = eligibility.validUntil
+                    session.houseInventoryApi()?.let { api -> HouseAdRepository(eligibility, api) }
+                }
+            }
+            houseAdRepository = created
+            publishLocked(PodcastReaderRuntimeSnapshot.online(productState, engine))
+            created
+        } ?: return
+
+        for (placement in HouseAdPlacement.entries) {
+            if (!isCurrent(expectedGeneration)) return
+            repository.refresh(
+                placement = placement,
+                now = now(),
+                requestId = "android-runtime-$expectedGeneration-house-${placement.backendSlot}",
+            )
+            val accepted = synchronized(lock) {
+                if (!isCurrentLocked(expectedGeneration) || houseAdRepository !== repository) {
+                    return@synchronized false
+                }
+                val checkedAt = now()
+                publishLocked(
+                    PodcastReaderRuntimeSnapshot.online(
+                        productState = productState,
+                        engine = engine,
+                        libraryInventory = repository.current(HouseAdPlacement.LIBRARY, checkedAt),
+                        jobsInventory = repository.current(HouseAdPlacement.JOBS, checkedAt),
+                    ),
+                )
+                true
+            }
+            if (!accepted) return
+        }
+
+        val expiresAt = synchronized(lock) {
+            if (!isCurrentLocked(expectedGeneration) || houseAdRepository !== repository) return
+            val checkedAt = now()
+            listOfNotNull(
+                eligibilityValidUntil,
+                repository.current(HouseAdPlacement.LIBRARY, checkedAt)?.expiresAt,
+                repository.current(HouseAdPlacement.JOBS, checkedAt)?.expiresAt,
+            ).minOrNull()
+        } ?: return
+        delay(Duration.between(now(), expiresAt).toMillis().coerceAtLeast(1L))
+        synchronized(lock) {
+            if (!isCurrentLocked(expectedGeneration) || houseAdRepository !== repository) return@synchronized
+            beginRestoreLocked()
         }
     }
 
@@ -544,6 +636,8 @@ internal class PodcastReaderRuntime(
         generation += 1
         operation?.cancel()
         operation = null
+        houseAdRepository?.clear()
+        houseAdRepository = null
     }
 
     private fun publishIfCurrent(expectedGeneration: Long, value: PodcastReaderRuntimeSnapshot) =

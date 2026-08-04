@@ -6,8 +6,16 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
+import net.jim80.podcastreader.core.ads.HouseAdCreative
+import net.jim80.podcastreader.core.ads.HouseAdCta
+import net.jim80.podcastreader.core.ads.HouseAdCtaOpener
+import net.jim80.podcastreader.core.ads.HouseAdPlacement
+import net.jim80.podcastreader.core.ads.HouseInventory
+import net.jim80.podcastreader.core.ads.HouseInventoryApi
+import net.jim80.podcastreader.core.ads.HouseInventoryResult
 import net.jim80.podcastreader.core.premium.AuthorizedPremiumTokens
 import net.jim80.podcastreader.core.premium.ConnectedPremiumSession
 import net.jim80.podcastreader.core.premium.DeviceAuthorizationSession
@@ -24,6 +32,7 @@ import net.jim80.podcastreader.core.premium.PremiumRestoreResult
 import net.jim80.podcastreader.core.premium.ProductState.ProductStateReducer
 import net.jim80.podcastreader.core.premium.UserCode
 import net.jim80.podcastreader.ui.AccountUiState
+import net.jim80.podcastreader.support.FixtureProductStates
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -31,6 +40,7 @@ import org.junit.Test
 @OptIn(ExperimentalCoroutinesApi::class)
 class PodcastReaderRuntimeTest {
     private val now = Instant.parse("2026-08-03T18:30:00Z")
+    private val fixtureStates = FixtureProductStates(::fixture)
 
     @Test
     fun pairedEngineWithNoAccountConstructsZeroPremiumResources() = runTest {
@@ -59,7 +69,7 @@ class PodcastReaderRuntimeTest {
 
         assertTrue(runtime.uiState.value.account is AccountUiState.Bootstrapping)
         runtime.foreground()
-        advanceUntilIdle()
+        testScheduler.runCurrent()
         runtime.foreground() // Activity recreation must not duplicate work.
         advanceUntilIdle()
 
@@ -109,6 +119,151 @@ class PodcastReaderRuntimeTest {
 
         assertEquals(1, premiumConstructions)
         assertTrue(runtime.uiState.value.account is AccountUiState.OnlineUnavailable)
+    }
+
+    @Test
+    fun onlyReducerIssuedFreshHouseTruthConstructsAndLoadsBothRuntimeSlots() = runTest {
+        val eligibleNow = fixtureStates.now
+        val cta = HouseAdCta.fromContract("https://example.com/house").getOrThrow()
+        val api = RecordingHouseInventoryApi(cta)
+        val opened = mutableListOf<HouseAdCta>()
+        val session = CompletedSession(
+            PremiumRestoreResult.Online(fixtureStates.free(houseAds = true)),
+            inventoryApi = api,
+        )
+        val runtime = PodcastReaderRuntime(
+            scope = this,
+            workDispatcher = StandardTestDispatcher(testScheduler),
+            engineRecords = EngineRecordProbe { Result.success(true) },
+            premiumRecords = TestPremiumRecords(Result.success(account())),
+            connectedFactory = ConnectedPremiumSessionFactory { session },
+            accountConnectionFactory = rejectingConnectionFactory(),
+            houseAdCtaOpener = HouseAdCtaOpener { value -> Result.success(Unit).also { opened += value } },
+            now = { eligibleNow },
+        )
+
+        runtime.foreground()
+        testScheduler.runCurrent()
+
+        assertEquals(listOf(HouseAdPlacement.LIBRARY, HouseAdPlacement.JOBS), api.calls)
+        assertEquals(1, session.inventoryApiCount)
+        assertEquals(HouseAdPlacement.LIBRARY, runtime.uiState.value.libraryInventory?.placement)
+        assertEquals(HouseAdPlacement.JOBS, runtime.uiState.value.jobsInventory?.placement)
+
+        runtime.dispatch(
+            PodcastReaderRuntimeEvent.OpenHouseAd(
+                HouseAdCta.fromContract("https://example.com/unissued").getOrThrow(),
+            ),
+        )
+        runtime.dispatch(
+            PodcastReaderRuntimeEvent.OpenHouseAd(
+                HouseAdCta.fromContract(cta.value).getOrThrow(),
+            ),
+        )
+        assertTrue(opened.isEmpty())
+        runtime.dispatch(PodcastReaderRuntimeEvent.OpenHouseAd(cta))
+        assertEquals(listOf(cta), opened)
+
+        runtime.background()
+        assertEquals(null, runtime.uiState.value.libraryInventory)
+        assertEquals(null, runtime.uiState.value.jobsInventory)
+        runtime.dispatch(PodcastReaderRuntimeEvent.OpenHouseAd(cta))
+        assertEquals(listOf(cta), opened)
+    }
+
+    @Test
+    fun ineligibleTruthNeverConstructsHouseInventoryResources() = runTest {
+        val states = listOf(
+            fixtureStates.free(),
+            fixtureStates.premium(),
+            fixtureStates.unavailable(OnlineUnavailableReason.OFFLINE),
+        )
+
+        states.forEach { state ->
+            val session = CompletedSession(PremiumRestoreResult.Online(state), RejectingHouseInventoryApi)
+            val runtime = PodcastReaderRuntime(
+                scope = this,
+                workDispatcher = StandardTestDispatcher(testScheduler),
+                engineRecords = EngineRecordProbe { Result.success(false) },
+                premiumRecords = TestPremiumRecords(Result.success(account())),
+                connectedFactory = ConnectedPremiumSessionFactory { session },
+                accountConnectionFactory = rejectingConnectionFactory(),
+                now = { fixtureStates.now },
+            )
+
+            runtime.foreground()
+            advanceUntilIdle()
+
+            assertEquals(0, session.inventoryApiCount)
+            assertEquals(null, runtime.uiState.value.libraryInventory)
+            assertEquals(null, runtime.uiState.value.jobsInventory)
+            runtime.background()
+        }
+    }
+
+    @Test
+    fun lifecycleGenerationRejectsInventoryReturnedAfterBackground() = runTest {
+        val eligibleNow = fixtureStates.now
+        lateinit var runtime: PodcastReaderRuntime
+        val api = RecordingHouseInventoryApi(
+            cta = HouseAdCta.fromContract("https://example.com/late").getOrThrow(),
+            onFirstFetch = { runtime.background() },
+        )
+        val session = CompletedSession(
+            PremiumRestoreResult.Online(fixtureStates.free(houseAds = true)),
+            inventoryApi = api,
+        )
+        runtime = PodcastReaderRuntime(
+            scope = this,
+            workDispatcher = StandardTestDispatcher(testScheduler),
+            engineRecords = EngineRecordProbe { Result.success(false) },
+            premiumRecords = TestPremiumRecords(Result.success(account())),
+            connectedFactory = ConnectedPremiumSessionFactory { session },
+            accountConnectionFactory = rejectingConnectionFactory(),
+            now = { eligibleNow },
+        )
+
+        runtime.foreground()
+        advanceUntilIdle()
+
+        assertEquals(listOf(HouseAdPlacement.LIBRARY), api.calls)
+        assertTrue(runtime.uiState.value.account is AccountUiState.OnlineFree)
+        assertEquals(null, runtime.uiState.value.libraryInventory)
+        assertEquals(null, runtime.uiState.value.jobsInventory)
+    }
+
+    @Test
+    fun earliestInventoryExpiryRevalidatesTruthBeforeIssuingNewSlots() = runTest {
+        val eligibleNow = fixtureStates.now
+        val api = RecordingHouseInventoryApi(
+            HouseAdCta.fromContract("https://example.com/refresh").getOrThrow(),
+        )
+        val session = CompletedSession(
+            PremiumRestoreResult.Online(fixtureStates.free(houseAds = true)),
+            inventoryApi = api,
+        )
+        val runtime = PodcastReaderRuntime(
+            scope = this,
+            workDispatcher = StandardTestDispatcher(testScheduler),
+            engineRecords = EngineRecordProbe { Result.success(false) },
+            premiumRecords = TestPremiumRecords(Result.success(account())),
+            connectedFactory = ConnectedPremiumSessionFactory { session },
+            accountConnectionFactory = rejectingConnectionFactory(),
+            now = { eligibleNow.plusMillis(testScheduler.currentTime) },
+        )
+
+        runtime.foreground()
+        testScheduler.runCurrent()
+        assertEquals(1, session.restoreCount)
+        assertEquals(2, api.calls.size)
+
+        advanceTimeBy(60_000)
+        testScheduler.runCurrent()
+
+        assertEquals(2, session.restoreCount)
+        assertEquals(4, api.calls.size)
+        assertEquals(HouseAdPlacement.LIBRARY, runtime.uiState.value.libraryInventory?.placement)
+        runtime.background()
     }
 
     @Test
@@ -478,6 +633,10 @@ class PodcastReaderRuntimeTest {
         error("account connection was not expected")
     }
 
+    private fun fixture(name: String): String = requireNotNull(javaClass.classLoader?.getResource(name)) {
+        "missing contract fixture $name"
+    }.readText()
+
 
     private fun authorizationSession(nextPollAt: Instant) = DeviceAuthorizationSession(
         origin = PremiumOrigin.fromTrustedConfiguration("https://premium.example.test").getOrThrow(),
@@ -512,9 +671,11 @@ private class TestPremiumRecords(
 
 private class CompletedSession(
     private val result: PremiumRestoreResult,
+    private val inventoryApi: HouseInventoryApi? = null,
 ) : ConnectedPremiumSession {
     var restoreCount = 0
     var validateCount = 0
+    var inventoryApiCount = 0
 
     override suspend fun restore(now: Instant, requestId: String): PremiumRestoreResult = result.also {
         restoreCount += 1
@@ -523,7 +684,52 @@ private class CompletedSession(
     override suspend fun validateAuthorized(now: Instant, requestId: String): PremiumRestoreResult = result.also {
         validateCount += 1
     }
+
+    override fun houseInventoryApi(): HouseInventoryApi? = inventoryApi.also { inventoryApiCount += 1 }
+
     override suspend fun signOut(requestId: String) = Unit
+}
+
+private class RecordingHouseInventoryApi(
+    private val cta: HouseAdCta,
+    private val onFirstFetch: () -> Unit = {},
+) : HouseInventoryApi {
+    val calls = mutableListOf<HouseAdPlacement>()
+
+    override fun fetch(
+        placement: HouseAdPlacement,
+        now: Instant,
+        entitlementValidUntil: Instant,
+        requestId: String,
+    ): HouseInventoryResult {
+        calls += placement
+        if (calls.size == 1) onFirstFetch()
+        return HouseInventoryResult.Success(
+            HouseInventory(
+                placement = placement,
+                inventoryRevision = calls.size.toLong(),
+                expiresAt = minOf(now.plusSeconds(60), entitlementValidUntil),
+                items = listOf(
+                    HouseAdCreative(
+                        id = "ad_${placement.name.lowercase()}",
+                        revision = 1,
+                        title = "House message",
+                        body = "Plain text only",
+                        cta = cta,
+                    ),
+                ),
+            ),
+        )
+    }
+}
+
+private data object RejectingHouseInventoryApi : HouseInventoryApi {
+    override fun fetch(
+        placement: HouseAdPlacement,
+        now: Instant,
+        entitlementValidUntil: Instant,
+        requestId: String,
+    ): HouseInventoryResult = error("ineligible truth must not use house inventory")
 }
 
 private class TestAccountConnection(

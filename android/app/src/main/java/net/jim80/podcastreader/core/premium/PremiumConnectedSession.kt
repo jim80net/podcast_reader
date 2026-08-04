@@ -1,6 +1,7 @@
 package net.jim80.podcastreader.core.premium
 
 import java.time.Instant
+import net.jim80.podcastreader.core.ads.HouseInventoryApi
 
 internal sealed interface PremiumRestoreResult {
     data object Local : PremiumRestoreResult
@@ -11,6 +12,7 @@ internal interface ConnectedPremiumSession {
     suspend fun restore(now: Instant, requestId: String): PremiumRestoreResult
     suspend fun validateAuthorized(now: Instant, requestId: String): PremiumRestoreResult
     suspend fun signOut(requestId: String)
+    fun houseInventoryApi(): HouseInventoryApi? = null
 }
 
 internal class ProductionPremiumConnectedSession(
@@ -18,6 +20,7 @@ internal class ProductionPremiumConnectedSession(
     private val nativeAuth: PremiumNativeAuthApi,
     private val currentUser: PremiumCurrentUserApi,
     private val entitlements: PremiumEntitlementApi,
+    private val houseInventoryFactory: (PremiumAccessToken) -> HouseInventoryApi? = { null },
 ) : ConnectedPremiumSession {
     override suspend fun restore(now: Instant, requestId: String): PremiumRestoreResult {
         when (authorizer.refreshOnce(nativeAuth, "$requestId-refresh")) {
@@ -60,6 +63,9 @@ internal class ProductionPremiumConnectedSession(
     override suspend fun signOut(requestId: String) {
         authorizer.revoke(nativeAuth, requestId)
     }
+
+    override fun houseInventoryApi(): HouseInventoryApi? =
+        authorizer.currentAccessToken()?.let(houseInventoryFactory)
 }
 
 private fun PremiumFailure.toUnavailableReason(): OnlineUnavailableReason = when (category) {

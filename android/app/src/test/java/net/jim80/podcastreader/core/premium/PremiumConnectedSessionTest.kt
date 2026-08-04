@@ -2,6 +2,9 @@ package net.jim80.podcastreader.core.premium
 
 import java.time.Instant
 import kotlinx.coroutines.test.runTest
+import net.jim80.podcastreader.core.ads.HouseAdPlacement
+import net.jim80.podcastreader.core.ads.HouseInventoryApi
+import net.jim80.podcastreader.core.ads.HouseInventoryResult
 import net.jim80.podcastreader.core.security.FakeEncryptedRecordBackend
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -47,10 +50,36 @@ class PremiumConnectedSessionTest {
         assertEquals("online-free", requireOnline(result).kind())
     }
 
+    @Test
+    fun houseInventoryCapabilityIsLazyAndRequiresAnAuthorizedAccessToken() = runTest {
+        var constructions = 0
+        val disconnected = session(
+            currentSubject = "usr_free_fixture",
+            houseInventoryFactory = {
+                constructions += 1
+                SessionHouseInventoryApi
+            },
+        )
+        assertEquals(null, disconnected.houseInventoryApi())
+        assertEquals(0, constructions)
+
+        val authorized = session(
+            currentSubject = "usr_free_fixture",
+            authorized = true,
+            houseInventoryFactory = {
+                constructions += 1
+                SessionHouseInventoryApi
+            },
+        )
+        assertEquals(SessionHouseInventoryApi, authorized.houseInventoryApi())
+        assertEquals(1, constructions)
+    }
+
     private fun session(
         currentSubject: String,
         calls: MutableList<String> = mutableListOf(),
         authorized: Boolean = false,
+        houseInventoryFactory: (PremiumAccessToken) -> HouseInventoryApi? = { null },
     ): ProductionPremiumConnectedSession {
         val store = PremiumCredentialStore(FakeEncryptedRecordBackend(PremiumCredentialStore.storageIdentity))
         store.save(
@@ -74,6 +103,7 @@ class PremiumConnectedSessionTest {
             nativeAuth = SessionNativeAuthApi(calls),
             currentUser = SessionCurrentUserApi(currentSubject, calls),
             entitlements = SessionEntitlementApi(entitlementFixture(), calls),
+            houseInventoryFactory = houseInventoryFactory,
         )
     }
 
@@ -92,6 +122,15 @@ class PremiumConnectedSessionTest {
         onOnlinePremium = { "online-premium" },
         onOnlineUnavailable = { "unavailable" },
     )
+}
+
+private data object SessionHouseInventoryApi : HouseInventoryApi {
+    override fun fetch(
+        placement: HouseAdPlacement,
+        now: Instant,
+        entitlementValidUntil: Instant,
+        requestId: String,
+    ): HouseInventoryResult = error("not used")
 }
 
 private class SessionNativeAuthApi(
