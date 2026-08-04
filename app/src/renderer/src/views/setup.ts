@@ -124,8 +124,8 @@ export function mountSetup(container: HTMLElement): ViewCleanup {
     const device = deriveWhisperDevice(hardware, packs)
     hardwareLine.textContent +=
       device === 'cuda'
-        ? ' Transcription will use the NVIDIA GPU.'
-        : ' Transcription will use the CPU.'
+        ? '. Transcription will use the NVIDIA GPU.'
+        : '. Transcription will use the CPU.'
     renderList()
     // Install and Finish are mutually exclusive by state: an install in
     // progress shows an "Installing…" affordance with Finish hidden; once

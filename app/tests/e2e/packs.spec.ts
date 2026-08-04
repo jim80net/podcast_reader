@@ -58,7 +58,7 @@ test.describe('setup wizard (first run)', () => {
 
     // Hardware and execution choice stay on one calm, user-facing line.
     await expect(harness.window.locator('.hardware-summary')).toHaveText(
-      'Windows — NVIDIA GPU: Mock GeForce RTX Transcription will use the NVIDIA GPU.'
+      'Windows — NVIDIA GPU: Mock GeForce RTX. Transcription will use the NVIDIA GPU.'
     )
     await expect(harness.window.locator('.setup-actions')).toBeInViewport()
 
