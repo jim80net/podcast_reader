@@ -118,6 +118,13 @@ test('audio entry gets the compact audio skin and still syncs', async ({ harness
   await expect(panel).toHaveAttribute('data-kind', 'audio')
   await expect(panel.locator('audio.media-audio')).toHaveCount(1)
   await expect(panel.locator('video')).toHaveCount(0)
+  const toggle = harness.window.locator('.media-toggle')
+  await expect(toggle).toHaveText('▾ Hide audio')
+  await toggle.click()
+  await expect(panel).toBeHidden()
+  await expect(toggle).toHaveText('▸ Show audio')
+  await toggle.click()
+  await expect(panel).toBeVisible()
 
   const frame = harness.window.frameLocator('iframe.reader-frame')
   await frame.locator('p.passage').nth(1).click()

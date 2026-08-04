@@ -106,6 +106,32 @@ test('transcript export preserves Korean/CJK bytes and offers an honest opaque f
   }
 })
 
+test('copy transcript control stays in flow and clear of the provenance footer (#181)', async () => {
+  const browser = await chromium.launch()
+  try {
+    const page = await browser.newPage({ viewport: { width: 609, height: 559 } })
+    await page.goto(exportArtifactUrl)
+    const geometry = await page.evaluate(() => {
+      const control = document.querySelector<HTMLElement>('.transcript-export')
+      const footer = document.querySelector<HTMLElement>('footer')
+      if (control === null || footer === null) throw new Error('export geometry missing')
+      const controlBox = control.getBoundingClientRect()
+      const footerBox = footer.getBoundingClientRect()
+      return {
+        position: getComputedStyle(control).position,
+        overlaps:
+          controlBox.left < footerBox.right &&
+          controlBox.right > footerBox.left &&
+          controlBox.top < footerBox.bottom &&
+          controlBox.bottom > footerBox.top
+      }
+    })
+    expect(geometry).toEqual({ position: 'static', overlaps: false })
+  } finally {
+    await browser.close()
+  }
+})
+
 test('search tolerates extension decoration but rejects transcript mutation (#92, #106)', async () => {
   const browser = await chromium.launch()
   try {

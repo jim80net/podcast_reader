@@ -38,9 +38,9 @@ export function mountReader(container: HTMLElement, sourceId: string): ViewClean
   const mediaSlot = el('div', { class: 'media-slot' })
   const readerBody = el('div', { class: 'reader-body' }, mediaSlot, frame)
   const adSlot = el('div', { class: 'house-ad-slot', attrs: { 'data-slot': 'reader' } })
-  // A permanent video toggle (shown only once a player exists): always visible
-  // so the user can hide/show the video at will. The choice persists ("doesn't
-  // use the video" sticks across episodes and launches).
+  // A permanent media toggle (shown only once a player exists): always visible
+  // so the user can hide/show the current audio or video at will. The choice
+  // persists across episodes and launches.
   const mediaToggle = el('button', { class: 'media-toggle', attrs: { type: 'button' } })
   mediaToggle.hidden = true
   const emailButton = el('button', {
@@ -72,9 +72,10 @@ export function mountReader(container: HTMLElement, sourceId: string): ViewClean
   )
   confirmation.hidden = true
   let premiumState: PremiumProductState = { state: 'local', available: true }
+  let mediaKind: MediaInfo['kind'] = 'video'
   const setMediaHidden = (hidden: boolean, persist: boolean): void => {
     readerBody.classList.toggle('media-hidden', hidden)
-    mediaToggle.textContent = hidden ? '▸ Show video' : '▾ Hide video'
+    mediaToggle.textContent = mediaToggleText(mediaKind, hidden)
     if (persist) localStorage.setItem(MEDIA_HIDDEN_KEY, hidden ? '1' : '0')
   }
   mediaToggle.addEventListener('click', () =>
@@ -174,6 +175,7 @@ export function mountReader(container: HTMLElement, sourceId: string): ViewClean
     mediaSlot.append(player.el)
     // Reveal the permanent toggle + honor the persisted hidden preference now
     // that a player exists.
+    mediaKind = info.kind
     mediaToggle.hidden = false
     setMediaHidden(localStorage.getItem(MEDIA_HIDDEN_KEY) === '1', false)
     const frameWindow = frame.contentWindow
@@ -280,6 +282,11 @@ export function mountReader(container: HTMLElement, sourceId: string): ViewClean
     cleanupAd()
     unsubscribePremium()
   }
+}
+
+export function mediaToggleText(kind: MediaInfo['kind'], hidden: boolean): string {
+  const label = kind === 'audio' ? 'audio' : 'video'
+  return hidden ? `▸ Show ${label}` : `▾ Hide ${label}`
 }
 
 export function manualEmailAvailable(state: PremiumProductState): boolean {

@@ -714,14 +714,9 @@ h1 {
 
 /* ---- TRANSCRIPT EXPORT ---- */
 .transcript-export {
-  position: fixed;
-  right: 1rem;
-  bottom: 1rem;
-  z-index: 40;
-  width: min(22rem, calc(100vw - 2rem));
-  max-height: calc(100vh - 2rem);
+  width: min(22rem, 100%);
+  margin: 1rem 0 0 auto;
   padding: 0.4rem;
-  overflow-y: auto;
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 4px;
