@@ -52,7 +52,7 @@ class HouseAdEligibilityTest {
     @Test
     fun repositoryMakesNoCallAfterTruthExpiresAndEvictsOnFailure() {
         val api = RecordingInventoryApi(successInventory())
-        val repository = HouseAdRepository(EligibleHouseAds(now.plusSeconds(300)), api)
+        val repository = HouseAdRepository(EligibleHouseAds(now.plusSeconds(300)), api) { now }
         assertTrue(repository.refresh(HouseAdPlacement.LIBRARY, now, "r1") is HouseInventoryResult.Success)
         assertTrue(repository.current(HouseAdPlacement.LIBRARY, now) != null)
 
@@ -76,7 +76,7 @@ class HouseAdEligibilityTest {
         val started = CountDownLatch(1)
         val release = CountDownLatch(1)
         val api = BlockingInventoryApi(successInventory(), started, release)
-        val repository = HouseAdRepository(EligibleHouseAds(now.plusSeconds(300)), api)
+        val repository = HouseAdRepository(EligibleHouseAds(now.plusSeconds(300)), api) { now }
         assertTrue(repository.refresh(HouseAdPlacement.LIBRARY, now, "seed") is HouseInventoryResult.Success)
         val executor = Executors.newFixedThreadPool(3)
         val refresh = executor.submit<HouseInventoryResult> {
@@ -99,6 +99,32 @@ class HouseAdEligibilityTest {
 
         assertEquals(HouseInventoryResult.Empty, refresh.get(1, TimeUnit.SECONDS))
         assertNull(repository.current(HouseAdPlacement.LIBRARY, now.plusSeconds(1)))
+    }
+
+    @Test
+    fun blockedFetchCannotCommitAfterEligibilityExpires() {
+        val validUntil = now.plusSeconds(300)
+        var clockNow = now
+        val started = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val api = BlockingInventoryApi(successInventory(), started, release)
+        val repository = HouseAdRepository(EligibleHouseAds(validUntil), api) { clockNow }
+        assertTrue(repository.refresh(HouseAdPlacement.LIBRARY, now, "seed") is HouseInventoryResult.Success)
+        val executor = Executors.newSingleThreadExecutor()
+        val refresh = executor.submit<HouseInventoryResult> {
+            repository.refresh(HouseAdPlacement.LIBRARY, now.plusSeconds(1), "blocked-expiry")
+        }
+
+        try {
+            assertTrue(started.await(1, TimeUnit.SECONDS))
+            clockNow = validUntil
+        } finally {
+            release.countDown()
+            executor.shutdown()
+        }
+
+        assertEquals(HouseInventoryResult.Empty, refresh.get(1, TimeUnit.SECONDS))
+        assertNull(repository.current(HouseAdPlacement.LIBRARY, validUntil))
     }
 
     private fun successInventory() = HouseInventoryResult.Success(

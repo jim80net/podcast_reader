@@ -25,6 +25,7 @@ fun interface HouseAdCtaOpener {
 class HouseAdRepository(
     private val eligibility: EligibleHouseAds,
     private val api: HouseInventoryApi,
+    private val clock: () -> Instant,
 ) {
     private val inventory = mutableMapOf<HouseAdPlacement, HouseInventory>()
     private val refreshGenerations = mutableMapOf<HouseAdPlacement, Long>()
@@ -48,6 +49,10 @@ class HouseAdRepository(
             ) {
                 return@synchronized HouseInventoryResult.Empty
             }
+            if (!clock().isBefore(eligibility.validUntil)) {
+                clearLocked()
+                return@synchronized HouseInventoryResult.Empty
+            }
             when (result) {
                 is HouseInventoryResult.Success -> result.also { inventory[placement] = it.inventory }
                 HouseInventoryResult.Empty -> result.also { inventory.remove(placement) }
@@ -58,8 +63,12 @@ class HouseAdRepository(
 
     @Synchronized
     fun current(placement: HouseAdPlacement, now: Instant): HouseInventory? {
+        if (!now.isBefore(eligibility.validUntil)) {
+            clearLocked()
+            return null
+        }
         val value = inventory[placement] ?: return null
-        if (!now.isBefore(eligibility.validUntil) || !now.isBefore(value.expiresAt)) {
+        if (!now.isBefore(value.expiresAt)) {
             clearLocked()
             return null
         }

@@ -72,10 +72,13 @@ def main() -> None:
         repository_constructed_inside_runtime_gate(runtime),
         "house-ad repository construction must stay reducer-gated",
     )
-    relocated = (
-        runtime.replace("HouseAdRepository(eligibility, api)", "api", 1)
-        + "\nHouseAdRepository(eligibility, api)\n"
+    constructor = "HouseAdRepository(eligibility, api, now)"
+    relocated_body = runtime.replace(constructor, "api", 1)
+    require(
+        relocated_body != runtime,
+        "runtime gate negative control did not relocate the constructor",
     )
+    relocated = relocated_body + f"\n{constructor}\n"
     require(
         not repository_constructed_inside_runtime_gate(relocated),
         "runtime gate negative control failed",

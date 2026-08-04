@@ -585,7 +585,7 @@ internal class PodcastReaderRuntime(
             val created = connected?.let { session ->
                 HouseAdRuntimeGate.create(productState, now()) { eligibility ->
                     eligibilityValidUntil = eligibility.validUntil
-                    session.houseInventoryApi()?.let { api -> HouseAdRepository(eligibility, api) }
+                    session.houseInventoryApi()?.let { api -> HouseAdRepository(eligibility, api, now) }
                 }
             }
             houseAdRepository = created
