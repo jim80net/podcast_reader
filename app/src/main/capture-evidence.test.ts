@@ -86,7 +86,7 @@ describe('captured screenshot evidence', () => {
         format: 'png',
         fromSurface: true,
         captureBeyondViewport: false,
-        clip: { x: 0, y: 0, width: 4, height: 3, scale: 1.25 }
+        clip: { x: 0, y: 0, width: 4, height: 3, scale: 1 }
       })
       expect(evidence).toMatchObject({ width: 5, height: 4, devicePixelRatio: 1.25 })
       expect(await readFile(outputPath)).toEqual(bytes)

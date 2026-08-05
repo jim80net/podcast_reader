@@ -83,8 +83,8 @@ export async function capturePageEvidence(
  *
  * Playwright does not know about device metrics applied after attaching to an
  * Electron window, so its `scale: 'device'` screenshot path still uses the
- * context's original scale of 1. CDP's clip scale is explicit and keeps the
- * requested renderer DPR independently checkable against the decoded PNG.
+ * context's original scale of 1. A raw CDP compositor capture honors the
+ * renderer DPR; its clip scale stays at 1 to avoid applying that DPR twice.
  */
 export async function captureScaledPageEvidence(
   page,
@@ -125,7 +125,7 @@ export async function captureScaledPageEvidence(
         y: 0,
         width: metrics.cssWidth,
         height: metrics.cssHeight,
-        scale: deviceScaleFactor
+        scale: 1
       }
     })
   } finally {
