@@ -5,8 +5,8 @@ The landing-page check requires UI-affecting pull requests to refresh
 with an explicit waiver for independent review.
 
 Each waiver must name the changed UI scope, explain why the published screenshots
-remain accurate, and identify the follow-up issue or expiry condition. There are
-currently no active waivers.
+remain accurate, and identify the follow-up issue or expiry condition. Active
+waivers are listed below.
 
 ## PR #190 — synthetic path fixtures
 
