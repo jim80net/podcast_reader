@@ -1,3 +1,5 @@
+import { writeFile } from 'node:fs/promises'
+
 import { PNG } from 'pngjs'
 
 const MIN_PIXEL_VARIANCE = 16
@@ -74,6 +76,72 @@ export async function capturePageEvidence(
     expectedWidth: metrics.width,
     expectedHeight: metrics.height
   })
+}
+
+/**
+ * Capture an attached Electron page at an explicit physical raster scale.
+ *
+ * Playwright does not know about device metrics applied after attaching to an
+ * Electron window, so its `scale: 'device'` screenshot path still uses the
+ * context's original scale of 1. A raw CDP compositor capture honors the
+ * renderer DPR; its clip scale stays at 1 to avoid applying that DPR twice.
+ */
+export async function captureScaledPageEvidence(
+  page,
+  cdp,
+  { path, deviceScaleFactor, fullPage = false, caret = 'hide', label = path }
+) {
+  const metrics = await page.evaluate((captureFullPage) => {
+    const root = document.documentElement
+    const body = document.body
+    return {
+      cssWidth: captureFullPage
+        ? Math.max(root.clientWidth, root.scrollWidth, body?.clientWidth ?? 0, body?.scrollWidth ?? 0)
+        : window.innerWidth,
+      cssHeight: captureFullPage
+        ? Math.max(root.clientHeight, root.scrollHeight, body?.clientHeight ?? 0, body?.scrollHeight ?? 0)
+        : window.innerHeight,
+      devicePixelRatio: window.devicePixelRatio
+    }
+  }, fullPage)
+  if (Math.abs(metrics.devicePixelRatio - deviceScaleFactor) >= 0.01) {
+    throw new Error(
+      `${label} renderer DPR is ${metrics.devicePixelRatio}, expected ${deviceScaleFactor}`
+    )
+  }
+
+  const caretStyle =
+    caret === 'hide'
+      ? await page.addStyleTag({ content: '*, *::before, *::after { caret-color: transparent !important; }' })
+      : undefined
+  let response
+  try {
+    response = await cdp.send('Page.captureScreenshot', {
+      format: 'png',
+      fromSurface: true,
+      captureBeyondViewport: fullPage,
+      clip: {
+        x: 0,
+        y: 0,
+        width: metrics.cssWidth,
+        height: metrics.cssHeight,
+        scale: 1
+      }
+    })
+  } finally {
+    if (caretStyle !== undefined) {
+      await caretStyle.evaluate((style) => style.remove()).catch(() => undefined)
+    }
+  }
+
+  const bytes = Buffer.from(response.data, 'base64')
+  const evidence = assertPngCapture(bytes, {
+    label,
+    expectedWidth: Math.round(metrics.cssWidth * deviceScaleFactor),
+    expectedHeight: Math.round(metrics.cssHeight * deviceScaleFactor)
+  })
+  await writeFile(path, bytes)
+  return { ...evidence, devicePixelRatio: metrics.devicePixelRatio }
 }
 
 /** Capture a Playwright locator and validate its exact physical crop. */
