@@ -114,15 +114,15 @@ From a clean checkout at the gated commit on the target host:
 ```bash
 cd services/premium
 BUILD_SHA=$(git rev-parse HEAD)
-PUBLIC_ORIGIN=https://rt-dgx-sp001.taild1140e.ts.net:8443
+PUBLIC_ORIGIN=https://your-host.example:8443
 uv run python scripts/dev_host.py prepare \
-  --home /home/jim \
+  --home $HOME \
   --checkout-root ../.. \
   --public-origin "$PUBLIC_ORIGIN" \
   --https-port 8443 \
   --loopback-port 8090 \
   --build-sha "$BUILD_SHA" \
-  --uv /home/jim/.local/bin/uv
+  --uv $HOME/.local/bin/uv
 ```
 
 The preparation evidence is owner-only at
@@ -138,10 +138,10 @@ already exists. On a first install, record that no pre-migration database exists
 run the migrations, then create the first proof backup:
 
 ```bash
-DATA=/home/jim/.local/share/podcast-reader-premium
-STATE=/home/jim/.local/state/podcast-reader-premium
+DATA=$HOME/.local/share/podcast-reader-premium
+STATE=$HOME/.local/state/podcast-reader-premium
 RELEASE="$DATA/releases/$BUILD_SHA/services/premium"
-ENV=/home/jim/.config/podcast-reader-premium/service.env
+ENV=$HOME/.config/podcast-reader-premium/service.env
 DATABASE="$DATA/premium.sqlite3"
 if test -f "$DATABASE"; then
   set -a; . "$ENV"; set +a
@@ -174,7 +174,7 @@ the command rejects live keys and unsafe/malformed values:
 
 ```bash
 "$RELEASE/.venv/bin/python" "$RELEASE/scripts/dev_host.py" \
-  install-stripe-credentials --home /home/jim
+  install-stripe-credentials --home $HOME
 systemctl --user enable --now premium-dev.service premium-stripe-forwarder.service
 curl --fail --silent http://127.0.0.1:8090/healthz
 ```

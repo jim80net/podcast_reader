@@ -92,8 +92,8 @@ describe('sourceLabel', () => {
   })
 
   it('shows the basename for local paths', () => {
-    expect(sourceLabel('/home/jim/Downloads/episode.mp3')).toBe('episode.mp3')
-    expect(sourceLabel('C:\\Users\\jim\\episode.mp3')).toBe('episode.mp3')
+    expect(sourceLabel('/home/test-user/Downloads/episode.mp3')).toBe('episode.mp3')
+    expect(sourceLabel('C:\\Users\\test-user\\episode.mp3')).toBe('episode.mp3')
   })
 })
 
