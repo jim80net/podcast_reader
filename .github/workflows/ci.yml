@@ -175,6 +175,10 @@ jobs:
           cache-dependency-path: app/package-lock.json
       - name: Install dependencies
         run: npm ci
+      - name: Production dependency audit (high/critical)
+        run: |
+          npm run audit:production:test
+          npm run audit:production
       - name: Typecheck
         run: npm run typecheck
       - name: Lint
