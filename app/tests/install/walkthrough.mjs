@@ -44,7 +44,7 @@ import { join } from 'node:path'
 import { parseArgs } from 'node:util'
 import { _electron } from 'playwright'
 
-import { capturePageEvidence } from './capture-evidence.mjs'
+import { capturePageEvidence, captureScaledPageEvidence } from './capture-evidence.mjs'
 
 // A short, famously stable video with English captions ("Me at the zoo",
 // 19 s) — the keyless captions path needs no packs and no API key.
@@ -202,8 +202,9 @@ async function captureSurface(number, surface) {
       )
       const filename = `${number}-${surface}-${scale.label}-${theme}.png`
       const fullPage = surface === 'new-view-submitted' || surface === 'new-view-job-done'
-      const evidence = await capturePageEvidence(page, {
+      const evidence = await captureScaledPageEvidence(page, cdp, {
         path: join(outDir, filename),
+        deviceScaleFactor: scale.factor,
         fullPage,
         label: filename
       })
@@ -211,7 +212,7 @@ async function captureSurface(number, surface) {
         filename,
         surface,
         scale: scale.label,
-        devicePixelRatio: scale.factor,
+        devicePixelRatio: evidence.devicePixelRatio,
         theme,
         viewport: {
           width: geometry.clientWidth,

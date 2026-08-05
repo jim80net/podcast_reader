@@ -1,4 +1,4 @@
-import type { Locator, Page } from '@playwright/test'
+import type { CDPSession, Locator, Page } from '@playwright/test'
 
 export interface CaptureEvidence {
   width: number
@@ -27,6 +27,18 @@ export function capturePageEvidence(
     label?: string
   }
 ): Promise<CaptureEvidence>
+
+export function captureScaledPageEvidence(
+  page: Page,
+  cdp: CDPSession,
+  options: {
+    path: string
+    deviceScaleFactor: number
+    fullPage?: boolean
+    caret?: 'hide' | 'initial'
+    label?: string
+  }
+): Promise<CaptureEvidence & { devicePixelRatio: number }>
 
 export function captureLocatorEvidence(
   locator: Locator,
