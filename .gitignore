@@ -62,6 +62,7 @@
 !services/premium/contracts/v1/email/*.json
 !src/podcast_reader/engine/contracts/v1/subscriptions/*.json
 !src/podcast_reader/engine/contracts/v1/email/*.json
+!site/assets/screenshots/*.json
 
 # Python
 __pycache__/
