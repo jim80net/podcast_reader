@@ -18,7 +18,6 @@ import org.junit.Test
 class CredentialIsolationTest {
     @Test
     fun trustDomainsUseDifferentRecordsAndKeystoreAliases() {
-        assertFalse(EngineCredentialStore.storageIdentity == PremiumCredentialStore.storageIdentity)
         assertFalse(
             EngineCredentialStore.storageIdentity.keyAlias ==
                 PremiumCredentialStore.storageIdentity.keyAlias,
@@ -49,12 +48,19 @@ class CredentialIsolationTest {
     }
 
     @Test
-    fun aDomainRejectsTheOtherDomainsBackendBeforeWriting() {
-        val engineBackend = FakeEncryptedRecordBackend(EngineCredentialStore.storageIdentity)
-        val premiumStoreOnEngineRecord = PremiumCredentialStore(engineBackend)
+    fun storeBackendsCarryDistinctDomainTypesInTheirJvmSignatures() {
+        val engineBackendType = EngineCredentialStore::class.java
+            .getDeclaredField("backend")
+            .genericType
+            .typeName
+        val premiumBackendType = PremiumCredentialStore::class.java
+            .getDeclaredField("backend")
+            .genericType
+            .typeName
 
-        assertTrue(premiumStoreOnEngineRecord.save(premiumCredentials()).isFailure)
-        assertNull(engineBackend.bytes)
+        assertTrue(engineBackendType.contains(EnginePairingCredentialDomain::class.java.name))
+        assertTrue(premiumBackendType.contains(PremiumAccountCredentialDomain::class.java.name))
+        assertFalse(engineBackendType == premiumBackendType)
     }
 
     @Test
@@ -100,12 +106,12 @@ class CredentialIsolationTest {
     )
 }
 
-internal class FakeEncryptedRecordBackend(
-    override val identity: CredentialStorageIdentity,
+internal class FakeEncryptedRecordBackend<Domain : CredentialStorageDomain>(
+    override val identity: CredentialStorageIdentity<Domain>,
     private val failWrites: Boolean = false,
     private val failReads: Boolean = false,
     private val failClears: Boolean = false,
-) : EncryptedRecordBackend {
+) : EncryptedRecordBackend<Domain> {
     var bytes: ByteArray? = null
     var clearCount = 0
 

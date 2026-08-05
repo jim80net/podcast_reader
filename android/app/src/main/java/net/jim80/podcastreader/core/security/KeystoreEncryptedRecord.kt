@@ -12,14 +12,30 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
-internal data class CredentialStorageIdentity(
-    val domain: String,
+internal sealed interface CredentialStorageDomain
+
+internal data object EnginePairingCredentialDomain : CredentialStorageDomain
+
+internal data object PremiumAccountCredentialDomain : CredentialStorageDomain
+
+internal class CredentialStorageIdentity<Domain : CredentialStorageDomain> private constructor(
     val keyAlias: String,
     val preferencesName: String,
-)
+) {
+    companion object {
+        val enginePairing = CredentialStorageIdentity<EnginePairingCredentialDomain>(
+            keyAlias = "net.jim80.podcastreader.keystore.home_engine.v1",
+            preferencesName = "home_engine_pairing_v1",
+        )
+        val premiumAccount = CredentialStorageIdentity<PremiumAccountCredentialDomain>(
+            keyAlias = "net.jim80.podcastreader.keystore.premium_account.v1",
+            preferencesName = "premium_account_v1",
+        )
+    }
+}
 
-internal interface EncryptedRecordBackend {
-    val identity: CredentialStorageIdentity
+internal interface EncryptedRecordBackend<Domain : CredentialStorageDomain> {
+    val identity: CredentialStorageIdentity<Domain>
 
     fun read(): ByteArray?
 
@@ -28,10 +44,10 @@ internal interface EncryptedRecordBackend {
     fun clear()
 }
 
-internal class KeystoreEncryptedRecordBackend(
+internal class KeystoreEncryptedRecordBackend<Domain : CredentialStorageDomain>(
     context: Context,
-    override val identity: CredentialStorageIdentity,
-) : EncryptedRecordBackend {
+    override val identity: CredentialStorageIdentity<Domain>,
+) : EncryptedRecordBackend<Domain> {
     private val preferences = context.getSharedPreferences(identity.preferencesName, Context.MODE_PRIVATE)
 
     override fun read(): ByteArray? {
