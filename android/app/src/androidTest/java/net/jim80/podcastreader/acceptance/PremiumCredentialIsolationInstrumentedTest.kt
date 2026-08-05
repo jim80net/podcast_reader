@@ -42,37 +42,40 @@ class PremiumCredentialIsolationInstrumentedTest {
         engineStore.save(engine).getOrThrow()
         premiumStore.save(premium).getOrThrow()
 
-        val engineRecordBefore = preferencesBytes(ENGINE_PREFERENCES)
-        val premiumRecordBefore = preferencesBytes(PREMIUM_PREFERENCES)
+        val engineRecordBefore = preferencesBytes(EngineCredentialStore.storageIdentity.preferencesName)
+        val premiumRecordBefore = preferencesBytes(PremiumCredentialStore.storageIdentity.preferencesName)
         assertNoPlaintextMarkers(engineRecordBefore, premiumRecordBefore)
         assertFalse(engineRecordBefore.contentEquals(premiumRecordBefore))
 
         val keyStore = androidKeyStore()
-        assertTrue(keyStore.containsAlias(ENGINE_ALIAS))
-        assertTrue(keyStore.containsAlias(PREMIUM_ALIAS))
+        assertTrue(keyStore.containsAlias(EngineCredentialStore.storageIdentity.keyAlias))
+        assertTrue(keyStore.containsAlias(PremiumCredentialStore.storageIdentity.keyAlias))
 
         engineStore.forget().getOrThrow()
-        assertFalse(androidKeyStore().containsAlias(ENGINE_ALIAS))
-        assertTrue(androidKeyStore().containsAlias(PREMIUM_ALIAS))
+        assertFalse(androidKeyStore().containsAlias(EngineCredentialStore.storageIdentity.keyAlias))
+        assertTrue(androidKeyStore().containsAlias(PremiumCredentialStore.storageIdentity.keyAlias))
         assertTrue(premiumStore.load().getOrThrow() != null)
-        assertArrayEquals(premiumRecordBefore, preferencesBytes(PREMIUM_PREFERENCES))
+        assertArrayEquals(
+            premiumRecordBefore,
+            preferencesBytes(PremiumCredentialStore.storageIdentity.preferencesName),
+        )
 
         engineStore.save(engine).getOrThrow()
         premiumStore.disconnectLocalRecord().getOrThrow()
         assertTrue(engineStore.load().getOrThrow() != null)
-        assertFalse(androidKeyStore().containsAlias(PREMIUM_ALIAS))
-        assertTrue(androidKeyStore().containsAlias(ENGINE_ALIAS))
+        assertFalse(androidKeyStore().containsAlias(PremiumCredentialStore.storageIdentity.keyAlias))
+        assertTrue(androidKeyStore().containsAlias(EngineCredentialStore.storageIdentity.keyAlias))
 
         premiumStore.save(premium).getOrThrow()
-        androidKeyStore().deleteEntry(PREMIUM_ALIAS)
+        androidKeyStore().deleteEntry(PremiumCredentialStore.storageIdentity.keyAlias)
         assertTrue(premiumStore.load().isFailure)
         assertTrue(engineStore.load().getOrThrow() != null)
 
         premiumStore.disconnectLocalRecord().getOrThrow()
         premiumStore.save(premium).getOrThrow()
         assertNoPlaintextMarkers(
-            preferencesBytes(ENGINE_PREFERENCES),
-            preferencesBytes(PREMIUM_PREFERENCES),
+            preferencesBytes(EngineCredentialStore.storageIdentity.preferencesName),
+            preferencesBytes(PremiumCredentialStore.storageIdentity.preferencesName),
         )
         // Deliberately leave both encrypted records for the post-test run-as K4 sweep.
     }
@@ -92,11 +95,4 @@ class PremiumCredentialIsolationInstrumentedTest {
     }
 
     private fun androidKeyStore(): KeyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-
-    private companion object {
-        const val ENGINE_ALIAS = "net.jim80.podcastreader.keystore.home_engine.v1"
-        const val PREMIUM_ALIAS = "net.jim80.podcastreader.keystore.premium_account.v1"
-        const val ENGINE_PREFERENCES = "home_engine_pairing_v1"
-        const val PREMIUM_PREFERENCES = "premium_account_v1"
-    }
 }

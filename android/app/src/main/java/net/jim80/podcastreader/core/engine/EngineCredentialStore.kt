@@ -5,6 +5,7 @@ import java.util.Arrays
 import kotlinx.serialization.Serializable
 import net.jim80.podcastreader.core.security.CredentialStorageIdentity
 import net.jim80.podcastreader.core.security.EncryptedRecordBackend
+import net.jim80.podcastreader.core.security.EnginePairingCredentialDomain
 import net.jim80.podcastreader.core.security.KeystoreEncryptedRecordBackend
 import net.jim80.podcastreader.core.security.secretBytes
 import net.jim80.podcastreader.core.security.secretText
@@ -17,10 +18,9 @@ data class EnginePairingCredentials(
 }
 
 class EngineCredentialStore internal constructor(
-    private val backend: EncryptedRecordBackend,
+    private val backend: EncryptedRecordBackend<EnginePairingCredentialDomain>,
 ) {
     fun save(credentials: EnginePairingCredentials): Result<Unit> = runCatching {
-        require(backend.identity == storageIdentity) { "wrong credential domain" }
         val plaintext = engineJson.encodeToString(
             StoredEngineCredentials(
                 origin = credentials.origin.value,
@@ -35,7 +35,6 @@ class EngineCredentialStore internal constructor(
     }
 
     fun load(): Result<EnginePairingCredentials?> = runCatching {
-        require(backend.identity == storageIdentity) { "wrong credential domain" }
         val plaintext = backend.read() ?: return@runCatching null
         try {
             val stored = engineJson.decodeFromString<StoredEngineCredentials>(plaintext.secretText())
@@ -49,16 +48,11 @@ class EngineCredentialStore internal constructor(
     }
 
     fun forget(): Result<Unit> = runCatching {
-        require(backend.identity == storageIdentity) { "wrong credential domain" }
         backend.clear()
     }
 
     companion object {
-        internal val storageIdentity = CredentialStorageIdentity(
-            domain = "home_engine_pairing",
-            keyAlias = "net.jim80.podcastreader.keystore.home_engine.v1",
-            preferencesName = "home_engine_pairing_v1",
-        )
+        internal val storageIdentity = CredentialStorageIdentity.enginePairing
 
         fun create(context: Context): EngineCredentialStore = EngineCredentialStore(
             KeystoreEncryptedRecordBackend(context.applicationContext, storageIdentity),
