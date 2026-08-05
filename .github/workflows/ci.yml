@@ -57,11 +57,11 @@ jobs:
       - name: Byte-exact transcript CSP policy
         run: uv run python scripts/csp_scripts.py check
       - name: Type check (strict)
-        run: uv run mypy src/ scripts/csp_scripts.py scripts/repro.py scripts/walk_repros.py
+        run: uv run mypy src/ scripts/check_screenshot_provenance.py scripts/csp_scripts.py scripts/repro.py scripts/walk_repros.py
       - name: Lint
-        run: uv run ruff check src/ tests/ scripts/csp_scripts.py scripts/repro.py scripts/walk_repros.py
+        run: uv run ruff check src/ tests/ scripts/check_screenshot_provenance.py scripts/csp_scripts.py scripts/repro.py scripts/walk_repros.py
       - name: Format check
-        run: uv run ruff format --check src/ tests/ scripts/csp_scripts.py scripts/repro.py scripts/walk_repros.py
+        run: uv run ruff format --check src/ tests/ scripts/check_screenshot_provenance.py scripts/csp_scripts.py scripts/repro.py scripts/walk_repros.py
 
   frozen-smoke:
     # Builds the REAL frozen engine (task 7.2 — the spike stub is retired;

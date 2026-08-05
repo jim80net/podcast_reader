@@ -3,7 +3,13 @@ name: Landing page
 on:
   pull_request:
     paths:
+      - "app/package.json"
+      - "app/package-lock.json"
+      - "app/src/renderer/**"
+      - "app/tests/install/**"
       - "site/**"
+      - "scripts/check_screenshot_provenance.py"
+      - "tests/test_screenshot_provenance.py"
       - ".github/workflows/pages.yml"
   push:
     branches: [main]
@@ -25,6 +31,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
 
       - name: Validate static privacy boundary and local assets
         shell: bash
@@ -71,12 +79,14 @@ jobs:
               raise SystemExit('Missing local assets:\n' + '\n'.join(missing))
           PY
 
+          python3 scripts/check_screenshot_provenance.py
+
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            python3 scripts/check_screenshot_provenance.py \
+              --base-ref "${{ github.event.pull_request.base.sha }}"
+          fi
+
           sha256sum --check <<'SUMS'
-          b7c3f2818446bba71645633edfbee770392f357d3c19cbf88a851396e68a7677  site/assets/screenshots/01-first-run-wizard-100pct-light.png
-          b854293ce78c44eba94f6639e34ef9768a36347570890996367a7fd497377577  site/assets/screenshots/02-empty-library-100pct-light.png
-          6724e3649682aec09bbe5bfc4a9dd3aa2fc77ef74b144c7d5500d04555fd788d  site/assets/screenshots/05-reader-transcript-100pct-dark.png
-          7b8307ecf1f751440a0c97da9a431b4c533c179f8084f9e95735ddc3f2ebf5d8  site/assets/screenshots/05-reader-transcript-100pct-light.png
-          f90fd3a07e7291545beb770157eca9400fa8d3885c53ddfe52271875ab5bad38  site/assets/screenshots/06-settings-100pct-light.png
           f9e4eac0e8f8ffdae91cf6eff3962b96e81417cba5c728bc1c89efe9510e7653  site/assets/fonts/SourceSans3VF-Upright.otf.woff2
           f146ee102dddcc5bc7a2cf4af5bcf129832195941b92bd0a512626f390688c1e  site/assets/fonts/SourceSerif4Variable-Roman.otf.woff2
           89ad2c4f66dd29127527493e729c31e731f111cf10faf5774c3db9275ed0c22c  site/assets/fonts/OFL-Source-Sans-3.txt
