@@ -194,11 +194,20 @@ async function captureSurface(number, surface) {
         `${theme} theme to apply`
       )
       if (surface === 'first-run-wizard') {
-        const lastRow = page.locator('.setup-components .pack-row').last()
-        await page
-          .locator('.setup-actions')
-          .evaluate((node) => node.scrollIntoView({ block: 'end' }))
-        const setupGeometry = await lastRow.evaluate((node) => {
+        const rows = page.locator('.setup-components .pack-row')
+        const targetIndex = await rows.evaluateAll((nodes) => {
+          const actions = document.querySelector('.setup-actions')?.getBoundingClientRect()
+          if (actions === undefined) return -1
+          const overlapIndex = nodes.findIndex((node) => {
+            const row = node.getBoundingClientRect()
+            return row.top < actions.bottom && row.bottom > actions.top
+          })
+          return overlapIndex >= 0 ? overlapIndex : nodes.length - 1
+        })
+        if (targetIndex < 0) await fail('setup model rows are missing')
+        const targetRow = rows.nth(targetIndex)
+        await targetRow.evaluate((node) => node.scrollIntoView({ block: 'end' }))
+        const setupGeometry = await targetRow.evaluate((node) => {
           const actions = document.querySelector('.setup-actions')?.getBoundingClientRect()
           const view = document.querySelector('.setup-view')
           if (actions === undefined || view === null) return null
@@ -223,7 +232,8 @@ async function captureSurface(number, surface) {
           setupGeometry.overlap
         ) {
           await fail(
-            `setup content overlaps actions at ${scale.label}/${theme}: ${JSON.stringify(setupGeometry)}`
+            `setup target row or actions are not fully exposed at ${scale.label}/${theme}: ` +
+              `${JSON.stringify(setupGeometry)}`
           )
         }
       }
