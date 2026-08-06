@@ -70,7 +70,7 @@ export function mountSetup(container: HTMLElement): ViewCleanup {
   )
   const componentsSection = el(
     'section',
-    { class: 'setup-section' },
+    { class: 'setup-section setup-components' },
     el('h3', { class: 'setup-section-title', text: 'Transcription model' }),
     el('p', {
       class: 'setup-section-note',
@@ -79,11 +79,19 @@ export function mountSetup(container: HTMLElement): ViewCleanup {
     list
   )
   const chapter = buildChapterSection(() => disposed)
+  const actions = el(
+    'div',
+    { class: 'form-actions setup-actions' },
+    installButton,
+    finishButton,
+    skipButton
+  )
+  container.classList.add('setup-view')
   container.append(
     hero,
     hardwareSection,
     componentsSection,
-    el('div', { class: 'form-actions setup-actions' }, installButton, finishButton, skipButton),
+    actions,
     actionError,
     chapter.section
   )
@@ -95,6 +103,15 @@ export function mountSetup(container: HTMLElement): ViewCleanup {
   const selection = new Set<string>()
   let selectionInitialized = false
   const gate = new LatestGate()
+  const updateActionClearance = (): void => {
+    container.style.setProperty(
+      '--setup-actions-clearance',
+      `${Math.ceil(actions.getBoundingClientRect().height)}px`
+    )
+  }
+  const actionResizeObserver = new ResizeObserver(updateActionClearance)
+  actionResizeObserver.observe(actions)
+  updateActionClearance()
 
   async function load(): Promise<void> {
     const isLatest = gate.next()
@@ -273,6 +290,9 @@ export function mountSetup(container: HTMLElement): ViewCleanup {
 
   return () => {
     disposed = true
+    actionResizeObserver.disconnect()
+    container.classList.remove('setup-view')
+    container.style.removeProperty('--setup-actions-clearance')
     for (const unsubscribe of unsubscribers) unsubscribe()
   }
 }

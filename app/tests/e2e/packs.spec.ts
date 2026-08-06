@@ -50,6 +50,96 @@ async function scriptPackState(
 test.describe('setup wizard (first run)', () => {
   test.use({ mockSeed: WIZARD_SEED })
 
+  test('measured clearance keeps model rows above sticky actions at every capture scale and theme (#194)', async ({
+    harness
+  }) => {
+    await expectWizardOpen(harness)
+    const page = harness.window
+    const cdp = await page.context().newCDPSession(page)
+    const viewport = { width: 1008, height: 655 }
+
+    const readGeometry = async (packId: string) => {
+      const row = packRow(harness, packId)
+      return row.evaluate((node) => {
+        const actions = document.querySelector<HTMLElement>('.setup-actions')
+        const view = document.querySelector<HTMLElement>('.setup-view')
+        if (actions === null || view === null) throw new Error('setup geometry missing')
+        const rowBox = node.getBoundingClientRect()
+        const actionBox = actions.getBoundingClientRect()
+        return {
+          actionHeight: actionBox.height,
+          actionBottom: actionBox.bottom,
+          clearance: Number.parseFloat(
+            getComputedStyle(view).getPropertyValue('--setup-actions-clearance')
+          ),
+          overlap: rowBox.top < actionBox.bottom && rowBox.bottom > actionBox.top
+        }
+      })
+    }
+    const expose = async (packId: string) => {
+      await packRow(harness, packId).evaluate((node) => node.scrollIntoView({ block: 'end' }))
+      await page.waitForTimeout(50)
+      return readGeometry(packId)
+    }
+
+    try {
+      for (const scale of [1, 1.25]) {
+        await cdp.send('Emulation.setDeviceMetricsOverride', {
+          width: viewport.width,
+          height: viewport.height,
+          deviceScaleFactor: scale,
+          mobile: false,
+          screenWidth: viewport.width,
+          screenHeight: viewport.height
+        })
+        await expect.poll(() => page.evaluate(() => devicePixelRatio)).toBeCloseTo(scale, 2)
+
+        for (const theme of ['light', 'dark']) {
+          await page.locator('.theme-select').selectOption(theme)
+          await expect(page.locator('html')).toHaveAttribute('data-theme', theme)
+
+          for (const packId of ['cuda-runtime', 'model-tiny', 'model-large-v3']) {
+            const geometry = await expose(packId)
+            expect(geometry.clearance).toBeGreaterThanOrEqual(geometry.actionHeight)
+            expect(geometry.actionBottom).toBeLessThanOrEqual(viewport.height + 1)
+            expect(geometry.overlap).toBe(false)
+          }
+
+          const control = await page.locator('.setup-view').evaluate((view) => {
+            const actions = document.querySelector<HTMLElement>('.setup-actions')
+            if (actions === null) throw new Error('setup actions missing')
+            const value = getComputedStyle(view).getPropertyValue('--setup-actions-clearance')
+            const actionBox = actions.getBoundingClientRect()
+            const actionStyle = actions.style.cssText
+            view.style.setProperty('--setup-actions-clearance', '0px')
+            Object.assign(actions.style, {
+              position: 'fixed',
+              bottom: '0px',
+              left: `${actionBox.left}px`,
+              width: `${actionBox.width}px`
+            })
+            return { actionStyle, measured: value }
+          })
+          const withoutClearance = await expose('model-large-v3')
+          expect(withoutClearance.actionHeight).toBeGreaterThan(0)
+          expect(withoutClearance.clearance).toBeLessThan(withoutClearance.actionHeight)
+          expect(withoutClearance.overlap).toBe(true)
+          await page.locator('.setup-view').evaluate((view, values) => {
+            const actions = document.querySelector<HTMLElement>('.setup-actions')
+            if (actions === null) throw new Error('setup actions missing')
+            view.style.setProperty('--setup-actions-clearance', values.measured)
+            actions.style.cssText = values.actionStyle
+          }, control)
+          const restored = await expose('model-large-v3')
+          expect(restored.clearance).toBeGreaterThanOrEqual(restored.actionHeight)
+          expect(restored.overlap).toBe(false)
+        }
+      }
+    } finally {
+      await cdp.send('Emulation.clearDeviceMetricsOverride')
+    }
+  })
+
   test('auto-opens, pre-checks recommended packs with sizes, installs with device defaulting and live progress', async ({
     harness
   }) => {
