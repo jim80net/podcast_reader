@@ -105,19 +105,31 @@ test.describe('setup wizard (first run)', () => {
             expect(geometry.overlap).toBe(false)
           }
 
-          const measured = await page.locator('.setup-view').evaluate((view) => {
+          const control = await page.locator('.setup-view').evaluate((view) => {
+            const actions = document.querySelector<HTMLElement>('.setup-actions')
+            if (actions === null) throw new Error('setup actions missing')
             const value = getComputedStyle(view).getPropertyValue('--setup-actions-clearance')
+            const actionBox = actions.getBoundingClientRect()
+            const actionStyle = actions.style.cssText
             view.style.setProperty('--setup-actions-clearance', '0px')
-            return value
+            Object.assign(actions.style, {
+              position: 'fixed',
+              bottom: '0px',
+              left: `${actionBox.left}px`,
+              width: `${actionBox.width}px`
+            })
+            return { actionStyle, measured: value }
           })
           const withoutClearance = await expose('model-large-v3')
-          expect(
-            withoutClearance.clearance >= withoutClearance.actionHeight &&
-              !withoutClearance.overlap
-          ).toBe(false)
-          await page.locator('.setup-view').evaluate((view, value) => {
-            view.style.setProperty('--setup-actions-clearance', value)
-          }, measured)
+          expect(withoutClearance.actionHeight).toBeGreaterThan(0)
+          expect(withoutClearance.clearance).toBeLessThan(withoutClearance.actionHeight)
+          expect(withoutClearance.overlap).toBe(true)
+          await page.locator('.setup-view').evaluate((view, values) => {
+            const actions = document.querySelector<HTMLElement>('.setup-actions')
+            if (actions === null) throw new Error('setup actions missing')
+            view.style.setProperty('--setup-actions-clearance', values.measured)
+            actions.style.cssText = values.actionStyle
+          }, control)
           const restored = await expose('model-large-v3')
           expect(restored.clearance).toBeGreaterThanOrEqual(restored.actionHeight)
           expect(restored.overlap).toBe(false)
