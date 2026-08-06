@@ -101,6 +101,8 @@ export async function captureScaledPageEvidence(
       cssHeight: captureFullPage
         ? Math.max(root.clientHeight, root.scrollHeight, body?.clientHeight ?? 0, body?.scrollHeight ?? 0)
         : window.innerHeight,
+      scrollX: captureFullPage ? 0 : window.scrollX,
+      scrollY: captureFullPage ? 0 : window.scrollY,
       devicePixelRatio: window.devicePixelRatio
     }
   }, fullPage)
@@ -121,8 +123,8 @@ export async function captureScaledPageEvidence(
       fromSurface: true,
       captureBeyondViewport: fullPage,
       clip: {
-        x: 0,
-        y: 0,
+        x: metrics.scrollX,
+        y: metrics.scrollY,
         width: metrics.cssWidth,
         height: metrics.cssHeight,
         scale: 1

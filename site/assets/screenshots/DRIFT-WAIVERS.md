@@ -38,6 +38,18 @@ records are listed below; a record is active only until its stated expiry condit
   gate admitted a first-run frame whose action bar was outside the viewport.
 - Review: independently review the positive-height and full-viewport action bounds while
   retaining measured clearance and model-row/action non-overlap checks.
-- Expiry: when PR #198 merges, immediately run the installed walkthrough at the resulting
-  exact main, publish the validated 24/24 metadata and affected assets in a separately
-  reviewed provenance PR, and remove both active Issue #194 and PR #198 records.
+- Expiry: PR #198 has merged, but run 31070934606 exposed the capture-coordinate defect
+  covered by PR #199. Remove this record with the validated post-#199 provenance refresh.
+
+## PR #199 — scrolled viewport screenshot coordinates
+
+- Scope: `app/tests/install/capture-evidence.mjs` and its focused unit test only.
+- Reason: this is test-evidence infrastructure; production renderer code and pixels are
+  unchanged. Exact-main run 31070934606 was deliberately withheld because its geometry
+  gate evaluated a scrolled viewport while the raw screenshot clip remained at document
+  origin, so the PNG did not depict the gated state.
+- Review: independently verify that viewport captures use scroll coordinates, full-page
+  captures remain origin-based, and the focused regression exercises nonzero offsets.
+- Expiry: when PR #199 merges, immediately run the installed walkthrough at the resulting
+  exact main, publish validated 24/24 metadata and affected assets in a separately reviewed
+  provenance PR, and remove all active Issue #194, PR #198, and PR #199 records.
