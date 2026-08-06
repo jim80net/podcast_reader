@@ -14,11 +14,12 @@
       "right": 961,
       "width": 124.546875
     },
+    "setupTargetPackId": "model-small",
     "fullPage": false,
     "evidence": {
       "width": 1008,
       "height": 655,
-      "pixelVariance": 771.5742843968401,
+      "pixelVariance": 833.1285940331145,
       "devicePixelRatio": 1
     }
   },
@@ -37,11 +38,12 @@
       "right": 961,
       "width": 124.546875
     },
+    "setupTargetPackId": "model-small",
     "fullPage": false,
     "evidence": {
       "width": 1008,
       "height": 655,
-      "pixelVariance": 1367.869347677779,
+      "pixelVariance": 1456.83440862451,
       "devicePixelRatio": 1
     }
   },
@@ -60,11 +62,12 @@
       "right": 961,
       "width": 124.546875
     },
+    "setupTargetPackId": "model-small",
     "fullPage": false,
     "evidence": {
       "width": 1260,
       "height": 819,
-      "pixelVariance": 782.1316473539555,
+      "pixelVariance": 848.3324538499073,
       "devicePixelRatio": 1.25
     }
   },
@@ -83,11 +86,12 @@
       "right": 961,
       "width": 124.546875
     },
+    "setupTargetPackId": "model-small",
     "fullPage": false,
     "evidence": {
       "width": 1260,
       "height": 819,
-      "pixelVariance": 1373.4787384219417,
+      "pixelVariance": 1447.5638383465794,
       "devicePixelRatio": 1.25
     }
   },
@@ -110,7 +114,7 @@
     "evidence": {
       "width": 1008,
       "height": 655,
-      "pixelVariance": 477.1652168593937,
+      "pixelVariance": 479.51888349527144,
       "devicePixelRatio": 1
     }
   },
@@ -133,7 +137,7 @@
     "evidence": {
       "width": 1008,
       "height": 655,
-      "pixelVariance": 430.29222124090677,
+      "pixelVariance": 430.26611736279426,
       "devicePixelRatio": 1
     }
   },
@@ -156,7 +160,7 @@
     "evidence": {
       "width": 1260,
       "height": 819,
-      "pixelVariance": 472.7126871395958,
+      "pixelVariance": 466.4867747389726,
       "devicePixelRatio": 1.25
     }
   },
@@ -179,7 +183,7 @@
     "evidence": {
       "width": 1260,
       "height": 819,
-      "pixelVariance": 431.05462977078673,
+      "pixelVariance": 431.33304975994804,
       "devicePixelRatio": 1.25
     }
   },
@@ -202,7 +206,7 @@
     "evidence": {
       "width": 1008,
       "height": 655,
-      "pixelVariance": 438.8808139342873,
+      "pixelVariance": 437.358924250766,
       "devicePixelRatio": 1
     }
   },
@@ -225,7 +229,7 @@
     "evidence": {
       "width": 1008,
       "height": 655,
-      "pixelVariance": 430.7971603621472,
+      "pixelVariance": 439.4317831247497,
       "devicePixelRatio": 1
     }
   },
@@ -248,7 +252,7 @@
     "evidence": {
       "width": 1260,
       "height": 819,
-      "pixelVariance": 429.92414897868,
+      "pixelVariance": 450.90383751373156,
       "devicePixelRatio": 1.25
     }
   },
@@ -271,7 +275,7 @@
     "evidence": {
       "width": 1260,
       "height": 819,
-      "pixelVariance": 435.24758911772074,
+      "pixelVariance": 442.69844490685625,
       "devicePixelRatio": 1.25
     }
   },
@@ -317,7 +321,7 @@
     "evidence": {
       "width": 993,
       "height": 1255,
-      "pixelVariance": 653.927653160332,
+      "pixelVariance": 650.723947916205,
       "devicePixelRatio": 1
     }
   },
@@ -340,7 +344,7 @@
     "evidence": {
       "width": 1241,
       "height": 1569,
-      "pixelVariance": 736.0620384845679,
+      "pixelVariance": 736.137227368381,
       "devicePixelRatio": 1.25
     }
   },
@@ -363,7 +367,7 @@
     "evidence": {
       "width": 1241,
       "height": 1569,
-      "pixelVariance": 667.4738713855891,
+      "pixelVariance": 667.2712442176794,
       "devicePixelRatio": 1.25
     }
   },
@@ -432,7 +436,7 @@
     "evidence": {
       "width": 1260,
       "height": 819,
-      "pixelVariance": 516.2375673014903,
+      "pixelVariance": 511.6954446363743,
       "devicePixelRatio": 1.25
     }
   },
@@ -455,7 +459,7 @@
     "evidence": {
       "width": 1260,
       "height": 819,
-      "pixelVariance": 1574.230426319536,
+      "pixelVariance": 1580.5375873591338,
       "devicePixelRatio": 1.25
     }
   },
@@ -478,7 +482,7 @@
     "evidence": {
       "width": 1008,
       "height": 655,
-      "pixelVariance": 423.58939917419775,
+      "pixelVariance": 422.3904907429096,
       "devicePixelRatio": 1
     }
   },
@@ -501,7 +505,7 @@
     "evidence": {
       "width": 1008,
       "height": 655,
-      "pixelVariance": 1106.213215064296,
+      "pixelVariance": 1100.0287373237102,
       "devicePixelRatio": 1
     }
   },
@@ -524,7 +528,7 @@
     "evidence": {
       "width": 1260,
       "height": 819,
-      "pixelVariance": 422.2580843797041,
+      "pixelVariance": 422.57298857183196,
       "devicePixelRatio": 1.25
     }
   },
@@ -547,7 +551,7 @@
     "evidence": {
       "width": 1260,
       "height": 819,
-      "pixelVariance": 1108.374744068858,
+      "pixelVariance": 1114.5825832409223,
       "devicePixelRatio": 1.25
     }
   }
