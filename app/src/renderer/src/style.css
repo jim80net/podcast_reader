@@ -1330,6 +1330,16 @@ a.job-title:hover {
   border-top: 1px solid var(--border);
 }
 
+/* The action bar overlays the document while sticky. Reserve its measured
+   height after the model list, and make row-focused scrolling stop above it. */
+.setup-view .setup-components {
+  padding-bottom: var(--setup-actions-clearance, 0);
+}
+
+.setup-view .setup-components .pack-row {
+  scroll-margin-bottom: calc(var(--setup-actions-clearance, 0px) + var(--space-2));
+}
+
 .settings-appearance {
   border-bottom: 1px solid var(--border);
   margin-bottom: var(--space-4);

@@ -186,13 +186,6 @@ async function captureSurface(number, surface) {
           })}`
       )
     }
-    if (surface === 'first-run-wizard') {
-      const actions = await page.locator('.setup-actions').boundingBox()
-      if (actions === null || actions.y + actions.height > geometry.viewportHeight + 1) {
-        await fail(`setup actions are not reachable at ${scale.label}`)
-      }
-    }
-
     for (const theme of CAPTURE_THEMES) {
       await page.locator('.theme-select').selectOption(theme)
       await waitFor(
@@ -200,6 +193,35 @@ async function captureSurface(number, surface) {
         WIZARD_TIMEOUT_MS,
         `${theme} theme to apply`
       )
+      if (surface === 'first-run-wizard') {
+        const lastRow = page.locator('.setup-components .pack-row').last()
+        await lastRow.evaluate((node) => node.scrollIntoView({ block: 'end' }))
+        const setupGeometry = await lastRow.evaluate((node) => {
+          const actions = document.querySelector('.setup-actions')?.getBoundingClientRect()
+          const view = document.querySelector('.setup-view')
+          if (actions === undefined || view === null) return null
+          const row = node.getBoundingClientRect()
+          const clearance = Number.parseFloat(
+            getComputedStyle(view).getPropertyValue('--setup-actions-clearance')
+          )
+          return {
+            actionBottom: actions.bottom,
+            actionHeight: actions.height,
+            clearance,
+            overlap: row.top < actions.bottom && row.bottom > actions.top
+          }
+        })
+        if (
+          setupGeometry === null ||
+          setupGeometry.actionBottom > geometry.viewportHeight + 1 ||
+          setupGeometry.clearance < setupGeometry.actionHeight ||
+          setupGeometry.overlap
+        ) {
+          await fail(
+            `setup content overlaps actions at ${scale.label}/${theme}: ${JSON.stringify(setupGeometry)}`
+          )
+        }
+      }
       const filename = `${number}-${surface}-${scale.label}-${theme}.png`
       const fullPage = surface === 'new-view-submitted' || surface === 'new-view-job-done'
       const evidence = await captureScaledPageEvidence(page, cdp, {
