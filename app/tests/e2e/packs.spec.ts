@@ -56,12 +56,10 @@ test.describe('setup wizard (first run)', () => {
     await expectWizardOpen(harness)
     const page = harness.window
     const cdp = await page.context().newCDPSession(page)
-    const viewport = await page.evaluate(() => ({ width: innerWidth, height: innerHeight }))
+    const viewport = { width: 1008, height: 655 }
 
-    const probe = async (packId: string) => {
+    const readGeometry = async (packId: string) => {
       const row = packRow(harness, packId)
-      await row.evaluate((node) => node.scrollIntoView({ block: 'end' }))
-      await page.waitForTimeout(50)
       return row.evaluate((node) => {
         const actions = document.querySelector<HTMLElement>('.setup-actions')
         const view = document.querySelector<HTMLElement>('.setup-view')
@@ -77,6 +75,11 @@ test.describe('setup wizard (first run)', () => {
           overlap: rowBox.top < actionBox.bottom && rowBox.bottom > actionBox.top
         }
       })
+    }
+    const expose = async (packId: string) => {
+      await packRow(harness, packId).evaluate((node) => node.scrollIntoView({ block: 'end' }))
+      await page.waitForTimeout(50)
+      return readGeometry(packId)
     }
 
     try {
@@ -96,7 +99,7 @@ test.describe('setup wizard (first run)', () => {
           await expect(page.locator('html')).toHaveAttribute('data-theme', theme)
 
           for (const packId of ['cuda-runtime', 'model-tiny', 'model-large-v3']) {
-            const geometry = await probe(packId)
+            const geometry = await expose(packId)
             expect(geometry.clearance).toBeGreaterThanOrEqual(geometry.actionHeight)
             expect(geometry.actionBottom).toBeLessThanOrEqual(viewport.height + 1)
             expect(geometry.overlap).toBe(false)
@@ -107,11 +110,12 @@ test.describe('setup wizard (first run)', () => {
             view.style.setProperty('--setup-actions-clearance', '0px')
             return value
           })
-          expect((await probe('model-large-v3')).overlap).toBe(true)
+          await page.evaluate(() => scrollTo(0, 0))
+          expect((await readGeometry('model-large-v3')).overlap).toBe(true)
           await page.locator('.setup-view').evaluate((view, value) => {
             view.style.setProperty('--setup-actions-clearance', value)
           }, measured)
-          expect((await probe('model-large-v3')).overlap).toBe(false)
+          expect((await expose('model-large-v3')).overlap).toBe(false)
         }
       }
     } finally {
