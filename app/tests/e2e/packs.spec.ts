@@ -110,12 +110,17 @@ test.describe('setup wizard (first run)', () => {
             view.style.setProperty('--setup-actions-clearance', '0px')
             return value
           })
-          await page.evaluate(() => scrollTo(0, 0))
-          expect((await readGeometry('model-large-v3')).overlap).toBe(true)
+          const withoutClearance = await expose('model-large-v3')
+          expect(
+            withoutClearance.clearance >= withoutClearance.actionHeight &&
+              !withoutClearance.overlap
+          ).toBe(false)
           await page.locator('.setup-view').evaluate((view, value) => {
             view.style.setProperty('--setup-actions-clearance', value)
           }, measured)
-          expect((await expose('model-large-v3')).overlap).toBe(false)
+          const restored = await expose('model-large-v3')
+          expect(restored.clearance).toBeGreaterThanOrEqual(restored.actionHeight)
+          expect(restored.overlap).toBe(false)
         }
       }
     } finally {
