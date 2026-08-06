@@ -139,6 +139,26 @@ async function setCaptureScale(factor) {
 }
 
 async function captureSurface(number, surface) {
+  let setupTargetPackId
+  if (surface === 'first-run-wizard') {
+    await setCaptureScale(1)
+    await page.locator('.theme-select').selectOption('light')
+    await page.evaluate(() => scrollTo(0, 0))
+    setupTargetPackId = await page
+      .locator('.setup-components .pack-row')
+      .evaluateAll((nodes) => {
+        const actions = document.querySelector('.setup-actions')?.getBoundingClientRect()
+        if (actions === undefined) return null
+        const target = nodes.find((node) => {
+          const row = node.getBoundingClientRect()
+          return row.top < actions.bottom && row.bottom > actions.top
+        })
+        return target?.getAttribute('data-pack-id') ?? null
+      })
+    if (setupTargetPackId === null || !/^[a-z0-9-]+$/.test(setupTargetPackId)) {
+      await fail('no stable setup model row overlaps actions at the capture baseline')
+    }
+  }
   for (const scale of CAPTURE_SCALES) {
     await setCaptureScale(scale.factor)
     await waitFor(
@@ -194,11 +214,12 @@ async function captureSurface(number, surface) {
         `${theme} theme to apply`
       )
       if (surface === 'first-run-wizard') {
-        const lastRow = page.locator('.setup-components .pack-row').last()
-        await page
-          .locator('.setup-actions')
-          .evaluate((node) => node.scrollIntoView({ block: 'end' }))
-        const setupGeometry = await lastRow.evaluate((node) => {
+        const targetRow = page.locator(
+          `.setup-components .pack-row[data-pack-id="${setupTargetPackId}"]`
+        )
+        if ((await targetRow.count()) !== 1) await fail('stable setup target row is missing')
+        await targetRow.evaluate((node) => node.scrollIntoView({ block: 'end' }))
+        const setupGeometry = await targetRow.evaluate((node) => {
           const actions = document.querySelector('.setup-actions')?.getBoundingClientRect()
           const view = document.querySelector('.setup-view')
           if (actions === undefined || view === null) return null
@@ -223,7 +244,8 @@ async function captureSurface(number, surface) {
           setupGeometry.overlap
         ) {
           await fail(
-            `setup content overlaps actions at ${scale.label}/${theme}: ${JSON.stringify(setupGeometry)}`
+            `setup target row or actions are not fully exposed at ${scale.label}/${theme}: ` +
+              `${JSON.stringify(setupGeometry)}`
           )
         }
       }
@@ -250,6 +272,7 @@ async function captureSurface(number, surface) {
           right: geometry.themeControlRight,
           width: geometry.themeControlWidth
         },
+        ...(setupTargetPackId === undefined ? {} : { setupTargetPackId }),
         fullPage,
         evidence
       })

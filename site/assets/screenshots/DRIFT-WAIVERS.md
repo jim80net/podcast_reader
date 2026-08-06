@@ -50,6 +50,19 @@ records are listed below; a record is active only until its stated expiry condit
   origin, so the PNG did not depict the gated state.
 - Review: independently verify that viewport captures use scroll coordinates, full-page
   captures remain origin-based, and the focused regression exercises nonzero offsets.
-- Expiry: when PR #199 merges, immediately run the installed walkthrough at the resulting
+- Expiry: PR #199 has merged, but run 31071454554 exposed the target-row mismatch covered
+  by PR #200. Remove this record with the validated post-#200 provenance refresh.
+
+## PR #200 — capture the wizard row that needed clearance
+
+- Scope: `app/tests/install/walkthrough.mjs` only.
+- Reason: this is a test-only capture-state correction; production renderer code and pixels
+  are unchanged. Exact-main run 31071454554 was deliberately withheld because it gated an
+  off-screen final row while the published viewport still showed an earlier row under the
+  sticky actions.
+- Review: independently verify that the walkthrough identifies the row intersecting the
+  action bar, scrolls that same row into measured clearance, and validates/captures that
+  same viewport at 100%/125% in Light/Dark.
+- Expiry: when PR #200 merges, immediately run the installed walkthrough at the resulting
   exact main, publish validated 24/24 metadata and affected assets in a separately reviewed
-  provenance PR, and remove all active Issue #194, PR #198, and PR #199 records.
+  provenance PR, and remove all active Issue #194, PR #198, PR #199, and PR #200 records.
