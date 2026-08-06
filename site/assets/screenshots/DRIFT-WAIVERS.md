@@ -18,7 +18,7 @@ records are listed below; a record is active only until its stated expiry condit
 - Expiry: this waiver applies only to PR #190 and expires when that PR merges. No
   follow-up issue is required because the affected files are test fixtures only.
 
-## Issue #194 — wizard clearance implementation and capture-gate stages
+## Issue #194 — wizard clearance implementation stage
 
 - Scope: `app/src/renderer/src/views/setup.ts`, `app/src/renderer/src/style.css`,
   `app/tests/e2e/packs.spec.ts`, and `app/tests/install/walkthrough.mjs`.
@@ -26,8 +26,18 @@ records are listed below; a record is active only until its stated expiry condit
   capture it from exact main. The currently published first-run frame remains historical
   evidence and is known to show the model-row overlap this change fixes.
 - Review: independently review the measured clearance and its 100%/125% Light/Dark
-  negative and positive-control geometry gates, plus PR #198's fail-closed installed-frame
-  action visibility bounds, before merging each stage.
-- Expiry: issue #194 remains open. Immediately after this stage merges, run the installed
-  walkthrough at exact main, refresh the 24-frame metadata and affected published assets,
-  and remove this waiver in the separately reviewed provenance stage.
+  negative and positive-control geometry gates before merging the implementation stage.
+- Expiry: PR #196 has merged, but this record remains only until the required exact-main
+  24-frame metadata and affected published assets are refreshed after PR #198.
+
+## PR #198 — installed wizard capture visibility gate
+
+- Scope: `app/tests/install/walkthrough.mjs` only.
+- Reason: this is a test-only capture-gate correction; production renderer code and pixels
+  are unchanged. Exact-main run 31070139538 was deliberately withheld because the prior
+  gate admitted a first-run frame whose action bar was outside the viewport.
+- Review: independently review the positive-height and full-viewport action bounds while
+  retaining measured clearance and model-row/action non-overlap checks.
+- Expiry: when PR #198 merges, immediately run the installed walkthrough at the resulting
+  exact main, publish the validated 24/24 metadata and affected assets in a separately
+  reviewed provenance PR, and remove both active Issue #194 and PR #198 records.
