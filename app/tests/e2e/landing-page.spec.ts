@@ -33,7 +33,7 @@ for (const viewport of [
             active: document.activeElement === node,
             clipPath: getComputedStyle(node).clipPath,
             link: { top: link.top, right: link.right, bottom: link.bottom, left: link.left },
-            header: { top: headerBox.top, height: headerBox.height },
+            header: { top: headerBox.top + scrollY, height: headerBox.height },
             overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth
           }
         })
