@@ -68,7 +68,13 @@ describe('captured screenshot evidence', () => {
     )
     const remove = vi.fn()
     const page = {
-      evaluate: vi.fn().mockResolvedValue({ cssWidth: 4, cssHeight: 3, devicePixelRatio: 1.25 }),
+      evaluate: vi.fn().mockResolvedValue({
+        cssWidth: 4,
+        cssHeight: 3,
+        scrollX: 11,
+        scrollY: 13,
+        devicePixelRatio: 1.25
+      }),
       addStyleTag: vi.fn().mockResolvedValue({
         evaluate: async (callback: (style: { remove(): void }) => void) => callback({ remove })
       })
@@ -86,7 +92,7 @@ describe('captured screenshot evidence', () => {
         format: 'png',
         fromSurface: true,
         captureBeyondViewport: false,
-        clip: { x: 0, y: 0, width: 4, height: 3, scale: 1 }
+        clip: { x: 11, y: 13, width: 4, height: 3, scale: 1 }
       })
       expect(evidence).toMatchObject({ width: 5, height: 4, devicePixelRatio: 1.25 })
       expect(await readFile(outputPath)).toEqual(bytes)
@@ -98,7 +104,13 @@ describe('captured screenshot evidence', () => {
 
   it('rejects mismatched renderer scale before taking a screenshot', async () => {
     const page = {
-      evaluate: vi.fn().mockResolvedValue({ cssWidth: 4, cssHeight: 3, devicePixelRatio: 1 })
+      evaluate: vi.fn().mockResolvedValue({
+        cssWidth: 4,
+        cssHeight: 3,
+        scrollX: 0,
+        scrollY: 0,
+        devicePixelRatio: 1
+      })
     }
     const cdp = { send: vi.fn() }
 
