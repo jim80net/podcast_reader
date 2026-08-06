@@ -195,7 +195,9 @@ async function captureSurface(number, surface) {
       )
       if (surface === 'first-run-wizard') {
         const lastRow = page.locator('.setup-components .pack-row').last()
-        await lastRow.evaluate((node) => node.scrollIntoView({ block: 'end' }))
+        await page
+          .locator('.setup-actions')
+          .evaluate((node) => node.scrollIntoView({ block: 'end' }))
         const setupGeometry = await lastRow.evaluate((node) => {
           const actions = document.querySelector('.setup-actions')?.getBoundingClientRect()
           const view = document.querySelector('.setup-view')
@@ -205,6 +207,7 @@ async function captureSurface(number, surface) {
             getComputedStyle(view).getPropertyValue('--setup-actions-clearance')
           )
           return {
+            actionTop: actions.top,
             actionBottom: actions.bottom,
             actionHeight: actions.height,
             clearance,
@@ -213,6 +216,8 @@ async function captureSurface(number, surface) {
         })
         if (
           setupGeometry === null ||
+          setupGeometry.actionHeight <= 0 ||
+          setupGeometry.actionTop < -1 ||
           setupGeometry.actionBottom > geometry.viewportHeight + 1 ||
           setupGeometry.clearance < setupGeometry.actionHeight ||
           setupGeometry.overlap
