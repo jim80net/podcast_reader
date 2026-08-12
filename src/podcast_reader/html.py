@@ -281,6 +281,13 @@ def _timeline_label(text: str) -> str:
     return label + "…"
 
 
+def _timeline_marker_label(paragraph: dict[str, Any], *, terminal: bool = False) -> str:
+    """Name a marker without echoing a complete terminal passage."""
+    text = " ".join(str(paragraph["text"]).split())
+    label = _timeline_label(text)
+    return "End" if terminal and label == text else label
+
+
 def _timeline_markers(paragraphs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Pick the coarse-interval marker paragraphs.
 
@@ -318,7 +325,8 @@ def build_timeline_nav(segments: list[dict[str, Any]], sentences_per_para: int =
         f'<a href="#{_time_anchor(float(p["start"]))}">'
         f'<span class="timeline-ts">{fmt_time(float(p["start"]))}</span>'
         f'<span class="timeline-snippet">'
-        f"{'Start' if i == 0 else _esc(_timeline_label(p['text']))}</span>"
+        f"{'Start' if i == 0 else _esc(_timeline_marker_label(p, terminal=p is paragraphs[-1]))}"
+        f"</span>"
         f"</a>"
         for i, p in enumerate(markers)
     )
@@ -375,17 +383,20 @@ def build_chapter_body(
         # a quiet rule + timestamp gives the eye the same coarse sections the
         # rail navigates. The first marker is skipped — it sits directly
         # under the masthead.
-        landmark_ids = {id(p) for p in _timeline_markers(paragraphs)[1:]}
+        landmark_labels = {
+            id(p): _timeline_marker_label(p, terminal=p is paragraphs[-1])
+            for p in _timeline_markers(paragraphs)[1:]
+        }
         parts = []
         last_speaker: str | None = None
         for p in paragraphs:
             ts = fmt_time(p["start"])
-            if id(p) in landmark_ids:
+            if id(p) in landmark_labels:
                 # The landmark carries the rail's label so sections have
                 # names, not a bare duplicate of the paragraph chip (#64).
                 parts.append(
                     f'<div class="landmark"><span class="landmark-ts">{ts}</span>'
-                    f'<span class="landmark-label">{_esc(_timeline_label(p["text"]))}</span></div>'
+                    f'<span class="landmark-label">{_esc(landmark_labels[id(p)])}</span></div>'
                 )
             prefix = _speaker_prefix(p, last_speaker)
             last_speaker = p.get("speaker")
@@ -714,13 +725,10 @@ h1 {
 
 /* ---- TRANSCRIPT EXPORT ---- */
 .transcript-export {
-  width: min(22rem, 100%);
-  margin: 1rem 0 0 auto;
-  padding: 0.4rem;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  box-shadow: 0 0.2rem 0.8rem rgba(0, 0, 0, 0.2);
+  display: grid;
+  justify-items: end;
+  gap: 0.65rem;
+  margin-top: 1rem;
 }
 .transcript-export button,
 .transcript-export select,
@@ -735,10 +743,19 @@ h1 {
 .transcript-export button:focus-visible,
 .transcript-export select:focus-visible,
 .transcript-export textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.transcript-export-toggle { width: 100%; text-align: left; }
+.transcript-export-toggle { width: auto; text-align: center; }
 .transcript-export-panel[hidden],
 .transcript-export-output[hidden] { display: none; }
-.transcript-export-panel { display: grid; gap: 0.65rem; margin-top: 0.65rem; }
+.transcript-export-panel {
+  display: grid;
+  gap: 0.65rem;
+  width: min(22rem, 100%);
+  padding: 0.65rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  box-shadow: 0 0.2rem 0.8rem rgba(0, 0, 0, 0.2);
+}
 .transcript-export-options { display: grid; grid-template-columns: 1fr 1fr; gap: 0.65rem; }
 .transcript-export-field { display: grid; gap: 0.25rem; color: var(--muted); font-size: 0.78rem; }
 .transcript-export-field select { width: 100%; padding: 0.5rem; }
@@ -1100,6 +1117,8 @@ body.search-term-highlights .search-match-active { outline-width: 0; }
     clip-path: inset(50%);
     white-space: nowrap;
   }
+  .transcript-export { justify-items: stretch; }
+  .transcript-export-toggle { width: 100%; text-align: left; }
   .transcript-export-options { grid-template-columns: 1fr; }
   body.transcript-search-active .timeline-label { display: none; }
 }

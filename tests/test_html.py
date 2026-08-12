@@ -351,6 +351,35 @@ class TestTranscriptExport:
         for network_primitive in ("fetch(", "XMLHttpRequest", "WebSocket", "sendBeacon"):
             assert network_primitive not in _EXPORT_SCRIPT
 
+    def test_closed_control_is_a_compact_desktop_button_and_full_width_when_narrow(self) -> None:
+        from podcast_reader.html import _STYLESHEET
+
+        root = re.search(
+            r"\.transcript-export\s*\{(?P<body>.*?)\}", _STYLESHEET, re.DOTALL
+        )
+        toggle = re.search(
+            r"\.transcript-export-toggle\s*\{(?P<body>.*?)\}", _STYLESHEET, re.DOTALL
+        )
+        panel = re.search(
+            r"\.transcript-export-panel\s*\{(?P<body>.*?)\}", _STYLESHEET, re.DOTALL
+        )
+        narrow = re.search(
+            r"@media \(max-width: 900px\)\s*\{(?P<body>.*)\n\}", _STYLESHEET, re.DOTALL
+        )
+
+        assert root is not None and toggle is not None and panel is not None and narrow is not None
+        assert "justify-items: end" in root.group("body")
+        assert "border:" not in root.group("body")
+        assert "box-shadow:" not in root.group("body")
+        assert "width: auto" in toggle.group("body")
+        assert "text-align: center" in toggle.group("body")
+        assert "width: min(22rem, 100%)" in panel.group("body")
+        assert "border: 1px solid var(--border)" in panel.group("body")
+        assert ".transcript-export { justify-items: stretch; }" in narrow.group("body")
+        assert ".transcript-export-toggle { width: 100%; text-align: left; }" in narrow.group(
+            "body"
+        )
+
 
 class TestKeylessTimeline:
     def test_no_chapters_gets_coarse_timestamp_landmarks_and_upsell(self) -> None:
@@ -574,6 +603,45 @@ class TestTimelineInterval:
             2400.0,
             3000.0,
         ]
+
+    def test_short_terminal_passage_is_not_repeated_as_a_final_section(self) -> None:
+        from podcast_reader.html import build_html
+
+        segments = [
+            {"start": 0.0, "end": 10.0, "text": "Opening one."},
+            {"start": 10.0, "end": 20.0, "text": "Opening two."},
+            {"start": 305.0, "end": 315.0, "text": "All right."},
+            {"start": 315.0, "end": 325.0, "text": "Thank you folks."},
+        ]
+
+        html = build_html(segments, title="T", sentences_per_para=1, source="test")
+
+        assert html.count("All right. Thank you folks.") == 1
+        assert (
+            '<span class="landmark-ts">00:05:05</span>'
+            '<span class="landmark-label">End</span>' in html
+        )
+        assert (
+            '<a href="#t-305000"><span class="timeline-ts">00:05:05</span>'
+            '<span class="timeline-snippet">End</span>' in html
+        )
+
+    def test_long_terminal_passage_keeps_an_excerpted_final_section(self) -> None:
+        from podcast_reader.html import _timeline_marker_label, _timeline_markers
+
+        closing = (
+            "The closing passage carries enough detail to need a distinct timeline excerpt "
+            "without echoing the complete paragraph below it."
+        )
+        paragraphs = [
+            {"start": 0.0, "end": 10.0, "text": "Opening passage."},
+            {"start": 305.0, "end": 315.0, "text": closing},
+        ]
+
+        markers = _timeline_markers(paragraphs)
+
+        assert markers == paragraphs
+        assert _timeline_marker_label(paragraphs[-1], terminal=True) != "End"
 
 
 class TestSectionBadgeContrast:
