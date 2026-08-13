@@ -171,7 +171,7 @@ jobs:
           WORKER="$APP_BUNDLE/Contents/Resources/engine/whisper-worker"
           [ -x "$ENGINE" ] || { echo "bundled Darwin engine missing or not executable"; exit 1; }
           [ -x "$WORKER" ] || { echo "bundled Darwin worker missing or not executable"; exit 1; }
-          python3 packaging/frozen_smoke.py "$ENGINE" --boot-only
+          uv run python packaging/frozen_smoke.py "$ENGINE" --boot-only
 
   cuda-pack-smoke:
     # S9 follow-up (workflow_dispatch only, not v1-blocking): install the
