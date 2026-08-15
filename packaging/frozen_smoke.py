@@ -645,10 +645,10 @@ def main(argv: list[str] | None = None) -> None:
     engine = Engine(args.engine.resolve(), data_dir, timeout=60)
     try:
         assert_version(engine, pyproject_version())
-        assert_engine_state_permissions(engine)
-        assert_web_assets(engine)
-        assert_serve_guardian(args.engine.resolve(), engine)
         if not args.boot_only:
+            assert_engine_state_permissions(engine)
+            assert_web_assets(engine)
+            assert_serve_guardian(args.engine.resolve(), engine)
             install_pack(engine, args.pack, args.timeout)
             assert_pack_manifest(engine, args.pack)
             if args.pack == "cuda-runtime":
