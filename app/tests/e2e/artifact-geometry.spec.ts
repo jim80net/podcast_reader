@@ -132,6 +132,48 @@ test('copy transcript control stays in flow and clear of the provenance footer (
   }
 })
 
+test('copy transcript is a compact desktop action and a full-width narrow action', async () => {
+  const browser = await chromium.launch()
+  try {
+    for (const width of [390, 1280]) {
+      for (const colorScheme of ['dark', 'light'] as const) {
+        const page = await browser.newPage({
+          viewport: { width, height: 844 },
+          colorScheme
+        })
+        await page.goto(longformArtifactUrl)
+        const geometry = await page.evaluate(() => {
+          const root = document.querySelector<HTMLElement>('.transcript-export')
+          const toggle = document.querySelector<HTMLElement>('.transcript-export-toggle')
+          if (root === null || toggle === null) throw new Error('export control missing')
+          const rootBox = root.getBoundingClientRect()
+          const toggleBox = toggle.getBoundingClientRect()
+          const rootStyle = getComputedStyle(root)
+          return {
+            rootWidth: rootBox.width,
+            toggleWidth: toggleBox.width,
+            rightGap: Math.abs(rootBox.right - toggleBox.right),
+            background: rootStyle.backgroundColor,
+            borderWidth: rootStyle.borderWidth
+          }
+        })
+
+        expect(geometry.background).toBe('rgba(0, 0, 0, 0)')
+        expect(geometry.borderWidth).toBe('0px')
+        expect(geometry.rightGap).toBeLessThanOrEqual(1)
+        if (width === 390) {
+          expect(Math.abs(geometry.rootWidth - geometry.toggleWidth)).toBeLessThanOrEqual(1)
+        } else {
+          expect(geometry.toggleWidth).toBeLessThan(geometry.rootWidth / 2)
+        }
+        await page.close()
+      }
+    }
+  } finally {
+    await browser.close()
+  }
+})
+
 test('search tolerates extension decoration but rejects transcript mutation (#92, #106)', async () => {
   const browser = await chromium.launch()
   try {
