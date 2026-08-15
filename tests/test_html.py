@@ -354,15 +354,11 @@ class TestTranscriptExport:
     def test_closed_control_is_a_compact_desktop_button_and_full_width_when_narrow(self) -> None:
         from podcast_reader.html import _STYLESHEET
 
-        root = re.search(
-            r"\.transcript-export\s*\{(?P<body>.*?)\}", _STYLESHEET, re.DOTALL
-        )
+        root = re.search(r"\.transcript-export\s*\{(?P<body>.*?)\}", _STYLESHEET, re.DOTALL)
         toggle = re.search(
             r"\.transcript-export-toggle\s*\{(?P<body>.*?)\}", _STYLESHEET, re.DOTALL
         )
-        panel = re.search(
-            r"\.transcript-export-panel\s*\{(?P<body>.*?)\}", _STYLESHEET, re.DOTALL
-        )
+        panel = re.search(r"\.transcript-export-panel\s*\{(?P<body>.*?)\}", _STYLESHEET, re.DOTALL)
         narrow = re.search(
             r"@media \(max-width: 900px\)\s*\{(?P<body>.*)\n\}", _STYLESHEET, re.DOTALL
         )
