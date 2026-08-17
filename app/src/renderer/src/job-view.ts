@@ -1,5 +1,5 @@
 import { isJobPipelineEvent } from '../../shared/types'
-import type { JobError, JobRecord, JobState, PipelineEvent, StepName } from '../../shared/types'
+import type { JobError, JobRecord, PipelineEvent, StepName } from '../../shared/types'
 
 /**
  * Pure view-model derivation for job progress: the engine's event list
@@ -69,10 +69,9 @@ export function userFacingJobWarning(warning: string): JobWarningView {
   return { message: warning, technicalDetail: null }
 }
 
-export function deriveProgress(events: readonly PipelineEvent[], jobState?: JobState): JobProgress {
+export function deriveProgress(events: readonly PipelineEvent[]): JobProgress {
   const steps: StepView[] = []
   const byStep = new Map<StepName, StepView>()
-  const terminalMessageSteps = new Set<StepName>()
 
   const stepView = (step: StepName): StepView => {
     let view = byStep.get(step)
@@ -94,19 +93,9 @@ export function deriveProgress(events: readonly PipelineEvent[], jobState?: JobS
     const view = stepView(event.step)
     if (event.kind === 'step_finished') {
       view.status = 'done'
-      if (event.message !== '') {
-        terminalMessageSteps.add(event.step)
-      } else {
-        view.detail = completedStepCopy[event.step]
-      }
+      if (event.message === '') view.detail = completedStepCopy[event.step]
     }
     if (event.message !== '') view.detail = event.message
-  }
-  if (jobState === 'done') {
-    for (const view of steps) {
-      view.status = 'done'
-      if (!terminalMessageSteps.has(view.step)) view.detail = completedStepCopy[view.step]
-    }
   }
   return { steps }
 }

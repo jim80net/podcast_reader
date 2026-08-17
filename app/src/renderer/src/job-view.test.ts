@@ -38,18 +38,55 @@ describe('deriveProgress', () => {
     expect(deriveProgress(events).steps[0]?.detail).toBe('Captions loaded.')
   })
 
-  it('replaces active copy with terminal copy when the job becomes done', () => {
+  it('replaces active copy with terminal copy when the step finishes', () => {
     const started: PipelineEvent[] = [
       stepEvent('step_started', 'transcribe', 'Transcribing with whisper-worker...')
     ]
-    expect(deriveProgress(started, 'running').steps[0]).toMatchObject({
+    expect(deriveProgress(started).steps[0]).toMatchObject({
       status: 'running',
       detail: 'Transcribing with whisper-worker...'
     })
-    expect(deriveProgress([...started, stepEvent('step_finished', 'transcribe')], 'done').steps[0]).toMatchObject({
+    expect(
+      deriveProgress([...started, stepEvent('step_finished', 'transcribe')]).steps[0]
+    ).toMatchObject({
       status: 'done',
       detail: 'Transcription complete.'
     })
+  })
+
+  it('does not mark warning-only skipped steps complete when the job is done', () => {
+    const events: PipelineEvent[] = [
+      {
+        kind: 'warning',
+        step: 'diarize',
+        message: 'Speaker detection skipped: worker unavailable',
+        data: { job_id: 'j1', code: 'diarization_skipped' }
+      },
+      {
+        kind: 'warning',
+        step: 'chapters',
+        message: 'Chapters skipped: no provider configured',
+        data: { job_id: 'j1', code: 'chapters_skipped' }
+      },
+      { kind: 'job_done', step: null, message: 'Done', data: { job_id: 'j1' } }
+    ]
+    const progress = deriveProgress(events)
+    expect(progress.steps).toEqual([
+      {
+        step: 'diarize',
+        status: 'running',
+        detail: '',
+        warnings: ['Speaker detection skipped: worker unavailable']
+      },
+      {
+        step: 'chapters',
+        status: 'running',
+        detail: '',
+        warnings: ['Chapters skipped: no provider configured']
+      }
+    ])
+    expect(progress.steps.map((step) => step.detail)).not.toContain('Speaker detection complete.')
+    expect(progress.steps.map((step) => step.detail)).not.toContain('Chapter step complete.')
   })
 
   it('attaches warnings to their required pipeline step', () => {

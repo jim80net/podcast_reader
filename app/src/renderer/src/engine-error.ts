@@ -33,7 +33,16 @@ export function settingsErrorMessage(detail: string): string {
   if (/custom provider requires a base URL/i.test(detail)) {
     return 'Enter a Custom provider base URL.'
   }
-  if (/custom provider base URL must/i.test(detail)) {
+  if (/custom provider base URL must include a hostname/i.test(detail)) {
+    return 'Custom provider base URL must include a hostname.'
+  }
+  if (/custom provider base URL must not contain credentials/i.test(detail)) {
+    return 'Remove the username and password from the Custom provider base URL.'
+  }
+  if (/custom provider base URL must not contain a query or fragment/i.test(detail)) {
+    return 'Remove the query or fragment from the Custom provider base URL.'
+  }
+  if (/custom provider base URL must be https/i.test(detail)) {
     return 'Custom provider base URL must use HTTPS, or HTTP for localhost.'
   }
   if (/unknown chapter provider/i.test(detail)) return 'Choose a supported chapter provider.'

@@ -269,7 +269,7 @@ export function mountNew(container: HTMLElement, store: AppStore): ViewCleanup {
 
     // Step status as a 2-column table. The trivial `resolve`/`download` steps
     // are hidden; `render` shows only when it warned/errored.
-    const progress = deriveProgress(job.events, job.state)
+    const progress = deriveProgress(job.events)
     const visibleSteps = progress.steps.filter((s) => {
       if (s.step === 'resolve' || s.step === 'download') return false
       if (s.step === 'render') return s.warnings.length > 0

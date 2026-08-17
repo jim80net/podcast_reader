@@ -55,10 +55,31 @@ describe('settingsErrorMessage', () => {
     expect(message).not.toContain('custom_provider_url')
   })
 
-  it('translates URL and provider validation messages', () => {
-    expect(settingsErrorMessage('custom provider base URL must be https')).toBe(
-      'Custom provider base URL must use HTTPS, or HTTP for localhost.'
-    )
+  it('preserves the cause of every custom URL validation error', () => {
+    const cases = [
+      [
+        'custom provider base URL must include a hostname',
+        'Custom provider base URL must include a hostname.'
+      ],
+      [
+        'custom provider base URL must not contain credentials',
+        'Remove the username and password from the Custom provider base URL.'
+      ],
+      [
+        'custom provider base URL must not contain a query or fragment',
+        'Remove the query or fragment from the Custom provider base URL.'
+      ],
+      [
+        'custom provider base URL must be https, or http on localhost/127.0.0.1',
+        'Custom provider base URL must use HTTPS, or HTTP for localhost.'
+      ]
+    ] as const
+    for (const [engineDetail, expected] of cases) {
+      expect(settingsErrorMessage(engineDetail)).toBe(expected)
+    }
+  })
+
+  it('translates unknown provider validation', () => {
     expect(settingsErrorMessage("unknown chapter provider: 'bogus'")).toBe(
       'Choose a supported chapter provider.'
     )
