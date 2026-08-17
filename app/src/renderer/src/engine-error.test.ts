@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { extractEngineDetail, settingsErrorField } from './engine-error'
+import { extractEngineDetail, settingsErrorField, settingsErrorMessage } from './engine-error'
 
 describe('extractEngineDetail', () => {
   it('strips the ipcRenderer.invoke wrapper and the EngineRequestError prefix', () => {
@@ -43,5 +43,24 @@ describe('settingsErrorField', () => {
 
   it('returns null for anything unrecognized (shown as a general error)', () => {
     expect(settingsErrorField('something else entirely')).toBeNull()
+  })
+})
+
+describe('settingsErrorMessage', () => {
+  it('uses a human-facing custom provider field name', () => {
+    const message = settingsErrorMessage(
+      'custom provider requires a base URL (set custom_provider_url / PODCAST_READER_CUSTOM_PROVIDER_URL)'
+    )
+    expect(message).toBe('Enter a Custom provider base URL.')
+    expect(message).not.toContain('custom_provider_url')
+  })
+
+  it('translates URL and provider validation messages', () => {
+    expect(settingsErrorMessage('custom provider base URL must be https')).toBe(
+      'Custom provider base URL must use HTTPS, or HTTP for localhost.'
+    )
+    expect(settingsErrorMessage("unknown chapter provider: 'bogus'")).toBe(
+      'Choose a supported chapter provider.'
+    )
   })
 })

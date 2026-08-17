@@ -1,6 +1,12 @@
 import { el } from '../dom'
 import { extractEngineDetail } from '../engine-error'
-import { deriveProgress, sortJobs, sourceLabel, userFacingJobWarning } from '../job-view'
+import {
+  deriveProgress,
+  sortJobs,
+  sourceLabel,
+  userFacingJobError,
+  userFacingJobWarning
+} from '../job-view'
 import { LatestGate } from '../latest-gate'
 import { buildRerunOverrides } from '../rerun-plan'
 import { hrefFor } from '../router'
@@ -23,7 +29,8 @@ export function mountNew(container: HTMLElement, store: AppStore): ViewCleanup {
     attrs: {
       type: 'text',
       id: 'new-source',
-      placeholder: 'Paste a URL (YouTube, X, podcast…) — or drop a file anywhere on this page',
+      placeholder: 'https://… or /path/to/episode.mp3',
+      'aria-describedby': 'new-source-guidance',
       autocomplete: 'off'
     }
   })
@@ -38,7 +45,14 @@ export function mountNew(container: HTMLElement, store: AppStore): ViewCleanup {
       'div',
       { class: 'field' },
       el('label', { text: 'URL or file path', attrs: { for: 'new-source' } }),
-      urlInput
+      urlInput,
+      el('p', {
+        class: 'field-note new-source-guidance',
+        text:
+          'Paste a YouTube, X, podcast, or direct media URL; enter a local file path; ' +
+          'or drop an audio or video file anywhere on this page.',
+        attrs: { id: 'new-source-guidance' }
+      })
     ),
     el(
       'div',
@@ -255,7 +269,7 @@ export function mountNew(container: HTMLElement, store: AppStore): ViewCleanup {
 
     // Step status as a 2-column table. The trivial `resolve`/`download` steps
     // are hidden; `render` shows only when it warned/errored.
-    const progress = deriveProgress(job.events)
+    const progress = deriveProgress(job.events, job.state)
     const visibleSteps = progress.steps.filter((s) => {
       if (s.step === 'resolve' || s.step === 'download') return false
       if (s.step === 'render') return s.warnings.length > 0
@@ -293,20 +307,19 @@ export function mountNew(container: HTMLElement, store: AppStore): ViewCleanup {
     if (table.childElementCount > 0) card.append(table)
 
     if (job.state === 'failed' && job.error !== null) {
+      const errorView = userFacingJobError(job.error)
       card.append(
         el(
           'div',
           { class: 'job-error', attrs: { role: 'alert' } },
-          el('p', { class: 'job-error-message', text: `${job.error.code}: ${job.error.message}` }),
-          job.error.hint !== '' ? el('p', { class: 'job-error-hint', text: job.error.hint }) : '',
-          job.error.detail !== ''
-            ? el(
-                'details',
-                { class: 'job-error-detail' },
-                el('summary', { text: 'Technical details' }),
-                el('pre', { class: 'job-error-detail-body', text: job.error.detail })
-              )
-            : ''
+          el('p', { class: 'job-error-message', text: errorView.cause }),
+          el('p', { class: 'job-error-hint', text: errorView.recovery }),
+          el(
+            'details',
+            { class: 'job-error-detail' },
+            el('summary', { text: 'Technical details' }),
+            el('pre', { class: 'job-error-detail-body', text: errorView.technicalDetail })
+          )
         )
       )
     }
