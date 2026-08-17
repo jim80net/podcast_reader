@@ -287,28 +287,78 @@ test('New: pasted URL submits and shows live step progress, failure shows the hi
   await expect(card.locator('.job-state')).toHaveText('running')
   await expect(card.locator('.job-row-key', { hasText: 'transcribe' })).toBeVisible()
 
-  // Structured failure: {code, message, hint} rendered from the job record.
+  // Structured failure leads with recovery; exact provider text stays collapsed.
   await harness.mock.control('/job', {
     job: { id: jobId, state: 'failed' },
     events: [
       {
         kind: 'job_failed',
         step: null,
-        message: 'Audio download failed',
+        message: 'Audio download failed: vendor response contained opaque diagnostics',
         data: {
           job_id: jobId,
           code: 'download_failed',
           hint: 'Check the URL and try again.',
-          detail: ''
+          detail: 'upstream stderr: media endpoint returned HTTP 403'
         }
       }
     ] satisfies PipelineEvent[]
   })
   await expect(card.locator('.job-state')).toHaveText('failed')
-  await expect(card.locator('.job-error-message')).toContainText(
-    'download_failed: Audio download failed'
+  await expect(card.locator('.job-error-message')).toHaveText(
+    'The audio could not be downloaded from this source.'
   )
   await expect(card.locator('.job-error-hint')).toHaveText('Check the URL and try again.')
+  const technical = card.locator('.job-error-detail')
+  await expect(technical).not.toHaveAttribute('open', '')
+  await expect(technical.locator('pre')).not.toBeVisible()
+  await technical.locator('summary').click()
+  await expect(technical.locator('pre')).toContainText('vendor response contained opaque diagnostics')
+  await expect(technical.locator('pre')).toContainText('media endpoint returned HTTP 403')
+})
+
+test('New: source guidance stays readable and names the input without its placeholder', async ({
+  harness
+}) => {
+  await expectEngineState(harness.window, 'ready')
+  await harness.window.evaluate(() => {
+    window.location.hash = '#/new'
+  })
+  const input = harness.window.getByLabel('URL or file path')
+  const guidance = harness.window.locator('#new-source-guidance')
+  await expect(input).toHaveAttribute('aria-describedby', 'new-source-guidance')
+  await expect(guidance).toHaveText(
+    'Paste a YouTube, X, podcast, or direct media URL; enter a local file path; or drop an audio or video file anywhere on this page.'
+  )
+
+  const cdp = await harness.window.context().newCDPSession(harness.window)
+  for (const theme of ['light', 'dark'] as const) {
+    await harness.window.evaluate((value) => {
+      document.documentElement.dataset.theme = value
+    }, theme)
+    for (const scale of [1, 1.25]) {
+      await cdp.send('Emulation.setDeviceMetricsOverride', {
+        width: 1008,
+        height: 655,
+        deviceScaleFactor: scale,
+        mobile: false
+      })
+      const geometry = await guidance.evaluate((node) => {
+        const box = node.getBoundingClientRect()
+        return {
+          visible: box.width > 0 && box.height > 0,
+          withinViewport: box.left >= 0 && box.right <= document.documentElement.clientWidth,
+          noOverflow: node.scrollWidth <= node.clientWidth
+        }
+      })
+      expect(geometry, `${theme} at ${scale * 100}%`).toEqual({
+        visible: true,
+        withinViewport: true,
+        noOverflow: true
+      })
+    }
+  }
+  await cdp.send('Emulation.clearDeviceMetricsOverride')
 })
 
 test('New: a finished job links to its transcript', async ({ harness }) => {
@@ -337,8 +387,27 @@ test('New: a finished job links to its transcript', async ({ harness }) => {
   const jobId = jobs[0]?.id ?? ''
 
   await harness.mock.control('/job', {
+    job: { id: jobId, state: 'running' },
+    events: [
+      {
+        kind: 'step_started',
+        step: 'transcribe',
+        message: 'Transcribing with whisper-worker...',
+        data: { job_id: jobId }
+      }
+    ] satisfies PipelineEvent[]
+  })
+  await expect(card.getByText('Transcribing with whisper-worker...')).toBeVisible()
+
+  await harness.mock.control('/job', {
     job: { id: jobId, state: 'done' },
     events: [
+      {
+        kind: 'step_finished',
+        step: 'transcribe',
+        message: '',
+        data: { job_id: jobId }
+      },
       {
         kind: 'warning',
         step: 'chapters',
@@ -349,6 +418,8 @@ test('New: a finished job links to its transcript', async ({ harness }) => {
     ] satisfies PipelineEvent[]
   })
   await expect(card.locator('.job-state')).toHaveText('done')
+  await expect(card.getByText('Transcription complete.')).toBeVisible()
+  await expect(card.getByText('Transcribing with whisper-worker...')).toHaveCount(0)
   const chapterWarning = card.locator('.warning-detail')
   await expect(chapterWarning.locator('summary')).toHaveText(
     '⚠ Chapters are off. Add a chapter provider in Settings to enable them.'
@@ -477,12 +548,17 @@ test('Settings: round-trip save, engine-side key test, inline validation error',
 
   // Engine 400 lands inline next to the offending field, and persists nothing.
   await provider.selectOption('custom')
+  const customUrl = harness.window.getByLabel('Custom provider base URL')
   await harness.window.getByRole('button', { name: 'Save', exact: true }).click()
   const urlFieldError = harness.window.locator(
     '.field:has(#settings-custom_provider_url) .field-error'
   )
   await expect(urlFieldError).toBeVisible()
-  await expect(urlFieldError).toContainText('custom provider requires a base URL')
+  await expect(urlFieldError).toHaveText('Enter a Custom provider base URL.')
+  await expect(customUrl).toBeFocused()
+  await expect(customUrl).toHaveAttribute('aria-invalid', 'true')
+  await expect(customUrl).toHaveAttribute('aria-describedby', 'settings-custom_provider_url-error')
+  await expect(harness.window.locator('body')).not.toContainText('custom_provider_url')
   const unchanged = (await (await harness.mock.engine('/v1/settings')).json()) as {
     chapter_provider: string
   }

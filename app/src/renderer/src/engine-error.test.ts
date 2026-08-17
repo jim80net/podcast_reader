@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { extractEngineDetail, settingsErrorField } from './engine-error'
+import { extractEngineDetail, settingsErrorField, settingsErrorMessage } from './engine-error'
 
 describe('extractEngineDetail', () => {
   it('strips the ipcRenderer.invoke wrapper and the EngineRequestError prefix', () => {
@@ -43,5 +43,45 @@ describe('settingsErrorField', () => {
 
   it('returns null for anything unrecognized (shown as a general error)', () => {
     expect(settingsErrorField('something else entirely')).toBeNull()
+  })
+})
+
+describe('settingsErrorMessage', () => {
+  it('uses a human-facing custom provider field name', () => {
+    const message = settingsErrorMessage(
+      'custom provider requires a base URL (set custom_provider_url / PODCAST_READER_CUSTOM_PROVIDER_URL)'
+    )
+    expect(message).toBe('Enter a Custom provider base URL.')
+    expect(message).not.toContain('custom_provider_url')
+  })
+
+  it('preserves the cause of every custom URL validation error', () => {
+    const cases = [
+      [
+        'custom provider base URL must include a hostname',
+        'Custom provider base URL must include a hostname.'
+      ],
+      [
+        'custom provider base URL must not contain credentials',
+        'Remove the username and password from the Custom provider base URL.'
+      ],
+      [
+        'custom provider base URL must not contain a query or fragment',
+        'Remove the query or fragment from the Custom provider base URL.'
+      ],
+      [
+        'custom provider base URL must be https, or http on localhost/127.0.0.1',
+        'Custom provider base URL must use HTTPS, or HTTP for localhost.'
+      ]
+    ] as const
+    for (const [engineDetail, expected] of cases) {
+      expect(settingsErrorMessage(engineDetail)).toBe(expected)
+    }
+  })
+
+  it('translates unknown provider validation', () => {
+    expect(settingsErrorMessage("unknown chapter provider: 'bogus'")).toBe(
+      'Choose a supported chapter provider.'
+    )
   })
 })

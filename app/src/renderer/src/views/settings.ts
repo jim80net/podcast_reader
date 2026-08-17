@@ -6,7 +6,7 @@ import { mountPremiumAccountSection } from './premium-account-section'
 import { planChapterSave } from '../chapter-onboarding'
 import { THEME_PREF_CHANGE_EVENT, getThemePref } from '../app-theme'
 import { el } from '../dom'
-import { extractEngineDetail, settingsErrorField } from '../engine-error'
+import { extractEngineDetail, settingsErrorField, settingsErrorMessage } from '../engine-error'
 import { keyPlaceholder, modelPlaceholder, toSettingsUpdate } from '../settings-form'
 import {
   normalizeNamedProviderKey,
@@ -77,6 +77,7 @@ export function mountSettings(container: HTMLElement): ViewCleanup {
     let knownProviders = providers
     let customProviders = settings.custom_providers.map((provider) => ({ ...provider }))
     const fieldErrors = new Map<string, HTMLElement>()
+    const fieldInputs = new Map<string, HTMLInputElement | HTMLSelectElement>()
 
     const themeSelect = el('select', { attrs: { id: 'settings-theme' } })
     for (const [value, label] of [
@@ -112,9 +113,15 @@ export function mountSettings(container: HTMLElement): ViewCleanup {
       input: HTMLInputElement | HTMLSelectElement
     ): HTMLElement {
       input.id = `settings-${id}`
-      const error = el('p', { class: 'error-text field-error', attrs: { role: 'alert' } })
+      const errorId = `${input.id}-error`
+      input.setAttribute('aria-describedby', errorId)
+      const error = el('p', {
+        class: 'error-text field-error',
+        attrs: { id: errorId, role: 'alert' }
+      })
       error.hidden = true
       fieldErrors.set(id, error)
+      fieldInputs.set(id, input)
       return el(
         'div',
         { class: 'field' },
@@ -129,6 +136,7 @@ export function mountSettings(container: HTMLElement): ViewCleanup {
         error.hidden = true
         error.textContent = ''
       }
+      for (const input of fieldInputs.values()) input.removeAttribute('aria-invalid')
       generalError.hidden = true
       saveStatus.textContent = ''
     }
@@ -142,6 +150,9 @@ export function mountSettings(container: HTMLElement): ViewCleanup {
       }
       target.textContent = message
       target.hidden = false
+      const input = fieldId === null ? undefined : fieldInputs.get(fieldId)
+      input?.setAttribute('aria-invalid', 'true')
+      input?.focus()
     }
 
     // -- chapter provider -----------------------------------------------
@@ -726,7 +737,7 @@ export function mountSettings(container: HTMLElement): ViewCleanup {
         } catch (err) {
           if (disposed) return
           const detail = extractEngineDetail(err)
-          showFieldError(settingsErrorField(detail), detail)
+          showFieldError(settingsErrorField(detail), settingsErrorMessage(detail))
         } finally {
           setSettingsMutationBusy(false)
         }

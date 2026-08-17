@@ -1,5 +1,5 @@
 import { isJobPipelineEvent } from '../../shared/types'
-import type { JobRecord, PipelineEvent, StepName } from '../../shared/types'
+import type { JobError, JobRecord, PipelineEvent, StepName } from '../../shared/types'
 
 /**
  * Pure view-model derivation for job progress: the engine's event list
@@ -23,6 +23,39 @@ export interface JobProgress {
 export interface JobWarningView {
   message: string
   technicalDetail: string | null
+}
+
+export interface JobErrorView {
+  cause: string
+  recovery: string
+  technicalDetail: string
+}
+
+const completedStepCopy: Record<StepName, string> = {
+  resolve: 'Source resolved.',
+  captions: 'Captions loaded.',
+  download: 'Download complete.',
+  transcribe: 'Transcription complete.',
+  diarize: 'Speaker detection complete.',
+  chapters: 'Chapter step complete.',
+  render: 'Transcript ready.'
+}
+
+/** Lead with an actionable summary while retaining exact diagnostics on demand. */
+export function userFacingJobError(error: JobError): JobErrorView {
+  let cause = 'The job could not be completed.'
+  let recovery = error.hint.trim() || 'Check the source and try again.'
+
+  if (/transcript|caption/i.test(`${error.code} ${error.message}`)) {
+    cause = 'This video is unavailable or does not provide captions.'
+    recovery = 'Check that the video is public and has captions, then try again.'
+  } else if (/download/i.test(`${error.code} ${error.message}`)) {
+    cause = 'The audio could not be downloaded from this source.'
+  }
+
+  const technicalParts = [`Code: ${error.code}`, `Message:\n${error.message}`]
+  if (error.detail.trim() !== '') technicalParts.push(`Details:\n${error.detail}`)
+  return { cause, recovery, technicalDetail: technicalParts.join('\n\n') }
 }
 
 /** Keep implementation vocabulary out of the primary completion path. */
@@ -58,7 +91,10 @@ export function deriveProgress(events: readonly PipelineEvent[]): JobProgress {
       continue
     }
     const view = stepView(event.step)
-    if (event.kind === 'step_finished') view.status = 'done'
+    if (event.kind === 'step_finished') {
+      view.status = 'done'
+      if (event.message === '') view.detail = completedStepCopy[event.step]
+    }
     if (event.message !== '') view.detail = event.message
   }
   return { steps }

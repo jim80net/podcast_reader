@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest'
 
-import { deriveProgress, formatDate, sortJobs, sourceLabel, userFacingJobWarning } from './job-view'
+import {
+  deriveProgress,
+  formatDate,
+  sortJobs,
+  sourceLabel,
+  userFacingJobError,
+  userFacingJobWarning
+} from './job-view'
 import type { JobRecord, PipelineEvent, StepName } from '../../shared/types'
 
 const stepEvent = (
@@ -23,12 +30,63 @@ describe('deriveProgress', () => {
     ])
   })
 
-  it('keeps the last non-empty message as the step detail', () => {
+  it('replaces active copy when a step finishes without terminal copy', () => {
     const events: PipelineEvent[] = [
       stepEvent('step_started', 'captions', 'Fetching captions'),
       stepEvent('step_finished', 'captions')
     ]
-    expect(deriveProgress(events).steps[0]?.detail).toBe('Fetching captions')
+    expect(deriveProgress(events).steps[0]?.detail).toBe('Captions loaded.')
+  })
+
+  it('replaces active copy with terminal copy when the step finishes', () => {
+    const started: PipelineEvent[] = [
+      stepEvent('step_started', 'transcribe', 'Transcribing with whisper-worker...')
+    ]
+    expect(deriveProgress(started).steps[0]).toMatchObject({
+      status: 'running',
+      detail: 'Transcribing with whisper-worker...'
+    })
+    expect(
+      deriveProgress([...started, stepEvent('step_finished', 'transcribe')]).steps[0]
+    ).toMatchObject({
+      status: 'done',
+      detail: 'Transcription complete.'
+    })
+  })
+
+  it('does not mark warning-only skipped steps complete when the job is done', () => {
+    const events: PipelineEvent[] = [
+      {
+        kind: 'warning',
+        step: 'diarize',
+        message: 'Speaker detection skipped: worker unavailable',
+        data: { job_id: 'j1', code: 'diarization_skipped' }
+      },
+      {
+        kind: 'warning',
+        step: 'chapters',
+        message: 'Chapters skipped: no provider configured',
+        data: { job_id: 'j1', code: 'chapters_skipped' }
+      },
+      { kind: 'job_done', step: null, message: 'Done', data: { job_id: 'j1' } }
+    ]
+    const progress = deriveProgress(events)
+    expect(progress.steps).toEqual([
+      {
+        step: 'diarize',
+        status: 'running',
+        detail: '',
+        warnings: ['Speaker detection skipped: worker unavailable']
+      },
+      {
+        step: 'chapters',
+        status: 'running',
+        detail: '',
+        warnings: ['Chapters skipped: no provider configured']
+      }
+    ])
+    expect(progress.steps.map((step) => step.detail)).not.toContain('Speaker detection complete.')
+    expect(progress.steps.map((step) => step.detail)).not.toContain('Chapter step complete.')
   })
 
   it('attaches warnings to their required pipeline step', () => {
@@ -56,6 +114,33 @@ describe('deriveProgress', () => {
       }
     ]
     expect(deriveProgress(events)).toEqual({ steps: [] })
+  })
+})
+
+describe('userFacingJobError', () => {
+  it('leads with cause and recovery while preserving raw diagnostics', () => {
+    const view = userFacingJobError({
+      code: 'captions_unavailable',
+      message: 'Could not retrieve a transcript for the video.',
+      hint: '',
+      detail: 'Transcript endpoint returned HTTP 404'
+    })
+    expect(view.cause).toBe('This video is unavailable or does not provide captions.')
+    expect(view.recovery).toBe('Check that the video is public and has captions, then try again.')
+    expect(view.technicalDetail).toContain('Code: captions_unavailable')
+    expect(view.technicalDetail).toContain('Could not retrieve a transcript')
+    expect(view.technicalDetail).toContain('HTTP 404')
+  })
+
+  it('uses a generic cause instead of exposing unknown third-party text', () => {
+    const view = userFacingJobError({
+      code: 'provider_failed',
+      message: 'opaque vendor text',
+      hint: '',
+      detail: ''
+    })
+    expect(view.cause).toBe('The job could not be completed.')
+    expect(view.technicalDetail).toContain('opaque vendor text')
   })
 })
 
